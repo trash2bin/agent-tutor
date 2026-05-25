@@ -44,10 +44,8 @@ agent-tutor/
 git clone https://github.com/ivan/agent-tutor
 cd agent-tutor
 
-python -m venv .venv
-source .venv/bin/activate
-
-pip install "mcp[cli]"
+uv sync
+uv run agent-tutor
 ```
 
 Сгенерировать тестовые данные если `fixtures.json` ещё нет:

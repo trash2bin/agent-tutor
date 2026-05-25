@@ -1,5 +1,6 @@
 __pycache__/
 .venv/
 *.db
+.claude/
 fixtures.json
 TECHNICAL_DOC.md
