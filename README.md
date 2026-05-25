@@ -41,7 +41,7 @@ agent-tutor/
 ## Быстрый старт
 
 ```bash
-git clone https://github.com/ivan/agent-tutor
+git clone https://github.com/trash2bin/agent-tutor
 cd agent-tutor
 
 uv sync
