@@ -1,3 +1,4 @@
+import os
 from mcp.server.fastmcp import FastMCP
 from typing import Annotated
 from pydantic import Field
@@ -6,8 +7,7 @@ from db.models import Student, ScheduleEntry, Discipline, Material
 from tools.student import StudentTools
 from tools.disciplines import DisciplineTools
 
-DB_PATH = "university.db"
-db = Database(DB_PATH)
+db = Database()
 student_tools = StudentTools(db)
 discipline_tools = DisciplineTools(db)
 

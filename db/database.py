@@ -1,13 +1,27 @@
+import os
+import sys
+
 import sqlite3
 import json
 from pathlib import Path
 from typing import List, Dict, Any
 from .models import Student, Discipline, Material, ScheduleEntry
 
+PROJECT_ROOT = Path(__file__).parent.parent
+
 class Database:
-    def __init__(self, db_path: str = "university.db"):
+    def __init__(self, db_path: str | None = None):
+        if db_path is None:
+            db_path = os.environ.get(
+                "DB_PATH",
+                str(PROJECT_ROOT / "university.db")
+            )
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(
+            db_path,
+            check_same_thread=False  # ← фикс проблемы с asyncio/threading
+        )
+        self.conn.row_factory = sqlite3.Row  # удобнее работать с результатами
         self.create_tables()
         self.load_fixtures()
 
@@ -70,6 +84,12 @@ class Database:
 
     def load_fixtures(self):
         fixtures_path = Path(__file__).parent.parent / "fixtures.json"
+        print(f"[DB] Looking for fixtures at: {fixtures_path}", file=sys.stderr)
+        print(f"[DB] Exists: {fixtures_path.exists()}", file=sys.stderr)
+        if not fixtures_path.exists():
+            print(f"[DB] FIXTURES NOT FOUND — база будет пустой!", file=sys.stderr)
+            return
+
         if fixtures_path.exists():
             with open(fixtures_path, "r") as f:
                 data = json.load(f)
