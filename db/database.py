@@ -43,6 +43,18 @@ class Database:
         """)
 
         cursor.execute("""
+        CREATE TABLE IF NOT EXISTS grades (
+            id TEXT PRIMARY KEY,
+            student_id TEXT,
+            discipline_id TEXT,
+            grade TEXT,
+            date TEXT,
+            FOREIGN KEY (student_id) REFERENCES students (id),
+            FOREIGN KEY (discipline_id) REFERENCES disciplines (id)
+        )
+        """)
+
+        cursor.execute("""
         CREATE TABLE IF NOT EXISTS schedule (
             id TEXT PRIMARY KEY,
             group_name TEXT,
