@@ -2,7 +2,7 @@ from faker import Faker
 import json
 import random
 
-fake = Faker('ru_RU')  # ← вот и всё изменение для имён( -ZeMa-)) )
+fake = Faker('ru_RU')
 
 # Пул русских текстов для описаний и контента
 TEXTS = [
@@ -51,7 +51,7 @@ def generate_disciplines(num_disciplines=5):
                 'Машинное обучение', 'Компьютерные сети', 'Операционные системы',
                 'Компьютерная графика', 'Теория алгоритмов', 'Криптография', 'Искусственный интеллект'
             )),
-            "description": ru_text(200)  # ← русский текст
+            "description": ru_text(200)
         }
         disciplines.append(discipline)
     return disciplines
@@ -64,7 +64,7 @@ def generate_materials(disciplines, num_materials=20):
             "id": fake.uuid4(),
             "discipline_id": random.choice(disciplines)['id'],
             "type": fake.random_element(elements=('Лекция', 'Методичка', 'Задание')),
-            "content": ru_text(500)  # ← русский текст
+            "content": ru_text(500)
         }
         materials.append(material)
     return materials
@@ -135,8 +135,8 @@ def generate_data():
         "grades": grades
     }
 
-    with open('fixtures.json', 'w', encoding='utf-8') as f:  # ← encoding важен для кириллицы
-        json.dump(data, f, indent=2, ensure_ascii=False)       # ← ensure_ascii=False тоже
+    with open('fixtures.json', 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 if __name__ == "__main__":
