@@ -4,7 +4,7 @@ MCP-сервер для университетского ассистента н
 
 ## Что умеет
 
-Модель может вызывать семь инструментов:
+Модель может вызывать инструменты:
 
 | Инструмент | Что делает |
 |---|---|
@@ -15,6 +15,12 @@ MCP-сервер для университетского ассистента н
 | `get_materials(discipline_id, type?)` | Учебные материалы по дисциплине |
 | `search_materials(query, discipline_id?)` | Поиск по содержимому материалов |
 | `get_student_grades(student_id, discipline_id?)` | Оценки студента, опционально по одной дисциплине |
+| `get_teacher_by_name(name)` | Поиск преподавателя |
+| `get_teacher_schedule(teacher_name, day?)` | Расписание преподавателя |
+| `import_document(path, discipline_id?, title?)` | Импорт документа в локальный RAG-индекс |
+| `list_documents(discipline_id?)` | Список документов в RAG-индексе |
+| `search_documents(query, discipline_id?, limit?)` | Поиск релевантных фрагментов документов |
+| `get_rag_context(query, discipline_id?, limit?)` | Готовый контекст для ответа по документам |
 
 ## Стек
 
@@ -23,6 +29,9 @@ MCP-сервер для университетского ассистента н
 - SQLite — локальное хранилище
 - Pydantic — схемы ответов
 - Faker — генерация тестовых данных
+- pypdf и python-docx — чтение PDF и DOCX
+- Sentence Transformers — локальная embedding-модель
+- ChromaDB — локальная векторная база для RAG-поиска
 
 ## Структура
 
@@ -34,10 +43,38 @@ agent-tutor/
 │   └── models.py       # Pydantic-модели
 ├── tools/
 │   ├── student.py      # StudentTools
-│   └── disciplines.py  # DisciplineTools
+│   ├── disciplines.py  # DisciplineTools
+│   └── rag.py          # Импорт документов, чанкинг, embeddings, retrieval
 ├── fixtures/
 │   └── generate.py     # Генератор тестовых данных
 └── fixtures.json       # Тестовые данные
+```
+
+## RAG по документам
+
+RAG-слой работает локально через SQLite + ChromaDB:
+
+1. `import_document` читает файл.
+2. Текст разбивается на чанки.
+3. Для каждого чанка считается embedding моделью `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`.
+4. Векторы и тексты чанков сохраняются в ChromaDB.
+5. Метаданные документов сохраняются в SQLite.
+6. `search_documents` ищет похожие фрагменты в ChromaDB.
+7. `get_rag_context` возвращает фрагменты и инструкцию для модели: отвечать только по найденным источникам.
+
+По умолчанию ChromaDB хранит индекс в папке `chroma_db/`.
+
+При первом импорте документа модель скачивается из Hugging Face. Если модель уже скачана или указан локальный путь, можно запретить сетевые обращения:
+
+```bash
+RAG_LOCAL_FILES_ONLY=1
+```
+
+Пример:
+
+```text
+Добавь документ, путь: /home/user/docs/file.docx, названия: Методичка по базам данных
+Найди задание под номером 11 в Методичка по базам данных
 ```
 
 ## Быстрый старт
@@ -83,7 +120,8 @@ mcp dev server.py
 Проект находится на стадии рабочего прототипа.
 
 Работает:
-- MCP-сервер стартует и публикует все семь инструментов
+- MCP-сервер стартует и публикует инструменты
 - SQLite-база инициализируется и загружает фикстуры при старте
 - Инструменты возвращают типизированные Pydantic-ответы
+- RAG-метаданные хранятся в SQLite, а векторный индекс документов — в ChromaDB
 - Проверено в MCP Inspector и Goose, Cluade-code, Pi
