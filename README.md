@@ -104,6 +104,27 @@ uv tool install .
 uv tool install . --reinstall
 ```
 
+Загрузить документ в RAG:
+
+```bash
+# Загрузил лекции
+agent-ingest import ./lectures/lec01.pdf -d "cs-101" -t "Лекция 1: Введение"
+agent-ingest import ./lectures/lec02.pdf -d "cs-101" -t "Лекция 2: Сортировки"
+agent-ingest import ./textbook.docx -t "Учебник Алохи"
+
+# Проверил что загрузилось
+agent-ingest list
+
+# Протестировал поиск
+agent-ingest search "как работает быстрая сортировка" -n 3
+
+# Если результат не устраивает
+agent-ingest import ./lectures/lec02.pdf -d "cs-101" -t "Лекция 2: Сортировки (исправленная)"
+
+# Удаление
+agent-ingest delete --document-id e077bb64-31e6-4d37-98c6-d2f350d7a947
+```
+
 Запустить через MCP Inspector для проверки инструментов:
 
 ```bash
