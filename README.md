@@ -68,12 +68,16 @@ RAG-слой работает локально через SQLite + ChromaDB:
 
 ```bash
 RAG_LOCAL_FILES_ONLY=1
+RAG_DEVICE=cuda
 ```
 
 Пример:
 
+```bash
+$ agent-ingest import ~/Documents/test.pdf
+```
+
 ```text
-Добавь документ, путь: /home/user/docs/file.docx, названия: Методичка по базам данных
 Найди задание под номером 11 в Методичка по базам данных
 ```
 

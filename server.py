@@ -5,7 +5,6 @@ from pydantic import Field
 from db.database import Database
 from db.models import (
     Document,
-    DocumentImportResult,
     Grade,
     Material,
     RagContext,
@@ -138,20 +137,6 @@ def get_teacher_schedule(
     Получить расписание учителя.
     """
     return teacher_tools.get_teacher_schedule(teacher_name, day)
-
-
-@mcp.tool()
-def import_document(
-    path: Annotated[str, Field(description="Путь к документу на сервере.")],
-    discipline_id: Annotated[str | None, Field(description="Опциональный ID дисциплины, если документ относится к конкретной дисциплине")] = None,
-    title: Annotated[str | None, Field(description="Опциональное название документа")] = None,
-) -> DocumentImportResult:
-    """
-    Импортировать документ в локальный RAG-индекс.
-    Документ будет прочитан, разбит на фрагменты, векторизован и сохранён в SQLite.
-    Если документ с тем же путём уже был импортирован, он будет переиндексирован.
-    """
-    return rag_tools.import_document(path, discipline_id, title)
 
 
 @mcp.tool()
