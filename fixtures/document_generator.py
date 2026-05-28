@@ -157,8 +157,7 @@ class TextGenerationClient(Protocol):
         self,
         prompt: str,
         images: Sequence[str | Path] | None = None,
-    ) -> str:
-        """Generate text from a prompt and optional image inputs."""
+    ) -> str: ...
 
 
 class OllamaGenerateClient:
@@ -884,7 +883,7 @@ def _write_docx(path: Path, title: str, text: str) -> None:
     for block in _markdown_blocks(text):
         _add_docx_block(document, block)
 
-    document.save(path)
+    document.save(str(path))
 
 
 def _add_docx_block(document: Any, block: str) -> None:
