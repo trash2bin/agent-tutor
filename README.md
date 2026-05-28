@@ -251,6 +251,9 @@ uv run agent-ingest delete --document-id e077bb64-31e6-4d37-98c6-d2f350d7a947
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Базовый адрес Ollama, если не задан `DOCGEN_OLLAMA_URL` |
 | `DOCGEN_OLLAMA_URL` | `$OLLAMA_HOST/api/generate` | Полный endpoint Ollama generate API |
 | `DOCGEN_NUM_PREDICT` | `4500` | Лимит генерируемых токенов |
+| `DOCGEN_MAX_ATTEMPTS` | `2` | Количество попыток получить не слишком короткий ответ |
+| `DOCGEN_MIN_RESPONSE_CHARS` | `120` | Минимальный желательный размер ответа модели |
+| `DOCGEN_FAKE_SEED` | не задан | Seed для воспроизводимого Faker-каркаса |
 | `DOCGEN_OUTPUT_DIR` | `./generated_materials` | Папка для PDF/DOCX-файлов |
 
 Пример изолированного запуска:

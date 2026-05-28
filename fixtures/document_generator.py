@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import random
 import re
 import textwrap
 import urllib.error
@@ -14,9 +15,17 @@ from typing import Any, Iterable, Protocol, Sequence
 from docx import Document as DocxDocument
 from docx.oxml.ns import qn
 from docx.shared import Pt
+from faker import Faker
 
 from db.database import Database, PROJECT_ROOT
 from db.models import Discipline, Material
+from fixtures.catalog import (
+    CURRICULUM,
+    DISCIPLINE_TOPICS,
+    GROUP_NAMES,
+    GROUP_SPECIALTY_MAP,
+    SPECIALITIES,
+)
 from tools.rag import RagTools
 
 
@@ -25,12 +34,70 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "generated_materials"
 DOCX_FONT_NAME = "Times New Roman"
 DOCX_BODY_SIZE_PT = 14
 
+GENERIC_TOPICS = [
+    "основные понятия дисциплины",
+    "типовые задачи предметной области",
+    "практические ограничения и допущения",
+    "инструменты анализа результата",
+    "ошибки, возникающие при применении методов",
+]
+
+DEPARTMENTS = [
+    "кафедра прикладной информатики",
+    "кафедра программной инженерии",
+    "кафедра интеллектуальных систем",
+    "кафедра информационной безопасности",
+    "кафедра вычислительной математики",
+]
+
+GOAL_TEMPLATES = [
+    "сформировать у студентов понимание ключевых идей дисциплины "
+    "«{discipline}» и показать их применение в направлении "
+    "«{specialty}».",
+    "подготовить студентов к решению типовых учебных и прикладных задач "
+    "по теме «{discipline}» с опорой на понятные алгоритмы действий.",
+    "связать теоретические разделы дисциплины «{discipline}» с практикой "
+    "проектирования, анализа и проверки решений.",
+]
+
+OUTCOME_TEMPLATES = [
+    "объяснять тему «{topic}» простыми терминами и на учебных примерах",
+    "выбирать подходящий метод решения задачи в рамках дисциплины",
+    "проверять корректность результата и находить типовые ошибки",
+    "оформлять решение в виде понятного отчета или краткого технического описания",
+    "связывать материал курса с задачами направления «{specialty}»",
+]
+
+PRACTICE_CONTEXTS = [
+    "учебной информационной системы кафедры",
+    "сервиса учета лабораторных работ",
+    "портала расписания и успеваемости",
+    "небольшого аналитического модуля для преподавателя",
+    "прототипа студенческого проекта",
+]
+
+CONTROL_FORMATS = [
+    "мини-тест и устное обсуждение решения",
+    "лабораторный отчет с демонстрацией результата",
+    "практическая задача с коротким письменным объяснением",
+    "разбор типовой ошибки и защита исправленного решения",
+]
+
+WEAK_RESPONSE_MARKERS = [
+    "к сожалению",
+    "не могу",
+    "не могу предоставить",
+    "как искусственный интеллект",
+    "как языковая модель",
+]
+
 
 @dataclass(frozen=True)
 class MaterialSpec:
     material_type: str
     extension: str
     title_prefix: str
+    body_word_range: tuple[int, int] = (450, 800)
 
     @property
     def suffix(self) -> str:
@@ -46,6 +113,23 @@ class GeneratedDocument:
 
 
 @dataclass(frozen=True)
+class DocumentScenario:
+    discipline: Discipline
+    spec: MaterialSpec
+    specialty: str
+    group_name: str
+    course: int
+    semester: int
+    teacher_name: str
+    department: str
+    goal: str
+    topics: tuple[str, ...]
+    outcomes: tuple[str, ...]
+    practice_context: str
+    control_format: str
+
+
+@dataclass(frozen=True)
 class OllamaGenerateConfig:
     model: str
     url: str
@@ -53,6 +137,7 @@ class OllamaGenerateConfig:
     temperature: float
     num_predict: int
     min_response_chars: int
+    max_attempts: int
 
     @classmethod
     def from_env(cls) -> OllamaGenerateConfig:
@@ -62,7 +147,8 @@ class OllamaGenerateConfig:
             timeout_seconds=_env_float("DOCGEN_TIMEOUT", 90.0),
             temperature=_env_float("DOCGEN_TEMPERATURE", 0.35),
             num_predict=_env_int("DOCGEN_NUM_PREDICT", 4500),
-            min_response_chars=_env_int("DOCGEN_MIN_RESPONSE_CHARS", 300),
+            min_response_chars=_env_int("DOCGEN_MIN_RESPONSE_CHARS", 120),
+            max_attempts=max(1, _env_int("DOCGEN_MAX_ATTEMPTS", 2)),
         )
 
 
@@ -91,6 +177,28 @@ class OllamaGenerateClient:
         prompt: str,
         images: Sequence[str | Path] | None = None,
     ) -> str:
+        best_text = ""
+        for attempt in range(self.config.max_attempts):
+            current_prompt = prompt if attempt == 0 else self._retry_prompt(prompt)
+            data = self._request(current_prompt, images)
+            if error := data.get("error"):
+                raise RuntimeError(f"Ollama returned an error: {error}")
+
+            text = str(data.get("response", "")).strip()
+            if len(text) > len(best_text):
+                best_text = text
+            if len(text) >= self.config.min_response_chars:
+                return text
+
+        if best_text:
+            return best_text
+        raise RuntimeError(f"Ollama model `{self.config.model}` returned empty text.")
+
+    def _request(
+        self,
+        prompt: str,
+        images: Sequence[str | Path] | None,
+    ) -> dict[str, Any]:
         payload = self._payload(prompt, images)
         request = urllib.request.Request(
             self.config.url,
@@ -113,15 +221,7 @@ class OllamaGenerateClient:
                 f"sure model `{self.config.model}` is installed."
             ) from exc
 
-        if error := data.get("error"):
-            raise RuntimeError(f"Ollama returned an error: {error}")
-
-        text = str(data.get("response", "")).strip()
-        if len(text) < self.config.min_response_chars:
-            raise RuntimeError(
-                f"Ollama model `{self.config.model}` returned too little text."
-            )
-        return text
+        return data
 
     def _payload(
         self,
@@ -147,41 +247,187 @@ class OllamaGenerateClient:
             return f"Ollama request failed with HTTP {exc.code}: {details}"
         return f"Ollama request failed with HTTP {exc.code}."
 
+    @staticmethod
+    def _retry_prompt(prompt: str) -> str:
+        return (
+            f"{prompt}\n\n"
+            "Предыдущий ответ был слишком коротким. Раскрой тему подробнее, "
+            "добавь связные объяснения и 2-3 учебных примера."
+        )
+
+
+class DocumentScenarioFactory:
+    """Builds repeatable-ish educational context around a discipline."""
+
+    def __init__(self, seed: int | None = None) -> None:
+        self.fake = Faker("ru_RU")
+        self.random = random.Random(seed)
+        if seed is not None:
+            self.fake.seed_instance(seed)
+
+    @classmethod
+    def from_env(cls) -> DocumentScenarioFactory:
+        return cls(seed=_env_optional_int("DOCGEN_FAKE_SEED"))
+
+    def build(self, discipline: Discipline, spec: MaterialSpec) -> DocumentScenario:
+        specialty = self._specialty_for_discipline(discipline.name)
+        group_name = self._group_for_specialty(specialty)
+        course = self.random.randint(1, 4)
+        semester = course * 2 - self.random.randint(0, 1)
+        topics = self._topics_for_discipline(discipline.name)
+
+        return DocumentScenario(
+            discipline=discipline,
+            spec=spec,
+            specialty=specialty,
+            group_name=group_name,
+            course=course,
+            semester=semester,
+            teacher_name=self.fake.name(),
+            department=self.random.choice(DEPARTMENTS),
+            goal=self._goal(discipline.name, specialty),
+            topics=topics,
+            outcomes=self._outcomes(topics, specialty),
+            practice_context=self._practice_context(),
+            control_format=self.random.choice(CONTROL_FORMATS),
+        )
+
+    def _specialty_for_discipline(self, discipline_name: str) -> str:
+        matches = [
+            specialty
+            for specialty, discipline_names in CURRICULUM.items()
+            if discipline_name in discipline_names
+        ]
+        return self.random.choice(matches or SPECIALITIES)
+
+    def _group_for_specialty(self, specialty: str) -> str:
+        matching_groups = []
+        for group_name in GROUP_NAMES:
+            prefix = group_name.split("-")[0]
+            if GROUP_SPECIALTY_MAP.get(prefix) == specialty:
+                matching_groups.append(group_name)
+        return self.random.choice(matching_groups or GROUP_NAMES)
+
+    def _topics_for_discipline(self, discipline_name: str) -> tuple[str, ...]:
+        topics = DISCIPLINE_TOPICS.get(discipline_name, GENERIC_TOPICS)
+        sample_size = min(len(topics), self.random.randint(4, 5))
+        selected = set(self.random.sample(topics, sample_size))
+        return tuple(topic for topic in topics if topic in selected)
+
+    def _goal(self, discipline_name: str, specialty: str) -> str:
+        template = self.random.choice(GOAL_TEMPLATES)
+        return template.format(discipline=discipline_name, specialty=specialty)
+
+    def _outcomes(self, topics: tuple[str, ...], specialty: str) -> tuple[str, ...]:
+        templates = self.random.sample(OUTCOME_TEMPLATES, k=4)
+        return tuple(
+            template.format(
+                topic=self.random.choice(topics),
+                specialty=specialty,
+            )
+            for template in templates
+        )
+
+    def _practice_context(self) -> str:
+        return f"{self.random.choice(PRACTICE_CONTEXTS)} «{self.fake.company()}»"
+
 
 class DocumentTextGenerator:
-    """Builds educational prompts and delegates text generation to a client."""
+    """Fills a Faker-built educational scaffold with LLM-generated body text."""
 
-    def __init__(self, client: TextGenerationClient | None = None) -> None:
+    def __init__(
+        self,
+        client: TextGenerationClient | None = None,
+        scenario_factory: DocumentScenarioFactory | None = None,
+    ) -> None:
         self.client = client or OllamaGenerateClient()
+        self.scenario_factory = scenario_factory or DocumentScenarioFactory.from_env()
 
-    def generate(self, discipline: Discipline, material_type: str) -> str:
-        return self.client.generate(self.build_prompt(discipline, material_type))
+    def generate(
+        self,
+        discipline: Discipline,
+        material: MaterialSpec | str,
+    ) -> str:
+        spec = (
+            material
+            if isinstance(material, MaterialSpec)
+            else _material_spec(material)
+        )
+        scenario = self.scenario_factory.build(discipline, spec)
+        body = self.client.generate(self.build_prompt(scenario))
+        if _is_weak_body(body):
+            body = _fallback_body(scenario)
+        return self.render_document(scenario, body)
 
     @staticmethod
-    def build_prompt(discipline: Discipline, material_type: str) -> str:
+    def build_prompt(scenario: DocumentScenario) -> str:
+        low, high = scenario.spec.body_word_range
         lines = [
-            "Сгенерируй учебный материал для университета на русском языке.",
-            f"Дисциплина: {discipline.name}",
-            f"Описание дисциплины: {discipline.description}",
-            f"Тип материала: {material_type}",
+            "Ты пишешь фрагмент учебного материала на русском языке.",
+            "Паспорт, цель, план, вопросы и выводы будут добавлены автоматически.",
+            "Верни связный учебный текст с Markdown-заголовками уровня ###.",
+            f"Дисциплина: {scenario.discipline.name}",
+            f"Описание дисциплины: {scenario.discipline.description}",
+            f"Тип материала: {scenario.spec.material_type}",
+            f"Направление: {scenario.specialty}",
+            f"Курс: {scenario.course}, семестр: {scenario.semester}",
+            f"Цель материала: {scenario.goal}",
+            "Темы, которые нужно раскрыть:",
+            *[f"- {topic}" for topic in scenario.topics],
             "Требования:",
-            "- объём 1200-1800 слов;",
-            "- структурированный учебный текст с разделами, подпунктами и примерами;",
-            "- используй Markdown только для заголовков (#, ##, ###), списков "
-            "и **жирного текста**;",
-            "- добавь практический пример, контрольные вопросы и краткие выводы;",
-            "- без выдуманных ссылок и без обращения к читателю от лица ассистента.",
+            f"- ориентировочный объём: {low}-{high} слов;",
+            "- используй Markdown-заголовки уровня ### для крупных фрагментов;",
+            "- пиши связно, с короткими примерами и без выдуманных источников;",
+            "- начни сразу с учебного объяснения.",
         ]
         return "\n".join(lines)
 
+    @staticmethod
+    def render_document(scenario: DocumentScenario, body: str) -> str:
+        sections = [
+            "## Паспорт материала",
+            f"- Направление: {scenario.specialty}",
+            f"- Группа: {scenario.group_name}",
+            f"- Курс: {scenario.course}",
+            f"- Семестр: {scenario.semester}",
+            f"- Преподаватель: {scenario.teacher_name}",
+            f"- Подразделение: {scenario.department}",
+            "",
+            "## Цель",
+            scenario.goal,
+            "",
+            "## План",
+            *_numbered_lines(scenario.topics),
+            "",
+            "## Ожидаемые результаты",
+            *_bullet_lines(scenario.outcomes),
+            "",
+            "## Содержательная часть",
+            body.strip(),
+            "",
+            "## Практический фрагмент",
+            _practice_fragment(scenario),
+            "",
+            "## Контрольные вопросы",
+            *_numbered_lines(_control_questions(scenario)),
+            "",
+            "## Формат проверки",
+            scenario.control_format,
+            "",
+            "## Краткие выводы",
+            _summary_fragment(scenario),
+        ]
+        return "\n".join(sections)
+
 
 MATERIAL_SPECS: tuple[MaterialSpec, ...] = (
-    MaterialSpec("Лекция", "pdf", "Лекция"),
-    MaterialSpec("Методичка", "docx", "Методичка"),
+    MaterialSpec("Лекция", "pdf", "Лекция", (650, 1000)),
+    MaterialSpec("Методичка", "docx", "Методичка", (500, 850)),
     MaterialSpec(
         "Лабораторная работа",
         "docx",
         "Лабораторная работа",
+        (450, 750),
     ),
 )
 
@@ -254,7 +500,7 @@ class MaterialDocumentGenerator:
         discipline_dir: Path,
     ) -> GeneratedDocument:
         title = f"{spec.title_prefix}: {discipline.name}"
-        text = self.text_generator.generate(discipline, spec.material_type)
+        text = self.text_generator.generate(discipline, spec)
         path = discipline_dir / self._file_name(spec, discipline)
 
         _write_document(path, title, text)
@@ -437,6 +683,94 @@ class MaterialDocumentGenerator:
             return False
 
 
+def _material_spec(material_type: str) -> MaterialSpec:
+    for spec in MATERIAL_SPECS:
+        if spec.material_type == material_type:
+            return spec
+    return MaterialSpec(material_type, "docx", material_type)
+
+
+def _numbered_lines(items: Sequence[str]) -> list[str]:
+    return [f"{index}. {item}" for index, item in enumerate(items, 1)]
+
+
+def _bullet_lines(items: Sequence[str]) -> list[str]:
+    return [f"- {item}" for item in items]
+
+
+def _practice_fragment(scenario: DocumentScenario) -> str:
+    first_topic = scenario.topics[0]
+    last_topic = scenario.topics[-1]
+    return (
+        f"Рассмотрите фрагмент {scenario.practice_context}. Необходимо описать, "
+        f"как тема «{first_topic}» влияет на выбор решения, и показать, какие "
+        f"ограничения появляются при работе с темой «{last_topic}». Результат "
+        "оформляется как короткий отчёт: постановка задачи, ход рассуждения, "
+        "полученный вывод и одно возможное улучшение."
+    )
+
+
+def _control_questions(scenario: DocumentScenario) -> tuple[str, ...]:
+    questions = [
+        f"Какую роль играет тема «{topic}» в дисциплине "
+        f"«{scenario.discipline.name}»?"
+        for topic in scenario.topics[:3]
+    ]
+    questions.append(
+        f"Какие ошибки вероятны при применении материала в направлении "
+        f"«{scenario.specialty}»?"
+    )
+    questions.append(
+        "Как проверить, что предложенное решение действительно соответствует "
+        "поставленной задаче?"
+    )
+    return tuple(questions)
+
+
+def _summary_fragment(scenario: DocumentScenario) -> str:
+    topics = ", ".join(scenario.topics[:3])
+    return (
+        f"Материал фиксирует базовый маршрут по дисциплине "
+        f"«{scenario.discipline.name}»: {topics}. Основной акцент сделан на "
+        "связи понятий с практической задачей, проверке результата и аккуратном "
+        "оформлении решения."
+    )
+
+
+def _is_weak_body(text: str) -> bool:
+    normalized = text.strip().lower()
+    if len(normalized) < 120:
+        return True
+    return any(marker in normalized for marker in WEAK_RESPONSE_MARKERS)
+
+
+def _fallback_body(scenario: DocumentScenario) -> str:
+    paragraphs = []
+    for topic in scenario.topics:
+        paragraphs.extend(
+            [
+                f"### {topic.capitalize()}",
+                (
+                    f"Тема «{topic}» рассматривается как часть дисциплины "
+                    f"«{scenario.discipline.name}» и помогает студентам "
+                    "перейти от общего определения к практическому действию. "
+                    f"В направлении «{scenario.specialty}» этот раздел важен "
+                    "потому, что он задает язык описания задачи и критерии "
+                    "проверки результата."
+                ),
+                (
+                    f"На учебном примере {scenario.practice_context} студент "
+                    "может выделить исходные данные, выбрать способ работы с "
+                    "ними, описать ожидаемый результат и проверить, где решение "
+                    "может дать сбой. Такой формат хорошо подходит для "
+                    "лабораторной работы, короткого отчета или обсуждения на "
+                    "практическом занятии."
+                ),
+            ]
+        )
+    return "\n\n".join(paragraphs)
+
+
 def _default_ollama_generate_url() -> str:
     host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
     if not host.startswith(("http://", "https://")):
@@ -462,6 +796,16 @@ def _env_float(name: str, default: float) -> float:
         return float(value)
     except ValueError:
         return default
+
+
+def _env_optional_int(name: str) -> int | None:
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 def _image_to_base64(image: str | Path) -> str:

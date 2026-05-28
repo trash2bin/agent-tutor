@@ -87,6 +87,10 @@ uv run agent-ingest import ./file.docx -d "<discipline-id>" -t "Название
 
 ## Полезные настройки
 
+Генератор собирает учебный каркас через Faker: направление, группу, цель,
+план, ожидаемые результаты, практический фрагмент и контрольные вопросы.
+Ollama используется для содержательной части по темам дисциплины.
+
 Использовать другую Ollama-модель:
 
 ```bash
@@ -132,4 +136,7 @@ DOCGEN_OUTPUT_DIR=/tmp/agent-tutor-materials uv run agent-ingest generate-all
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Базовый адрес Ollama |
 | `DOCGEN_OLLAMA_URL` | `$OLLAMA_HOST/api/generate` | Полный endpoint Ollama generate API |
 | `DOCGEN_NUM_PREDICT` | `4500` | Лимит генерируемых токенов |
+| `DOCGEN_MAX_ATTEMPTS` | `2` | Количество попыток получить не слишком короткий ответ |
+| `DOCGEN_MIN_RESPONSE_CHARS` | `120` | Минимальный желательный размер ответа модели |
+| `DOCGEN_FAKE_SEED` | не задан | Seed для воспроизводимого Faker-каркаса |
 | `DOCGEN_OUTPUT_DIR` | `./generated_materials` | Папка для созданных PDF/DOCX |

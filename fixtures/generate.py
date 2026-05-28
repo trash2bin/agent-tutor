@@ -2,36 +2,21 @@ from faker import Faker
 import json
 import random
 
+from fixtures.catalog import (
+    CURRICULUM,
+    DISCIPLINE_NAMES,
+    GROUP_NAMES,
+    GROUP_SPECIALTY_MAP,
+    LESSON_TYPES,
+    SPECIALITIES,
+    TEXTS,
+    TIME_SLOTS,
+    WEEK_DAYS,
+    WEEK_TYPES,
+)
+
 fake = Faker('ru_RU')
 
-# Пул русских текстов
-TEXTS = [
-    "Данная дисциплина охватывает основные теоретические и практические аспекты.",
-    "Курс предназначен для студентов, изучающих современные информационные технологии.",
-    "В рамках дисциплины рассматриваются ключевые алгоритмы и методы решения задач.",
-    "Материал включает лекции, лабораторные работы и самостоятельные задания.",
-    "Освоение курса позволит применять полученные знания в профессиональной деятельности.",
-]
-
-SPECIALITIES = [
-    'Информационные системы и технологии', 'Программная инженерия',
-    'Информационная безопасность', 'Прикладная математика'
-]
-
-DISCIPLINE_NAMES = [
-    'Алгоритмы и структуры данных', 'Базы данных', 'Веб-технологии',
-    'Машинное обучение', 'Компьютерные сети', 'Операционные системы',
-    'Компьютерная графика', 'Теория алгоритмов', 'Криптография', 'Искусственный интеллект'
-]
-
-# УЧЕБНЫЕ ПЛАНЫ: Какие специальности какие предметы изучают (Для реализма)
-CURRICULUM = {
-    'Информационные системы и технологии': ['Базы данных', 'Веб-технологии', 'Алгоритмы и структуры данных', 'Операционные системы'],
-    'Программная инженерия': ['Алгоритмы и структуры данных', 'Веб-технологии', 'Базы данных', 'Теория алгоритмов'],
-    'Информационная безопасность': ['Криптография', 'Компьютерные сети', 'Операционные системы', 'Алгоритмы и структуры данных'],
-    'Прикладная математика': ['Машинное обучение', 'Искусственный интеллект', 'Теория алгоритмов', 'Алгоритмы и структуры данных'],
-    'Вайбкодер': ['Операционные системы', 'Компьютерные сети', 'Искусственный интеллект', 'Машинное обучение', 'Компьютерная графика'],
-}
 
 def ru_text(max_chars=200):
     result = ""
@@ -43,19 +28,9 @@ def ru_text(max_chars=200):
 def generate_groups():
     # Группы вынесены в отдельную сущность, как в реальных БД
     groups = []
-    names = ['ИВТ-21', 'ПИ-20', 'ИБ-22', 'ПМ-21', 'ИВТ-67', 'ПИ-14', 'ВБ-67', 'ВБ-144']
-    group_specialty_map = {
-        'ИВТ': 'Информационные системы и технологии',
-        'ПИ': 'Программная инженерия',
-        'ИБ': 'Информационная безопасность',
-        'ПМ': 'Прикладная математика',
-        'ВБ': 'Вайбкодер',
-    }
-
-    groups = []
-    for name in names:
+    for name in GROUP_NAMES:
         prefix = name.split('-')[0]
-        specialty = group_specialty_map.get(prefix, random.choice(SPECIALITIES))
+        specialty = GROUP_SPECIALTY_MAP.get(prefix, random.choice(SPECIALITIES))
         groups.append({
             "id": fake.uuid4(),
             "name": name,
@@ -123,7 +98,8 @@ def generate_grades(students, groups, disciplines, num_grades=60):
         student = random.choice(students)
         # Берем предмет ТОЛЬКО из учебного плана группы студента!
         possible_discs = group_disciplines.get(student['group_id'], disciplines)
-        if not possible_discs: continue
+        if not possible_discs:
+            continue
 
         discipline = random.choice(possible_discs)
 
@@ -141,8 +117,6 @@ def generate_grades(students, groups, disciplines, num_grades=60):
 
 def generate_schedule(groups, disciplines, teachers):
     schedule = []
-    days = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']
-    time_slots = ["08:00-9:35 (1 пара)", "9:45-11:20 (2 пара)", "11:33-13:00 (3 пара)", "13:15-15:00 (4 пара)"]
 
     discipline_to_teachers = {}
     for disc in disciplines:
@@ -155,10 +129,13 @@ def generate_schedule(groups, disciplines, teachers):
         group_specs = CURRICULUM.get(group['specialty'], [])
         group_disciplines = [d for d in disciplines if d['name'] in group_specs]
 
-        for day in days:
+        for day in WEEK_DAYS:
             # В реальности пар обычно 2-4 в день
-            daily_slots = random.sample(time_slots, random.randint(2, min(4, len(time_slots))))
-            daily_slots.sort() # Сортируем по времени
+            daily_slots = random.sample(
+                TIME_SLOTS,
+                random.randint(2, min(4, len(TIME_SLOTS))),
+            )
+            daily_slots.sort()  # Сортируем по времени
             lessons = []
 
             for slot in daily_slots:
@@ -166,9 +143,12 @@ def generate_schedule(groups, disciplines, teachers):
                 discipline = random.choice(group_disciplines)
 
                 # Тип занятия
-                lesson_type = random.choice(['Лекция', 'Практика'])
+                lesson_type = random.choice(LESSON_TYPES)
 
-                possible_teachers = discipline_to_teachers.get(discipline['name'], teachers[:1])
+                possible_teachers = discipline_to_teachers.get(
+                    discipline['name'],
+                    teachers[:1],
+                )
                 teacher = random.choice(possible_teachers)
 
                 lessons.append({
@@ -177,9 +157,10 @@ def generate_schedule(groups, disciplines, teachers):
                     "type": lesson_type,
                     "teacher_id": teacher['id'],
                     "teacher_name": teacher['name'],
-                    "room": random.randint(100, 500), # В реальности лекции в 100-х, лабы в 300-х
+                    # В реальности лекции чаще в 100-х, лабораторные в 300-х.
+                    "room": random.randint(100, 500),
                     "time_slot": slot,
-                    "week_type": random.choice(['Числитель', 'Знаменатель', 'Обе'])
+                    "week_type": random.choice(WEEK_TYPES)
                 })
 
             if lessons:
