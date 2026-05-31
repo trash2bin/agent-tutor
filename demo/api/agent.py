@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -11,6 +13,9 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from demo.settings import PROJECT_ROOT, settings
+
+# Set up debug logging for agent operations
+logger = logging.getLogger("demo.api.agent")
 
 
 # System prompt for the assistant
@@ -35,7 +40,9 @@ oценках, преподавателях и документах исполь
 @asynccontextmanager
 async def mcp_session() -> AsyncIterator[ClientSession]:
     """Create and manage an MCP client session."""
+    logger.debug("[AGENT] Creating MCP session...")
     server_path = str(PROJECT_ROOT / "server.py")
+    logger.debug(f"[AGENT] Starting MCP server at: {server_path}")
     params = StdioServerParameters(
         command=settings.python_executable,
         args=[server_path],
@@ -44,7 +51,9 @@ async def mcp_session() -> AsyncIterator[ClientSession]:
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
+            logger.debug("[AGENT] MCP session initialized")
             yield session
+            logger.debug("[AGENT] MCP session closing")
 
 
 async def list_ollama_tools(session: ClientSession) -> list[dict[str, Any]]:
@@ -68,18 +77,24 @@ async def list_ollama_tools(session: ClientSession) -> list[dict[str, Any]]:
 async def call_tool(session: ClientSession, name: str, arguments: dict[str, Any]) -> str:
     """Call an MCP tool and return the result as a string."""
     try:
+        logger.debug(f"[AGENT] MCP call_tool: {name} with args: {arguments}")
         result = await session.call_tool(name, arguments)
         if result.isError:
             error_text = _collect_text_content(result)
+            logger.warning(f"[AGENT] Tool {name} returned error: {error_text}")
             return json.dumps({"error": error_text or f"Ошибка вызова инструмента {name}"}, ensure_ascii=False)
 
         structured = getattr(result, "structuredContent", None)
         if structured is not None:
+            logger.debug(f"[AGENT] Tool {name} returned structured: {structured}")
             return json.dumps(structured, ensure_ascii=False)
 
         content = _collect_text_content(result)
+        if not content:
+            logger.warning(f"[AGENT] Tool {name} returned empty content")
         return content or f"Инструмент {name} вернул пустой результат"
     except Exception as exc:
+        logger.exception(f"[AGENT] Exception calling tool {name}")
         return json.dumps({"error": f"Ошибка при вызове инструмента {name}: {str(exc)}"}, ensure_ascii=False)
 
 
@@ -103,6 +118,7 @@ class OllamaAgent:
 
     async def stream_answer(self, user_message: str) -> AsyncIterator[str]:
         """Stream an answer to a user message, handling tool calls recursively."""
+        logger.info(f"[AGENT] User message: {user_message[:100]}...")
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
@@ -112,23 +128,35 @@ class OllamaAgent:
             await self._ensure_available(client)
             async with mcp_session() as session:
                 tools = await list_ollama_tools(session)
+                logger.info(f"[AGENT] Available tools: {[t['function']['name'] for t in tools]}")
                 for _ in range(4):
+                    logger.info("[AGENT] Iteration - calling model...")
                     message = await self._chat_once(client, messages, tools)
+                    logger.info(f"[AGENT] Model response: {json.dumps(message, ensure_ascii=False)[:200]}...")
+                    
                     tool_calls = self._extract_tool_calls(message)
+                    logger.info(f"[AGENT] Extracted tool calls: {len(tool_calls)} - {tool_calls}")
+                    
                     if not tool_calls:
+                        # No tool calls - this is the final model response
                         if content := message.get("content"):
+                            logger.info(f"[AGENT] Final content: {content[:100]}...")
                             yield content
-                        else:
-                            # Model returned no content and no tool calls
-                            yield "Извините, не удалось получить ответ. Попробуйте переформулировать запрос."
-                        return
+                            return
+                        # If no content, continue to streaming final
+                        logger.info("[AGENT] No tool calls and no content, breaking to streaming...")
+                        break
 
+                    # Model has tool calls to make
+                    logger.info(f"[AGENT] Processing {len(tool_calls)} tool call(s)")
                     messages.append(message)
                     for tool_call in tool_calls:
                         name = tool_call["name"]
                         arguments = tool_call["arguments"]
+                        logger.info(f"[AGENT] Calling tool: {name} with args: {arguments}")
                         yield f"\n\n[tool:{name}]\n"
                         tool_result = await call_tool(session, name, arguments)
+                        logger.info(f"[AGENT] Tool {name} result: {tool_result[:200]}...")
                         messages.append(
                             {
                                 "role": "tool",
@@ -136,16 +164,31 @@ class OllamaAgent:
                                 "tool_name": name,
                             }
                         )
+                else:
+                    # We went through all 4 iterations with tool calls
+                    # Model needs to give final answer via streaming
+                    logger.info("[AGENT] Used all 4 iterations, switching to streaming final...")
+                    has_tokens = False
+                    async for token in self._stream_final(client, messages):
+                        has_tokens = True
+                        yield token
+                    if not has_tokens:
+                        logger.warning("[AGENT] No tokens from streaming final after 4 iterations")
+                        yield "Извините, модель завершила работу без ответа. Попробуйте уточнить запрос."
+                    return
 
-                # After 4 iterations with tool calls, get final streaming response
-                has_tokens = False
-                async for token in self._stream_final(client, messages):
-                    has_tokens = True
-                    yield token
-
-                if not has_tokens:
-                    # Model didn't return any final text
-                    yield "Извините, модель завершила работу без ответа. Попробуйте уточнить запрос."
+                # If we broke from loop (no tool calls), check for content
+                # If there was content, we already returned above
+                # If there was no content, try streaming final
+                if not message.get("content"):
+                    logger.info("[AGENT] No content in final message, trying streaming final...")
+                    has_tokens = False
+                    async for token in self._stream_final(client, messages):
+                        has_tokens = True
+                        yield token
+                    if not has_tokens:
+                        logger.warning("[AGENT] No tokens from streaming final")
+                        yield "Извините, модель завершила работу без ответа. Попробуйте уточнить запрос."
 
     async def health(self) -> dict[str, Any]:
         """Check Ollama server health and available models."""
@@ -173,6 +216,7 @@ class OllamaAgent:
         tools: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Send a single chat request to Ollama."""
+        logger.debug(f"[AGENT] _chat_once: sending {len(messages)} messages, {len(tools)} tools")
         response = await client.post(
             f"{self.base_url}/api/chat",
             json={
@@ -183,7 +227,9 @@ class OllamaAgent:
             },
         )
         response.raise_for_status()
-        return response.json().get("message", {})
+        result = response.json().get("message", {})
+        logger.debug(f"[AGENT] _chat_once: got content len={len(result.get('content', ''))}, tool_calls={bool(result.get('tool_calls'))}")
+        return result
 
     async def _stream_final(
         self,
@@ -191,6 +237,7 @@ class OllamaAgent:
         messages: list[dict[str, Any]],
     ) -> AsyncIterator[str]:
         """Stream the final response from Ollama."""
+        logger.debug(f"[AGENT] _stream_final: starting with {len(messages)} messages")
         async with client.stream(
             "POST",
             f"{self.base_url}/api/chat",
@@ -203,7 +250,10 @@ class OllamaAgent:
                 chunk = json.loads(line)
                 content = chunk.get("message", {}).get("content", "")
                 if content:
+                    logger.debug(f"[AGENT] _stream_final: got token (len={len(content)})")
                     yield content
+                else:
+                    logger.debug(f"[AGENT] _stream_final: empty content in chunk")
 
     @staticmethod
     def _extract_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:

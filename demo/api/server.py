@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 from typing import Any
 
 import uvicorn
@@ -13,6 +15,18 @@ from starlette.routing import Route
 from demo.api.agent import agent
 from demo.api.data import data_repository
 from demo.settings import settings
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+
+# Enable debug logging for agent if DEMO_DEBUG is set
+if os.environ.get("DEMO_DEBUG", "").lower() in ("1", "true", "yes"):
+    logging.getLogger("demo.api.agent").setLevel(logging.DEBUG)
+    logging.getLogger("mcp").setLevel(logging.DEBUG)
+    print("[DEMO] Debug logging enabled for agent and MCP")
 
 
 async def health(_: Request) -> JSONResponse:
