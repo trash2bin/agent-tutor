@@ -1,6 +1,6 @@
 [project]
 name = "agent-tutor"
-version = "0.0.31"
+version = "0.0.32"
 readme = "README.md"
 description = "University MCP server"
 requires-python = ">=3.12, <3.14" # tokie (dependencies for chonkie) needs Python 3.12+ and <3.14 (stable)

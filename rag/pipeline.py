@@ -79,9 +79,14 @@ class RAGPipeline:
 
         return result
 
-    def list_documents(self, discipline_id: str | None = None) -> list:
-        """Список документов."""
-        return self.repository.list_documents(discipline_id)
+    def list_documents(self, discipline_id: str | None = None, limit: int | None = None) -> list:
+        """Список документов.
+
+        Args:
+            discipline_id: Опциональный ID дисциплины для фильтрации
+            limit: Максимальное количество возвращаемых документов (None = без ограничения)
+        """
+        return self.repository.list_documents(discipline_id, limit)
 
     def delete_document_vectors(self, document_id: str) -> None:
         """Удалить векторы документа из векторного хранилища."""

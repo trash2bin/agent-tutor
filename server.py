@@ -1,6 +1,6 @@
 import os
 from mcp.server.fastmcp import FastMCP
-from typing import Annotated
+from typing import Annotated, Optional, List
 from pydantic import Field
 from db.database import Database
 from db.models import (
@@ -23,117 +23,188 @@ db = Database()
 student_tools = StudentTools(db)
 grade_tools = GradeTools(db)
 teacher_tools = TeacherTools(db)
-
-# RAG: create_rag_pipeline принимает sqlite3.Connection, не Database
 rag = create_rag_pipeline(db.conn)
-discipline_tools = DisciplineTools(db, doc_repo=rag.repository)
+discipline_tools = DisciplineTools(db)
 
 mcp = FastMCP("University Server")
 
 
-@mcp.tool()
-def get_student(
-    student_id: Annotated[str, Field(description="Числовой ID студента, например '1' или '42' или может быть uuid4 id например '3fa85f64-5717-4562-b3fc-2c963f66afa6'")]
-) -> Student | None:
-    """Получить карточку студента по его ID."""
-    return student_tools.get_student(student_id)
-
+# СТУДЕНТ
 
 @mcp.tool()
 def find_student_by_name(
-    name: Annotated[str, Field(description="Полное имя студента, например 'Иван Петров Иванович'")]
-) -> Student | None:
-    """Найти студента по имени и получить его ID и данные."""
+    name: Annotated[str, Field(description="Полное ФИО студента. Пример: 'Иван Петров Иванович'")]
+) -> Optional[Student]:
+    """Найти студента по имени.
+
+    Используй ПЕРВЫМ если знаешь имя, но не знаешь ID.
+    Возвращает Student: id, name, course, group {id, name, speciality}.
+    group.id нужен для get_schedule. id нужен для get_student_grades и get_disciplines.
+    Возвращает null если не найден.
+    """
     return student_tools.get_id_student(name)
 
 
 @mcp.tool()
-def get_schedule(
-    group_id: Annotated[str, Field(description="ID группы, например uuid4 '123e4567-e89b-12d3-a456-426614174000'")],
-    day: Annotated[str | None, Field(description="День недели на русском: 'Понедельник', 'Вторник' и т.д. Если не указан — вернётся всё расписание группы")] = None
-) -> list[ScheduleEntry]:
-    """Получить расписание группы."""
-    return student_tools.get_schedule(group_id, day)
+def get_student(
+    student_id: Annotated[str, Field(description="ID студента (UUID или число). Получи через find_student_by_name.")]
+) -> Optional[Student]:
+    """Получить карточку студента по ID.
 
+    Возвращает Student: id, name, course, group {id, name, speciality}.
+    Возвращает null если не найден.
+    """
+    return student_tools.get_student(student_id)
+
+
+# РАСПИСАНИЕ
+
+@mcp.tool()
+def get_schedule(
+    group_id: Annotated[str, Field(description="ID группы (UUID). Берётся из поля group.id студента.")],
+    day: Annotated[Optional[str], Field(
+        description="День недели по-русски: 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'. "
+                    "Не передавай если нужно всё расписание."
+    )] = None
+) -> List[ScheduleEntry]:
+    """Расписание группы студента.
+
+    ВАЖНО: принимает group.id (из карточки студента), а НЕ student.id.
+    Возвращает список ScheduleEntry: day, group, lessons[{discipline_id, discipline_name, teacher_name, room}].
+    """
+    return student_tools.get_schedule(group_id, day) or []
+
+
+# ДИСЦИПЛИНЫ И ОЦЕНКИ
 
 @mcp.tool()
 def get_disciplines(
-    student_id: Annotated[str, Field(description="ID студента из get_student или find_student_by_name")]
-) -> list[Discipline]:
-    """Получить список дисциплин студента."""
-    return discipline_tools.get_disciplines(student_id)
+    student_id: Annotated[str, Field(description="ID студента из find_student_by_name или get_student.")]
+) -> List[Discipline]:
+    """Список дисциплин студента.
 
-
-@mcp.tool()
-def get_materials(
-    discipline_id: Annotated[str, Field(description="ID дисциплины из get_disciplines")],
-    material_type: Annotated[str | None, Field(description="Тип материала: 'Лекция', 'Методичка', 'Лабораторная работа'. Если не указан — вернутся все типы")] = None
-) -> list[Material]:
-    """Получить учебные материалы по дисциплине."""
-    return discipline_tools.get_materials(discipline_id, material_type)
-
-
-@mcp.tool()
-def search_materials(
-    query: Annotated[str, Field(description="Поисковый запрос, ищется по содержимому материалов")],
-    discipline_id: Annotated[str | None, Field(description="Опциональный ID дисциплины для сужения поиска")] = None
-) -> list[Material]:
-    """Найти учебные материалы по содержимому."""
-    return discipline_tools.search_materials(query, discipline_id)
+    Возвращает List[Discipline]: id, name, description.
+    discipline.id можно передать в get_student_grades для фильтрации по предмету.
+    """
+    return discipline_tools.get_disciplines(student_id) or []
 
 
 @mcp.tool()
 def get_student_grades(
-    student_id: Annotated[str, Field(description="ID студента из get_student или find_student_by_name")],
-    discipline_id: Annotated[str | None, Field(description="Опциональный ID дисциплины из get_disciplines, если нужно получить оценки только по одному предмету")] = None
-) -> list[Grade]:
-    """Получить все оценки студента."""
-    return grade_tools.get_student_grades(student_id, discipline_id)
+    student_id: Annotated[str, Field(description="ID студента из find_student_by_name.")],
+    discipline_id: Annotated[Optional[str], Field(
+        description="ID дисциплины из get_disciplines для фильтрации по предмету. "
+                    "Не передавай если нужны все оценки — вызов без discipline_id вернёт их все."
+    )] = None
+) -> List[Grade]:
+    """Оценки студента.
 
+    Без discipline_id — все оценки. С discipline_id — только по этому предмету.
+    ВАЖНО: не перебирай discipline_id вручную — вызови один раз без него, чтобы получить всё.
+    Возвращает List[Grade]: id, student_id, discipline_id, discipline_name, grade, date.
+    """
+    return grade_tools.get_student_grades(student_id, discipline_id) or []
+
+
+# ПРЕПОДАВАТЕЛЬ
 
 @mcp.tool()
 def get_teacher_by_name(
-    name: Annotated[str, Field(description="Имя учителя, например 'Оксана Ниловна Константинова'")]
-) -> Teacher | None:
-    """Найти учителя по имени."""
+    name: Annotated[str, Field(description="Полное ФИО преподавателя. Пример: 'Оксана Ниловна Константинова'")]
+) -> Optional[Teacher]:
+    """Найти преподавателя по имени.
+
+    Возвращает Teacher: id, name, disciplines[]. Null если не найден.
+    """
     return teacher_tools.get_teacher_by_name(name)
 
 
 @mcp.tool()
 def get_teacher_schedule(
-    teacher_name: Annotated[str, Field(description="Имя учителя")],
-    day: Annotated[str | None, Field(description="День недели (по умолчанию - текущий день)")] = None
-) -> list[ScheduleEntry]:
-    """Получить расписание учителя."""
-    return teacher_tools.get_teacher_schedule(teacher_name, day)
+    teacher_name: Annotated[str, Field(description="Полное ФИО преподавателя.")],
+    day: Annotated[Optional[str], Field(
+        description="День недели по-русски. Не передавай если нужно всё расписание."
+    )] = None
+) -> List[ScheduleEntry]:
+    """Расписание преподавателя.
 
+    Принимает имя напрямую, отдельный вызов get_teacher_by_name не нужен.
+    Возвращает List[ScheduleEntry]: day, group, lessons[].
+    """
+    return teacher_tools.get_teacher_schedule(teacher_name, day) or []
+
+
+# ДОКУМЕНТЫ / RAG
 
 @mcp.tool()
 def list_documents(
-    discipline_id: Annotated[str | None, Field(description="Опциональный ID дисциплины для фильтрации документов")] = None
-) -> list[Document]:
-    """Получить список документов, доступных RAG-поиску."""
-    return rag.list_documents(discipline_id)
+    discipline_id: Annotated[Optional[str], Field(
+        description="ID дисциплины для фильтрации. Не передавай для получения всех документов."
+    )] = None,
+    limit: Annotated[Optional[int], Field(description="Максимум документов (1–1000).", ge=1, le=1000)] = None
+) -> List[Document]:
+    """Список документов, доступных для RAG-поиска.
+
+    Возвращает List[Document]: id, title, source_path, mime_type, discipline_id, created_at.
+    """
+    return rag.list_documents(discipline_id, limit) or []
 
 
 @mcp.tool()
 def search_documents(
-    query: Annotated[str, Field(description="Вопрос или поисковый запрос по загруженным документам")],
-    discipline_id: Annotated[str | None, Field(description="Опциональный ID дисциплины для сужения поиска")] = None,
-    limit: Annotated[int, Field(description="Сколько релевантных фрагментов вернуть, от 1 до 20")] = 5,
-) -> list[RagSearchResult]:
-    """Найти релевантные фрагменты документов через локальный RAG-поиск."""
-    return rag.search_documents(query, discipline_id, limit)
+    query: Annotated[str, Field(description="Поисковый запрос по документам.")],
+    discipline_id: Annotated[Optional[str], Field(
+        description="ID дисциплины для сужения поиска. Опционально."
+    )] = None,
+    limit: Annotated[int, Field(description="Количество фрагментов (1–20).", ge=1, le=20)] = 5,
+) -> List[RagSearchResult]:
+    """Поиск релевантных фрагментов документов (RAG).
+
+    Возвращает List[RagSearchResult]: document_id, document_title, chunk_id, page, score, content.
+    Используй context_search_in_documents если нужен готовый контекст для ответа.
+    """
+    return rag.search_documents(query, discipline_id, limit) or []
 
 
 @mcp.tool()
-def get_rag_context(
-    query: Annotated[str, Field(description="Вопрос пользователя, на который нужно ответить по документам")],
-    discipline_id: Annotated[str | None, Field(description="Опциональный ID дисциплины для сужения контекста")] = None,
-    limit: Annotated[int, Field(description="Сколько фрагментов включить в контекст, от 1 до 20")] = 5,
+def context_search_in_documents(
+    query: Annotated[str, Field(description="Вопрос пользователя для поиска по документам.")],
+    discipline_id: Annotated[Optional[str], Field(
+        description="ID дисциплины для сужения контекста. Опционально."
+    )] = None,
+    limit: Annotated[int, Field(description="Фрагментов в контексте (1–20).", ge=1, le=20)] = 5,
 ) -> RagContext:
-    """Получить готовый RAG-контекст для ответа модели."""
+    """Готовый RAG-контекст для ответа модели.
+
+    Предпочитай этот инструмент вместо search_documents когда нужно ответить на вопрос по материалам.
+    Возвращает RagContext: query, answer_instruction, chunks[].
+    Отвечай только на основе chunks, явно укажи если данных недостаточно.
+    """
     return rag.build_rag_context(query, discipline_id, limit)
+
+
+# СЛУЖЕБНОЕ
+
+@mcp.tool()
+def get_health_status() -> dict:
+    """Проверить работоспособность системы (БД и ChromaDB).
+
+    Возвращает {"database": {"status": "ok"|"error", "error": null|str},
+                "chroma":   {"status": "ok"|"error", "error": null|str}}.
+    """
+    db_status = {"status": "ok", "error": None}
+    try:
+        db.conn.execute("SELECT 1")
+    except Exception as e:
+        db_status = {"status": "error", "error": str(e)}
+
+    chroma_status = {"status": "ok", "error": None}
+    try:
+        rag.list_documents(limit=1)
+    except Exception as e:
+        chroma_status = {"status": "error", "error": str(e)}
+
+    return {"database": db_status, "chroma": chroma_status}
 
 
 def main():

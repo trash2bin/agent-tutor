@@ -29,25 +29,33 @@ class DocumentRepository:
         self.conn = conn
         self.config = config
 
-    def list_documents(self, discipline_id: str | None = None) -> list[Document]:
-        """Список загруженных документов (опционально по дисциплине)."""
+    def list_documents(self, discipline_id: str | None = None, limit: int | None = None) -> list[Document]:
+        """Список загруженных документов (опционально по дисциплине).
+
+        Args:
+            discipline_id: Опциональный ID дисциплины для фильтрации
+            limit: Максимальное количество возвращаемых документов (None = без ограничения)
+        """
         cursor = self.conn.cursor()
+        params = []
+
         if discipline_id:
-            rows = cursor.execute(
-                """
+            sql = """
                 SELECT id, title, source_path, mime_type, discipline_id, created_at
                 FROM documents WHERE discipline_id = ? ORDER BY created_at DESC
-                """,
-                (discipline_id,),
-            ).fetchall()
-        else:
-            rows = cursor.execute(
                 """
+            params.append(discipline_id)
+        else:
+            sql = """
                 SELECT id, title, source_path, mime_type, discipline_id, created_at
                 FROM documents ORDER BY created_at DESC
                 """
-            ).fetchall()
 
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+
+        rows = cursor.execute(sql, params).fetchall()
         return [self._document_from_row(row) for row in rows]
 
     def find_existing_by_path(self, source_path: str) -> str | None:
