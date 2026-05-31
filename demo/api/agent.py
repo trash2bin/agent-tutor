@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from typing import Any
 
 import httpx
@@ -115,12 +117,26 @@ class OllamaAgent:
         self.base_url = settings.ollama_url.rstrip("/")
         self.model = settings.ollama_model
         self.timeout = httpx.Timeout(settings.request_timeout)
+        self.max_history_turns = int(os.environ.get("DEMO_HISTORY_TURNS", "8"))
+        self.max_history_content_chars = int(os.environ.get("DEMO_HISTORY_CONTENT_CHARS", "6000"))
+        self._histories: dict[str, list[list[dict[str, Any]]]] = {}
+        self._session_locks: dict[str, asyncio.Lock] = {}
 
-    async def stream_answer(self, user_message: str) -> AsyncIterator[str]:
+    async def stream_answer(self, user_message: str, session_id: str = "default") -> AsyncIterator[str]:
         """Stream an answer to a user message, handling tool calls recursively."""
-        logger.info(f"[AGENT] User message: {user_message[:100]}...")
+        session_id = self._normalize_session_id(session_id)
+        logger.info(f"[AGENT] User message for session {session_id}: {user_message[:100]}...")
+        lock = self._session_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            async for token in self._stream_answer_locked(user_message, session_id):
+                yield token
+
+    async def _stream_answer_locked(self, user_message: str, session_id: str) -> AsyncIterator[str]:
+        """Stream an answer while the session history is locked."""
+        turn_messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
+            *self._history_messages(session_id),
             {"role": "user", "content": user_message},
         ]
 
@@ -141,6 +157,8 @@ class OllamaAgent:
                         # No tool calls - this is the final model response
                         if content := message.get("content"):
                             logger.info(f"[AGENT] Final content: {content[:100]}...")
+                            turn_messages.append({"role": "assistant", "content": content})
+                            self._remember_turn(session_id, turn_messages)
                             yield content
                             return
                         # If no content, continue to streaming final
@@ -150,6 +168,7 @@ class OllamaAgent:
                     # Model has tool calls to make
                     logger.info(f"[AGENT] Processing {len(tool_calls)} tool call(s)")
                     messages.append(message)
+                    turn_messages.append(message)
                     for tool_call in tool_calls:
                         name = tool_call["name"]
                         arguments = tool_call["arguments"]
@@ -157,24 +176,29 @@ class OllamaAgent:
                         yield f"\n\n[tool:{name}]\n"
                         tool_result = await call_tool(session, name, arguments)
                         logger.info(f"[AGENT] Tool {name} result: {tool_result[:200]}...")
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "content": tool_result,
-                                "tool_name": name,
-                            }
-                        )
+                        tool_message = {
+                            "role": "tool",
+                            "content": tool_result,
+                            "tool_name": name,
+                        }
+                        messages.append(tool_message)
+                        turn_messages.append(tool_message)
                 else:
                     # We went through all 4 iterations with tool calls
                     # Model needs to give final answer via streaming
                     logger.info("[AGENT] Used all 4 iterations, switching to streaming final...")
                     has_tokens = False
+                    final_parts = []
                     async for token in self._stream_final(client, messages):
                         has_tokens = True
+                        final_parts.append(token)
                         yield token
                     if not has_tokens:
                         logger.warning("[AGENT] No tokens from streaming final after 4 iterations")
                         yield "Извините, модель завершила работу без ответа. Попробуйте уточнить запрос."
+                    else:
+                        turn_messages.append({"role": "assistant", "content": "".join(final_parts)})
+                        self._remember_turn(session_id, turn_messages)
                     return
 
                 # If we broke from loop (no tool calls), check for content
@@ -183,12 +207,17 @@ class OllamaAgent:
                 if not message.get("content"):
                     logger.info("[AGENT] No content in final message, trying streaming final...")
                     has_tokens = False
+                    final_parts = []
                     async for token in self._stream_final(client, messages):
                         has_tokens = True
+                        final_parts.append(token)
                         yield token
                     if not has_tokens:
                         logger.warning("[AGENT] No tokens from streaming final")
                         yield "Извините, модель завершила работу без ответа. Попробуйте уточнить запрос."
+                    else:
+                        turn_messages.append({"role": "assistant", "content": "".join(final_parts)})
+                        self._remember_turn(session_id, turn_messages)
 
     async def health(self) -> dict[str, Any]:
         """Check Ollama server health and available models."""
@@ -274,6 +303,37 @@ class OllamaAgent:
                 arguments = raw_args
             calls.append({"name": name, "arguments": arguments})
         return calls
+
+    @staticmethod
+    def _normalize_session_id(session_id: str) -> str:
+        """Normalize a chat session id for history lookup."""
+        session_id = str(session_id or "").strip()
+        return session_id[:128] if session_id else "default"
+
+    def _history_messages(self, session_id: str) -> list[dict[str, Any]]:
+        """Return flattened message history for a session."""
+        turns = self._histories.get(session_id, [])
+        return [deepcopy(message) for turn in turns for message in turn]
+
+    def _remember_turn(self, session_id: str, turn_messages: list[dict[str, Any]]) -> None:
+        """Store a completed chat turn and keep history bounded."""
+        stored_turn = [self._compact_history_message(message) for message in turn_messages]
+        history = self._histories.setdefault(session_id, [])
+        history.append(stored_turn)
+        if len(history) > self.max_history_turns:
+            del history[: len(history) - self.max_history_turns]
+        logger.debug(f"[AGENT] Stored {len(stored_turn)} messages for session {session_id}; turns={len(history)}")
+
+    def _compact_history_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        """Copy a message for history and cap very large content fields."""
+        compact = deepcopy(message)
+        content = compact.get("content")
+        if isinstance(content, str) and len(content) > self.max_history_content_chars:
+            compact["content"] = (
+                content[: self.max_history_content_chars]
+                + "\n\n...[обрезано в истории диалога]"
+            )
+        return compact
 
 
 # Global agent instance

@@ -48,12 +48,13 @@ async def chat(request: Request) -> StreamingResponse:
     """Streaming chat endpoint that handles user messages."""
     body = await request.json()
     message = str(body.get("message", "")).strip()
+    session_id = str(body.get("session_id", "")).strip() or "default"
     if not message:
         return StreamingResponse(_single_error("Введите вопрос."), media_type="text/event-stream")
 
     async def events():
         try:
-            async for token in agent.stream_answer(message):
+            async for token in agent.stream_answer(message, session_id=session_id):
                 yield _sse({"type": "token", "text": token})
             yield _sse({"type": "done"})
         except Exception as exc:

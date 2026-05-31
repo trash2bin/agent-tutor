@@ -1,4 +1,5 @@
 const apiBase = window.DEMO_API_BASE || "http://127.0.0.1:8081";
+const sessionId = getSessionId();
 
 const state = {
   data: null,
@@ -195,7 +196,7 @@ async function streamChat(message, target) {
     const response = await fetch(`${apiBase}/api/chat`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({message})
+      body: JSON.stringify({message, session_id: sessionId})
     });
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -217,6 +218,25 @@ async function streamChat(message, target) {
     target.classList.add("error");
     target.textContent = `Ошибка: ${error.message}`;
   }
+}
+
+function getSessionId() {
+  const storageKey = "agentTutorSessionId";
+  try {
+    const existing = window.localStorage.getItem(storageKey);
+    if (existing) {
+      return existing;
+    }
+    const generated = createSessionId();
+    window.localStorage.setItem(storageKey, generated);
+    return generated;
+  } catch {
+    return createSessionId();
+  }
+}
+
+function createSessionId() {
+  return window.crypto?.randomUUID?.() || `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function handleEventChunk(chunk, target) {
