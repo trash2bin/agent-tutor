@@ -1,5 +1,6 @@
 const apiBase = window.DEMO_API_BASE || "http://127.0.0.1:8081";
 const sessionId = getSessionId();
+const chatHistoryKey = "agentTutorMessages";
 
 const state = {
   data: null,
@@ -77,6 +78,7 @@ const metrics = [
 const $ = selector => document.querySelector(selector);
 
 async function init() {
+  restoreChatHistory();
   bindTabs();
   bindChat();
   await Promise.all([loadData(), checkHealth()]);
@@ -183,8 +185,8 @@ function bindChat() {
       return;
     }
     input.value = "";
-    addMessage("user", text);
-    const answer = addMessage("assistant", "");
+    addMessage("user", text, {persist: true});
+    const answer = addMessage("assistant", "", {persist: false});
     await streamChat(text, answer);
   });
 }
@@ -223,12 +225,12 @@ async function streamChat(message, target) {
 function getSessionId() {
   const storageKey = "agentTutorSessionId";
   try {
-    const existing = window.localStorage.getItem(storageKey);
+    const existing = window.sessionStorage.getItem(storageKey);
     if (existing) {
       return existing;
     }
     const generated = createSessionId();
-    window.localStorage.setItem(storageKey, generated);
+    window.sessionStorage.setItem(storageKey, generated);
     return generated;
   } catch {
     return createSessionId();
@@ -246,11 +248,20 @@ function handleEventChunk(chunk, target) {
   }
   const payload = JSON.parse(line.slice(5).trim());
   if (payload.type === "token") {
+    const messages = $("#messages");
+    const shouldStickToBottom = isScrolledNearBottom(messages);
     appendAssistantToken(target, payload.text);
-    $("#messages").scrollTop = $("#messages").scrollHeight;
+    if (shouldStickToBottom) {
+      scrollMessagesToBottom(messages);
+    }
   }
   if (payload.type === "done" && !(target.dataset.raw || "").trim()) {
-    target.textContent = "Модель не вернула текст. Попробуйте уточнить запрос.";
+    const fallback = "Модель не вернула текст. Попробуйте уточнить запрос.";
+    target.dataset.raw = fallback;
+    target.textContent = fallback;
+  }
+  if (payload.type === "done") {
+    saveAssistantMessage(target);
   }
   if (payload.type === "error") {
     target.classList.add("error");
@@ -367,13 +378,94 @@ function inlineMarkdown(value) {
     .replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
-function addMessage(kind, text) {
+function addMessage(kind, text, options = {}) {
   const node = document.createElement("div");
   node.className = `message ${kind}`;
-  node.textContent = text;
-  $("#messages").appendChild(node);
-  $("#messages").scrollTop = $("#messages").scrollHeight;
+  if (kind === "assistant") {
+    node.dataset.raw = text;
+    node.innerHTML = text ? renderAssistantMarkup(text) : "";
+  } else {
+    node.textContent = text;
+  }
+  const messages = $("#messages");
+  messages.appendChild(node);
+  if (options.persist) {
+    appendStoredMessage(kind, text);
+  }
+  if (options.scroll !== false) {
+    scrollMessagesToBottom(messages);
+  }
   return node;
+}
+
+function restoreChatHistory() {
+  const storedMessages = readStoredMessages();
+  if (!storedMessages.length) {
+    return;
+  }
+
+  const messages = $("#messages");
+  messages.innerHTML = "";
+  storedMessages.forEach(message => {
+    addMessage(message.kind, message.text, {persist: false, scroll: false});
+  });
+  scrollMessagesToBottom(messages);
+}
+
+function saveAssistantMessage(target) {
+  if (target.dataset.saved === "true") {
+    return;
+  }
+  const text = target.dataset.raw || target.textContent || "";
+  appendStoredMessage("assistant", text);
+  target.dataset.saved = "true";
+}
+
+function appendStoredMessage(kind, text) {
+  const value = String(text || "").trim();
+  if (!value) {
+    return;
+  }
+  const messages = readStoredMessages();
+  messages.push({kind, text: value});
+  writeStoredMessages(messages);
+}
+
+function readStoredMessages() {
+  try {
+    const raw = window.sessionStorage.getItem(chatHistoryKey);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(isStoredMessage);
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredMessages(messages) {
+  try {
+    window.sessionStorage.setItem(chatHistoryKey, JSON.stringify(messages));
+  } catch {
+    // If browser storage is unavailable, the visible chat still works for the current page.
+  }
+}
+
+function isStoredMessage(value) {
+  return (
+    value &&
+    ["user", "assistant"].includes(value.kind) &&
+    typeof value.text === "string"
+  );
+}
+
+function isScrolledNearBottom(node) {
+  return node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+}
+
+function scrollMessagesToBottom(node = $("#messages")) {
+  node.scrollTop = node.scrollHeight;
 }
 
 function escapeHtml(value) {

@@ -218,6 +218,7 @@ td {
   height: min(620px, calc(100vh - 44px));
   display: grid;
   grid-template-rows: auto 1fr auto;
+  overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -257,7 +258,9 @@ td {
 }
 
 .messages {
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -265,12 +268,15 @@ td {
 }
 
 .message {
+  min-width: 0;
   max-width: 92%;
+  flex: 0 0 auto;
   padding: 10px 12px;
   border-radius: 8px;
   font-size: 14px;
   line-height: 1.45;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .message.user {
@@ -284,7 +290,6 @@ td {
   background: #eef3f4;
   color: var(--ink);
   white-space: normal;
-  overflow-x: auto;
 }
 
 .message.assistant p {
