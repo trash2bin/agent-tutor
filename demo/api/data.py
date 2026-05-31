@@ -8,10 +8,13 @@ from db.database import Database
 
 
 class DemoDataRepository:
+    """Repository for demo data access."""
+
     def __init__(self) -> None:
         self.db = Database()
 
     def overview(self) -> dict[str, Any]:
+        """Get an overview of all demo data."""
         conn = self.db.conn
         return {
             "stats": self._stats(conn),
@@ -110,3 +113,7 @@ class DemoDataRepository:
             """
         ).fetchall()
         return [dict(row) for row in rows]
+
+
+# Global data repository instance
+data_repository = DemoDataRepository()

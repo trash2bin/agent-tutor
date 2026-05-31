@@ -9,13 +9,15 @@ from starlette.staticfiles import StaticFiles
 from demo.settings import PROJECT_ROOT, settings
 
 
-STATIC_DIR = PROJECT_ROOT / "demo" / "static"
+STATIC_DIR = PROJECT_ROOT / "demo" / "web" / "static"
 
 
-async def index(_):
+async def index(_) -> FileResponse:
+    """Serve the main index.html page."""
     return FileResponse(STATIC_DIR / "index.html")
 
 
+# Create the web application
 app = Starlette(
     routes=[
         Route("/", index),
@@ -25,7 +27,8 @@ app = Starlette(
 
 
 def main() -> None:
-    uvicorn.run("demo.web:app", host=settings.web_host, port=settings.web_port, reload=False)
+    """Run the web server."""
+    uvicorn.run("demo.web.server:app", host=settings.web_host, port=settings.web_port, reload=False)
 
 
 if __name__ == "__main__":

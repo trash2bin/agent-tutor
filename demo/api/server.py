@@ -10,29 +10,28 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
-from demo.data import DemoDataRepository
-from demo.ollama_client import OllamaAssistant
+from demo.api.agent import agent
+from demo.api.data import data_repository
 from demo.settings import settings
 
 
-assistant = OllamaAssistant()
-data_repository = DemoDataRepository()
-
-
 async def health(_: Request) -> JSONResponse:
+    """Health check endpoint."""
     payload: dict[str, Any] = {"api": "ok"}
     try:
-        payload["ollama"] = await assistant.health()
+        payload["ollama"] = await agent.health()
     except Exception as exc:
         payload["ollama"] = {"status": "error", "error": str(exc)}
     return JSONResponse(payload)
 
 
 async def data(_: Request) -> JSONResponse:
+    """Get demo data overview."""
     return JSONResponse(data_repository.overview())
 
 
 async def chat(request: Request) -> StreamingResponse:
+    """Streaming chat endpoint that handles user messages."""
     body = await request.json()
     message = str(body.get("message", "")).strip()
     if not message:
@@ -40,7 +39,7 @@ async def chat(request: Request) -> StreamingResponse:
 
     async def events():
         try:
-            async for token in assistant.stream_answer(message):
+            async for token in agent.stream_answer(message):
                 yield _sse({"type": "token", "text": token})
             yield _sse({"type": "done"})
         except Exception as exc:
@@ -50,19 +49,23 @@ async def chat(request: Request) -> StreamingResponse:
 
 
 async def _single_error(text: str):
+    """Yield a single error event."""
     yield _sse({"type": "error", "text": text})
 
 
 def _sse(payload: dict[str, Any]) -> str:
+    """Format a payload as a Server-Sent Event."""
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def _format_error(exc: BaseException) -> str:
+    """Format an exception for error reporting."""
     if isinstance(exc, ExceptionGroup):
         return "; ".join(_format_error(item) for item in exc.exceptions)
     return str(exc)
 
 
+# Create the API application
 app = Starlette(
     routes=[
         Route("/health", health),
@@ -79,7 +82,8 @@ app.add_middleware(
 
 
 def main() -> None:
-    uvicorn.run("demo.api:app", host=settings.api_host, port=settings.api_port, reload=False)
+    """Run the API server."""
+    uvicorn.run("demo.api.server:app", host=settings.api_host, port=settings.api_port, reload=False)
 
 
 if __name__ == "__main__":
