@@ -4,47 +4,44 @@ import asyncio
 import json
 import logging
 import os
-import sys
+import re
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
-import httpx
+import litellm
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from demo.settings import PROJECT_ROOT, settings
 
-# Set up debug logging for agent operations
 logger = logging.getLogger("demo.api.agent")
 
+litellm.drop_params = True
+setattr(litellm, "set_verbose", os.environ.get("LITELLM_DEBUG", "false").lower() == "true")
 
-# System prompt for the assistant
-SYSTEM_PROMPT = """Ты университетский ассистент.
-Отвечай по-русски, кратко и по делу. Для данных о студентах, расписании,
-oценках, преподавателях и документах используй доступные MCP-инструменты.
+SYSTEM_PROMPT = """
+Ты университетский ассистент с доступом к базе данных через MCP-инструменты.
 
-Правила работы с документами:
-- Если пользователь спрашивает про доступные материалы, сначала найди студента
-  и его дисциплины, затем покажи материалы только по этим дисциплинам.
-- В списке материалов не пропускай PDF: документы с mime_type application/pdf
-  называй "Лекция (PDF)".
-- Если пользователь просит пересказать, найти или объяснить что-то внутри
-  документа, используй context_search_in_documents или search_documents, а не
-  только list_documents.
-- Не придумывай содержимое документов. Если найденных фрагментов мало, скажи
-  что данных недостаточно.
+КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА:
+1. Ты НЕ знаешь никаких данных о студентах, расписании, оценках, преподавателях или документах без инструментов.
+2. При любом вопросе о данных университета сначала используй соответствующий MCP-инструмент.
+3. Не выдумывай ответ из памяти.
+4. Если вопрос общий — отвечай кратко и по делу.
 
-Если данных не хватает, прямо скажи об этом и предложи уточнить запрос."""
-
+ПРАВИЛА ОТВЕТА:
+- Отвечай по-русски.
+- Если данных нет — прямо скажи об этом.
+- Если не понял запрос — уточни.
+"""
 
 @asynccontextmanager
 async def mcp_session() -> AsyncIterator[ClientSession]:
-    """Create and manage an MCP client session."""
     logger.debug("[AGENT] Creating MCP session...")
     server_path = str(PROJECT_ROOT / "server.py")
-    logger.debug(f"[AGENT] Starting MCP server at: {server_path}")
     params = StdioServerParameters(
         command=settings.python_executable,
         args=[server_path],
@@ -58,81 +55,111 @@ async def mcp_session() -> AsyncIterator[ClientSession]:
             logger.debug("[AGENT] MCP session closing")
 
 
-async def list_ollama_tools(session: ClientSession) -> list[dict[str, Any]]:
-    """List all available MCP tools from the server."""
+async def list_mcp_tools(session: ClientSession) -> list[dict[str, Any]]:
     result = await session.list_tools()
-    tools = []
-    for tool in result.tools:
-        tools.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "parameters": tool.inputSchema,
-                },
-            }
-        )
-    return tools
-
-
-async def call_tool(session: ClientSession, name: str, arguments: dict[str, Any]) -> str:
-    """Call an MCP tool and return the result as a string."""
-    try:
-        logger.debug(f"[AGENT] MCP call_tool: {name} with args: {arguments}")
-        result = await session.call_tool(name, arguments)
-        if result.isError:
-            error_text = _collect_text_content(result)
-            logger.warning(f"[AGENT] Tool {name} returned error: {error_text}")
-            return json.dumps({"error": error_text or f"Ошибка вызова инструмента {name}"}, ensure_ascii=False)
-
-        structured = getattr(result, "structuredContent", None)
-        if structured is not None:
-            logger.debug(f"[AGENT] Tool {name} returned structured: {structured}")
-            return json.dumps(structured, ensure_ascii=False)
-
-        content = _collect_text_content(result)
-        if not content:
-            logger.warning(f"[AGENT] Tool {name} returned empty content")
-        return content or f"Инструмент {name} вернул пустой результат"
-    except Exception as exc:
-        logger.exception(f"[AGENT] Exception calling tool {name}")
-        return json.dumps({"error": f"Ошибка при вызове инструмента {name}: {str(exc)}"}, ensure_ascii=False)
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description or "",
+                "parameters": tool.inputSchema,
+            },
+        }
+        for tool in result.tools
+    ]
 
 
 def _collect_text_content(result: Any) -> str:
-    """Collect text content from MCP tool result."""
-    parts = []
-    for item in getattr(result, "content", []) or []:
-        text = getattr(item, "text", None)
-        if text:
-            parts.append(text)
-    return "\n".join(parts)
+    return "\n".join(
+        getattr(item, "text", "")
+        for item in getattr(result, "content", []) or []
+        if getattr(item, "text", None)
+    )
 
 
-class OllamaAgent:
-    """Agent that handles Ollama communication, tool calling, and context management."""
+async def call_mcp_tool(session: ClientSession, name: str, arguments: dict[str, Any]) -> str:
+    try:
+        logger.debug(f"[AGENT] Calling MCP tool: {name} with args: {arguments}")
+        result = await session.call_tool(name, arguments)
 
+        if result.isError:
+            error_text = _collect_text_content(result)
+            return json.dumps(
+                {"ok": False, "error": error_text or f"Ошибка вызова инструмента {name}"},
+                ensure_ascii=False,
+            )
+
+        structured = getattr(result, "structuredContent", None)
+        if structured is not None:
+            return json.dumps({"ok": True, "data": structured}, ensure_ascii=False)
+
+        content = _collect_text_content(result)
+        return json.dumps({"ok": True, "data": content}, ensure_ascii=False)
+    except Exception as exc:
+        logger.exception(f"[AGENT] Exception calling tool {name}")
+        return json.dumps({"ok": False, "error": f"Ошибка при вызове {name}: {exc}"}, ensure_ascii=False)
+
+
+class LLMAgent:
     def __init__(self) -> None:
-        self.base_url = settings.ollama_url.rstrip("/")
-        self.model = settings.ollama_model
-        self.timeout = httpx.Timeout(settings.request_timeout)
+        model_name = settings.ollama_model
+        known_providers = (
+            "ollama/",
+            "ollama_chat/",
+            "openai/",
+            "anthropic/",
+            "deepseek/",
+            "huggingface/",
+            "mistral/",
+            "groq/",
+            "together_ai/",
+        )
+
+        if settings.ollama_url and not model_name.startswith(known_providers):
+            self.model = f"ollama_chat/{model_name}"
+        else:
+            self.model = model_name
+
+        self.api_base = settings.ollama_url.rstrip("/") if settings.ollama_url else None
+        self.timeout = settings.request_timeout
+        self.enable_thinking = os.environ.get("ENABLE_THINK", "true").lower() in ("1", "true", "yes")
+
         self.max_history_turns = int(os.environ.get("DEMO_HISTORY_TURNS", "8"))
         self.max_history_content_chars = int(os.environ.get("DEMO_HISTORY_CONTENT_CHARS", "6000"))
-        self._histories: dict[str, list[list[dict[str, Any]]]] = {}
+
+        self._memory_path = PROJECT_ROOT / ".agent_memory.json"
+        self._histories: dict[str, list[list[dict[str, Any]]]] = self._load_histories()
         self._session_locks: dict[str, asyncio.Lock] = {}
 
+    def _load_histories(self) -> dict[str, list[list[dict[str, Any]]]]:
+        if not self._memory_path.exists():
+            return {}
+        try:
+            data = json.loads(self._memory_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            logger.exception("[AGENT] Failed to load memory file")
+            return {}
+
+    def _save_histories(self) -> None:
+        tmp = self._memory_path.with_suffix(".json.tmp")
+        tmp.write_text(
+            json.dumps(self._histories, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp.replace(self._memory_path)
+
     async def stream_answer(self, user_message: str, session_id: str = "default") -> AsyncIterator[str]:
-        """Stream an answer to a user message, handling tool calls recursively."""
         session_id = self._normalize_session_id(session_id)
         logger.info(f"[AGENT] User message for session {session_id}: {user_message[:100]}...")
+
         lock = self._session_locks.setdefault(session_id, asyncio.Lock())
         async with lock:
             async for token in self._stream_answer_locked(user_message, session_id):
                 yield token
 
     async def _stream_answer_locked(self, user_message: str, session_id: str) -> AsyncIterator[str]:
-        """Stream an answer while the session history is locked."""
         turn_messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -140,201 +167,306 @@ class OllamaAgent:
             {"role": "user", "content": user_message},
         ]
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            await self._ensure_available(client)
-            async with mcp_session() as session:
-                tools = await list_ollama_tools(session)
-                logger.info(f"[AGENT] Available tools: {[t['function']['name'] for t in tools]}")
-                for _ in range(4):
-                    logger.info("[AGENT] Iteration - calling model...")
-                    message = await self._chat_once(client, messages, tools)
-                    logger.info(f"[AGENT] Model response: {json.dumps(message, ensure_ascii=False)[:200]}...")
-                    
-                    tool_calls = self._extract_tool_calls(message)
-                    logger.info(f"[AGENT] Extracted tool calls: {len(tool_calls)} - {tool_calls}")
-                    
-                    if not tool_calls:
-                        # No tool calls - this is the final model response
-                        if content := message.get("content"):
-                            logger.info(f"[AGENT] Final content: {content[:100]}...")
-                            turn_messages.append({"role": "assistant", "content": content})
-                            self._remember_turn(session_id, turn_messages)
-                            yield content
-                            return
-                        # If no content, continue to streaming final
-                        logger.info("[AGENT] No tool calls and no content, breaking to streaming...")
-                        break
+        async with mcp_session() as session:
+            tools = await list_mcp_tools(session)
+            logger.info(f"[AGENT] Available tools: {[t['function']['name'] for t in tools]}")
 
-                    # Model has tool calls to make
+            max_iterations = 4
+            empty_rounds = 0
+
+            for iteration in range(max_iterations):
+                logger.info(f"[AGENT] Iteration {iteration + 1}/{max_iterations} - calling model...")
+                message = await self._chat_once(messages, tools)
+                logger.info(f"[AGENT] Model response: {json.dumps(message, ensure_ascii=False)[:300]}...")
+
+                sanitized = self._sanitize_message(message)
+                tool_calls = self._extract_tool_calls(sanitized)
+                content = (sanitized.get("content") or "").strip()
+
+                if tool_calls:
                     logger.info(f"[AGENT] Processing {len(tool_calls)} tool call(s)")
-                    messages.append(message)
-                    turn_messages.append(message)
+                    messages.append(sanitized)
+                    turn_messages.append(sanitized)
+                    empty_rounds = 0
+
                     for tool_call in tool_calls:
                         name = tool_call["name"]
                         arguments = tool_call["arguments"]
-                        logger.info(f"[AGENT] Calling tool: {name} with args: {arguments}")
+                        tool_call_id = tool_call.get("id") or f"call_{name}_{uuid.uuid4().hex[:8]}"
+
+                        logger.info(f"[AGENT] Executing tool: {name}")
                         yield f"\n\n[tool:{name}]\n"
-                        tool_result = await call_tool(session, name, arguments)
-                        logger.info(f"[AGENT] Tool {name} result: {tool_result[:200]}...")
+
+                        tool_result = await call_mcp_tool(session, name, arguments)
+                        logger.info(f"[AGENT] Tool {name} result: {tool_result[:250]}...")
+
                         tool_message = {
                             "role": "tool",
                             "content": tool_result,
-                            "tool_name": name,
+                            "tool_call_id": tool_call_id,
+                            "name": name,
                         }
                         messages.append(tool_message)
                         turn_messages.append(tool_message)
-                else:
-                    # We went through all 4 iterations with tool calls
-                    # Model needs to give final answer via streaming
-                    logger.info("[AGENT] Used all 4 iterations, switching to streaming final...")
-                    has_tokens = False
-                    final_parts = []
-                    async for token in self._stream_final(client, messages):
-                        has_tokens = True
-                        final_parts.append(token)
-                        yield token
-                    if not has_tokens:
-                        logger.warning("[AGENT] No tokens from streaming final after 4 iterations")
-                        yield "Извините, модель завершила работу без ответа. Попробуйте уточнить запрос."
-                    else:
-                        turn_messages.append({"role": "assistant", "content": "".join(final_parts)})
-                        self._remember_turn(session_id, turn_messages)
+
+                    continue
+
+                if content:
+                    logger.info(f"[AGENT] Final content: {content}")
+                    messages.append(sanitized)
+                    turn_messages.append(sanitized)
+                    self._remember_turn(session_id, turn_messages)
+                    yield content
                     return
 
-                # If we broke from loop (no tool calls), check for content
-                # If there was content, we already returned above
-                # If there was no content, try streaming final
-                if not message.get("content"):
-                    logger.info("[AGENT] No content in final message, trying streaming final...")
-                    has_tokens = False
-                    final_parts = []
-                    async for token in self._stream_final(client, messages):
-                        has_tokens = True
-                        final_parts.append(token)
-                        yield token
-                    if not has_tokens:
-                        logger.warning("[AGENT] No tokens from streaming final")
-                        yield "Извините, модель завершила работу без ответа. Попробуйте уточнить запрос."
-                    else:
-                        turn_messages.append({"role": "assistant", "content": "".join(final_parts)})
-                        self._remember_turn(session_id, turn_messages)
+                empty_rounds += 1
+                logger.warning(
+                    "[AGENT] Model returned no content/tool_calls (reasoning only or empty). "
+                    f"empty_rounds={empty_rounds}"
+                )
 
-    async def health(self) -> dict[str, Any]:
-        """Check Ollama server health and available models."""
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
-            response = await client.get(f"{self.base_url}/api/tags")
-            response.raise_for_status()
-            data = response.json()
-        return {"status": "ok", "model": self.model, "models": data.get("models", [])}
+                # ВАЖНО: не возвращаем reasoning_content обратно в prompt.
+                # Даём только короткий системный пинок, без "user"-сообщения и без think-эхо.
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "Верни только tool_calls или финальный ответ. "
+                            "Не пиши reasoning_content и не повторяй внутренние рассуждения."
+                        ),
+                    }
+                )
 
-    async def _ensure_available(self, client: httpx.AsyncClient) -> None:
-        """Ensure Ollama server is available."""
-        try:
-            response = await client.get(f"{self.base_url}/api/tags")
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise RuntimeError(
-                f"Ollama недоступна по адресу {self.base_url}. "
-                "Запустите Ollama и проверьте OLLAMA_URL."
-            ) from exc
+                if empty_rounds >= 2:
+                    break
+
+            async for token in self._stream_and_save(messages, turn_messages, session_id):
+                yield token
+
+    async def _stream_and_save(
+        self,
+        messages: list[dict[str, Any]],
+        turn_messages: list[dict[str, Any]],
+        session_id: str,
+    ) -> AsyncIterator[str]:
+        final_parts: list[str] = []
+
+        async for token in self._stream_final(messages):
+            final_parts.append(token)
+            yield token
+
+        if not final_parts:
+            fallback_msg = "Извините, модель завершила работу без ответа. Попробуйте уточнить запрос."
+            yield fallback_msg
+            final_parts.append(fallback_msg)
+
+        turn_messages.append({"role": "assistant", "content": "".join(final_parts)})
+        self._remember_turn(session_id, turn_messages)
 
     async def _chat_once(
         self,
-        client: httpx.AsyncClient,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """Send a single chat request to Ollama."""
-        logger.debug(f"[AGENT] _chat_once: sending {len(messages)} messages, {len(tools)} tools")
-        response = await client.post(
-            f"{self.base_url}/api/chat",
-            json={
-                "model": self.model,
-                "messages": messages,
-                "tools": tools,
-                "stream": False,
-            },
+        extra_params: dict[str, Any] = {}
+        if self.enable_thinking:
+            extra_params["extra_body"] = {"think": True}
+        if self.api_base:
+            extra_params["api_base"] = self.api_base
+
+        response: Any = await litellm.acompletion(
+            model=self.model,
+            messages=self._prepare_messages_for_api(messages),
+            tools=tools,
+            stream=False,
+            timeout=self.timeout,
+            temperature=0.3,
+            **extra_params,
         )
-        response.raise_for_status()
-        result = response.json().get("message", {})
-        logger.debug(f"[AGENT] _chat_once: got content len={len(result.get('content', ''))}, tool_calls={bool(result.get('tool_calls'))}")
+
+        msg_obj = response.choices[0].message
+        result: dict[str, Any] = {
+            "role": getattr(msg_obj, "role", "assistant") or "assistant",
+            "content": getattr(msg_obj, "content", "") or "",
+        }
+
+        if getattr(msg_obj, "tool_calls", None):
+            result["tool_calls"] = [
+                {
+                    "id": getattr(tc, "id", None),
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments or "{}",
+                    },
+                }
+                for tc in msg_obj.tool_calls
+            ]
+
+        # reasonning_content оставляем только для логов, но НЕ для контекста
+        reasoning = getattr(msg_obj, "reasoning_content", None)
+        if reasoning:
+            result["reasoning_content"] = reasoning
+
         return result
 
-    async def _stream_final(
-        self,
-        client: httpx.AsyncClient,
-        messages: list[dict[str, Any]],
-    ) -> AsyncIterator[str]:
-        """Stream the final response from Ollama."""
-        logger.debug(f"[AGENT] _stream_final: starting with {len(messages)} messages")
-        async with client.stream(
-            "POST",
-            f"{self.base_url}/api/chat",
-            json={"model": self.model, "messages": messages, "stream": True},
-        ) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line:
-                    continue
-                chunk = json.loads(line)
-                content = chunk.get("message", {}).get("content", "")
-                if content:
-                    logger.debug(f"[AGENT] _stream_final: got token (len={len(content)})")
-                    yield content
-                else:
-                    logger.debug(f"[AGENT] _stream_final: empty content in chunk")
+    async def _stream_final(self, messages: list[dict[str, Any]]) -> AsyncIterator[str]:
+        extra_params: dict[str, Any] = {}
+        if self.enable_thinking:
+            extra_params["extra_body"] = {"think": True}
+        if self.api_base:
+            extra_params["api_base"] = self.api_base
+
+        response: Any = await litellm.acompletion(
+            model=self.model,
+            messages=self._prepare_messages_for_api(messages),
+            stream=True,
+            timeout=self.timeout,
+            **extra_params,
+        )
+
+        async for chunk in response:
+            if chunk.choices and getattr(chunk.choices[0].delta, "content", None):
+                yield chunk.choices[0].delta.content
+
+    @staticmethod
+    def _sanitize_message(message: dict[str, Any]) -> dict[str, Any]:
+        # Ключевой момент: hidden reasoning не должен жить в истории диалога
+        return {k: v for k, v in message.items() if k != "reasoning_content"}
 
     @staticmethod
     def _extract_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
-        """Extract tool calls from an Ollama message."""
         calls = []
-        for item in message.get("tool_calls") or []:
+
+        native_calls = message.get("tool_calls") or []
+        for item in native_calls:
             function = item.get("function") or {}
             name = function.get("name")
-            raw_args = function.get("arguments") or function.get("args") or {}
             if not name:
                 continue
-            if isinstance(raw_args, str):
-                try:
-                    arguments = json.loads(raw_args)
-                except json.JSONDecodeError:
-                    arguments = {}
-            else:
-                arguments = raw_args
-            calls.append({"name": name, "arguments": arguments})
+
+            raw_args = function.get("arguments") or "{}"
+            try:
+                arguments = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+            except json.JSONDecodeError:
+                arguments = {}
+
+            calls.append(
+                {
+                    "id": item.get("id") or f"call_{name}_{uuid.uuid4().hex[:8]}",
+                    "name": name,
+                    "arguments": arguments,
+                }
+            )
+
+        if calls:
+            return calls
+
+        text_content = message.get("content") or ""
+        if not text_content:
+            return []
+
+        potential_jsons = []
+
+        md_matches = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text_content, re.DOTALL)
+        potential_jsons.extend(md_matches)
+
+        if not potential_jsons:
+            start_idx = text_content.find("{")
+            end_idx = text_content.rfind("}")
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                potential_jsons.append(text_content[start_idx : end_idx + 1])
+
+        for json_str in potential_jsons:
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError:
+                continue
+
+            extracted_items = []
+            if "tool_calls" in data and isinstance(data["tool_calls"], list):
+                extracted_items = data["tool_calls"]
+            elif "tool_name" in data or "name" in data or "function" in data:
+                extracted_items = [data]
+
+            for item in extracted_items:
+                name = item.get("tool_name") or item.get("name")
+                args = item.get("arguments", {})
+
+                if not name and "function" in item and isinstance(item["function"], dict):
+                    name = item["function"].get("name")
+                    args = item["function"].get("arguments", args)
+
+                if not name:
+                    continue
+
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {}
+
+                calls.append(
+                    {
+                        "id": item.get("id") or f"call_{name}_{uuid.uuid4().hex[:8]}",
+                        "name": name,
+                        "arguments": args,
+                    }
+                )
+
         return calls
 
     @staticmethod
-    def _normalize_session_id(session_id: str) -> str:
-        """Normalize a chat session id for history lookup."""
-        session_id = str(session_id or "").strip()
-        return session_id[:128] if session_id else "default"
+    def _prepare_messages_for_api(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # НИКОГДА не возвращаем reasoning_content обратно в модель
+        return [{k: v for k, v in msg.items() if k != "reasoning_content"} for msg in messages]
+
+    def _remember_turn(self, session_id: str, turn_messages: list[dict[str, Any]]) -> None:
+        filtered: list[dict[str, Any]] = []
+        for message in turn_messages:
+            clean = self._compact_history_message(message)
+
+            # Не сохраняем пустые assistant-сообщения без tool_calls и без content
+            if clean.get("role") == "assistant":
+                has_content = bool((clean.get("content") or "").strip())
+                has_tool_calls = bool(clean.get("tool_calls"))
+                if not has_content and not has_tool_calls:
+                    continue
+
+            filtered.append(clean)
+
+        history = self._histories.setdefault(session_id, [])
+        history.append(filtered)
+
+        if len(history) > self.max_history_turns:
+            del history[: len(history) - self.max_history_turns]
+
+        self._save_histories()
+        logger.debug(f"[AGENT] Stored turn for session {session_id}; total turns={len(history)}")
+
+    def _compact_history_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        compact = {k: deepcopy(v) for k, v in message.items() if k != "reasoning_content"}
+        content = compact.get("content")
+        if isinstance(content, str) and len(content) > self.max_history_content_chars:
+            compact["content"] = content[: self.max_history_content_chars] + "\n\n...[обрезано в истории диалога]"
+        return compact
 
     def _history_messages(self, session_id: str) -> list[dict[str, Any]]:
-        """Return flattened message history for a session."""
         turns = self._histories.get(session_id, [])
         return [deepcopy(message) for turn in turns for message in turn]
 
-    def _remember_turn(self, session_id: str, turn_messages: list[dict[str, Any]]) -> None:
-        """Store a completed chat turn and keep history bounded."""
-        stored_turn = [self._compact_history_message(message) for message in turn_messages]
-        history = self._histories.setdefault(session_id, [])
-        history.append(stored_turn)
-        if len(history) > self.max_history_turns:
-            del history[: len(history) - self.max_history_turns]
-        logger.debug(f"[AGENT] Stored {len(stored_turn)} messages for session {session_id}; turns={len(history)}")
+    @staticmethod
+    def _normalize_session_id(session_id: str) -> str:
+        session_id = str(session_id or "").strip()
+        return session_id[:128] if session_id else "default"
 
-    def _compact_history_message(self, message: dict[str, Any]) -> dict[str, Any]:
-        """Copy a message for history and cap very large content fields."""
-        compact = deepcopy(message)
-        content = compact.get("content")
-        if isinstance(content, str) and len(content) > self.max_history_content_chars:
-            compact["content"] = (
-                content[: self.max_history_content_chars]
-                + "\n\n...[обрезано в истории диалога]"
-            )
-        return compact
+    async def health(self) -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "model": self.model,
+            "api_base": self.api_base,
+            "thinking_enabled": self.enable_thinking,
+        }
 
 
-# Global agent instance
-agent = OllamaAgent()
+agent = LLMAgent()
