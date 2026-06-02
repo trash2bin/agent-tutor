@@ -270,7 +270,7 @@ class LLMAgent:
                         token_usage=final_message.pop("_usage", None),
                     )
 
-                    reasoning = final_message.pop("reasoning_content", None)
+                    reasoning = final_message.get("reasoning_content")
                     tool_calls = self._extract_tool_calls(final_message)
                     content = (final_message.get("content") or "").strip()
 
@@ -353,12 +353,23 @@ class LLMAgent:
                             "empty_rounds": empty_rounds,
                         },
                     )
+
+                    # Дополнительно сохраняем reasoning_content в историю чтобы модель не тупила
+                    # если вдруг подумала и ничего не сделала
+                    if reasoning:
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": reasoning,
+                            }
+                        )
+
                     messages.append(
                         {
                             "role": "system",
                             "content": (
                                 "Верни только tool_calls или финальный ответ. "
-                                "Не пиши reasoning_content и не повторяй внутренние рассуждения."
+                                "Опирайся на предыдущие сообщения и reasoning_content и действуй"
                             ),
                         }
                     )
@@ -456,6 +467,12 @@ class LLMAgent:
         reasoning = getattr(msg_obj, "reasoning_content", None)
         if reasoning:
             result["reasoning_content"] = reasoning
+
+        # Логируем reasoning_content
+        if reasoning:
+            logger.info("[AGENT][REASONING]\n%s", reasoning)
+        else:
+            logger.warning("[AGENT] reasoning_content is empty")
 
         self._last_final_message = result
         yield AgentEvent("final", result)
