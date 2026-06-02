@@ -255,6 +255,14 @@ function handleEventChunk(chunk, target) {
       scrollMessagesToBottom(messages);
     }
   }
+  if (payload.type === "final") {
+    const messages = $("#messages");
+    const shouldStickToBottom = isScrolledNearBottom(messages);
+    setAssistantText(target, payload.text || "");
+    if (shouldStickToBottom) {
+      scrollMessagesToBottom(messages);
+    }
+  }
   if (payload.type === "done" && !(target.dataset.raw || "").trim()) {
     const fallback = "Модель не вернула текст. Попробуйте уточнить запрос.";
     target.dataset.raw = fallback;
@@ -271,6 +279,10 @@ function handleEventChunk(chunk, target) {
 
 function appendAssistantToken(target, text) {
   const raw = `${target.dataset.raw || ""}${text}`;
+  setAssistantText(target, raw);
+}
+
+function setAssistantText(target, raw) {
   target.dataset.raw = raw;
   target.innerHTML = renderAssistantMarkup(raw);
 }

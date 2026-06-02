@@ -189,13 +189,18 @@ class LLMAgent:
 
     async def stream_answer(self, user_message: str, session_id: str = "default") -> AsyncIterator[str]:
         """Backward-compatible token stream for the existing server.py."""
+        streamed_text = ""
         async for event in self.stream_events(user_message, session_id=session_id):
             if event.type == "token":
-                yield str(event.data)
+                token = str(event.data)
+                streamed_text += token
+                yield token
             elif event.type == "final":
                 content = event.data.get("content") if isinstance(event.data, dict) else None
                 if content:
-                    yield str(content)
+                    suffix = self._unstreamed_suffix(streamed_text, str(content))
+                    if suffix:
+                        yield suffix
 
     async def stream_sse(self, user_message: str, session_id: str = "default") -> AsyncIterator[str]:
         async for event in self.stream_events(user_message, session_id=session_id):
@@ -288,6 +293,7 @@ class LLMAgent:
                             },
                         )
 
+                        final_message["tool_calls"] = self._format_tool_calls_for_model(tool_calls)
                         messages.append(final_message)
                         turn_messages.append(final_message)
                         empty_rounds = 0
@@ -539,17 +545,11 @@ class LLMAgent:
             if not name:
                 continue
 
-            raw_args = function.get("arguments") or "{}"
-            try:
-                arguments = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-            except json.JSONDecodeError:
-                arguments = {}
-
             calls.append(
                 {
                     "id": item.get("id") or f"call_{name}_{uuid.uuid4().hex[:8]}",
                     "name": name,
-                    "arguments": arguments,
+                    "arguments": LLMAgent._parse_tool_arguments(function.get("arguments", {})),
                 }
             )
 
@@ -572,9 +572,8 @@ class LLMAgent:
                 potential_jsons.append(text_content[start_idx : end_idx + 1])
 
         for json_str in potential_jsons:
-            try:
-                data = json.loads(json_str)
-            except json.JSONDecodeError:
+            data = LLMAgent._parse_tool_arguments(json_str)
+            if not data:
                 continue
 
             extracted_items: list[dict[str, Any]] = []
@@ -594,21 +593,57 @@ class LLMAgent:
                 if not name:
                     continue
 
-                if isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except json.JSONDecodeError:
-                        args = {}
-
                 calls.append(
                     {
                         "id": item.get("id") or f"call_{name}_{uuid.uuid4().hex[:8]}",
                         "name": name,
-                        "arguments": args,
+                        "arguments": LLMAgent._parse_tool_arguments(args),
                     }
                 )
 
         return calls
+
+    @staticmethod
+    def _parse_tool_arguments(raw_args: Any) -> dict[str, Any]:
+        if isinstance(raw_args, dict):
+            return raw_args
+        if not isinstance(raw_args, str):
+            return {}
+
+        text = raw_args.strip()
+        if not text:
+            return {}
+
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            try:
+                parsed, end = json.JSONDecoder().raw_decode(text)
+            except json.JSONDecodeError:
+                return {}
+            if text[end:].strip():
+                logger.warning("[AGENT] Ignored extra data after tool arguments JSON: %r", text[end:].strip())
+
+        return parsed if isinstance(parsed, dict) else {}
+
+    @staticmethod
+    def _format_tool_calls_for_model(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        formatted: list[dict[str, Any]] = []
+        for tool_call in tool_calls:
+            name = tool_call.get("name")
+            if not name:
+                continue
+            formatted.append(
+                {
+                    "id": tool_call.get("id") or f"call_{name}_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(tool_call.get("arguments") or {}, ensure_ascii=False),
+                    },
+                }
+            )
+        return formatted
 
     def _remember_turn(self, session_id: str, turn_messages: list[dict[str, Any]]) -> None:
         filtered: list[dict[str, Any]] = []
@@ -637,11 +672,13 @@ class LLMAgent:
         content = compact.get("content")
         if isinstance(content, str) and len(content) > self.max_history_content_chars:
             compact["content"] = content[: self.max_history_content_chars] + "\n\n...[обрезано в истории диалога]"
+        if compact.get("role") == "assistant" and compact.get("tool_calls"):
+            compact["tool_calls"] = self._format_tool_calls_for_model(self._extract_tool_calls(compact))
         return compact
 
     def _history_messages(self, session_id: str) -> list[dict[str, Any]]:
         turns = self._histories.get(session_id, [])
-        return [deepcopy(message) for turn in turns for message in turn]
+        return [self._compact_history_message(message) for turn in turns for message in turn]
 
     @staticmethod
     def _normalize_session_id(session_id: str) -> str:
@@ -652,6 +689,14 @@ class LLMAgent:
     def _format_sse_event(event: AgentEvent) -> str:
         payload = json.dumps(event.data, ensure_ascii=False)
         return f"event: {event.type}\ndata: {payload}\n\n"
+
+    @staticmethod
+    def _unstreamed_suffix(streamed_text: str, final_text: str) -> str:
+        if not streamed_text:
+            return final_text
+        if final_text.startswith(streamed_text):
+            return final_text[len(streamed_text) :]
+        return ""
 
     async def health(self) -> dict[str, Any]:
         return {

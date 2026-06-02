@@ -68,8 +68,10 @@ async def chat(request: Request) -> StreamingResponse:
 
     async def events():
         try:
-            async for token in agent.stream_answer(message, session_id=session_id):
-                yield _sse({"type": "token", "text": token})
+            async for event in agent.stream_events(message, session_id=session_id):
+                payload = _event_payload(event.type, event.data)
+                if payload is not None:
+                    yield _sse(payload)
             yield _sse({"type": "done"})
         except Exception as exc:
             yield _sse({"type": "error", "text": _format_error(exc)})
@@ -85,6 +87,22 @@ async def _single_error(text: str):
 def _sse(payload: dict[str, Any]) -> str:
     """Format a payload as a Server-Sent Event."""
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _event_payload(event_type: str, data: Any) -> dict[str, Any] | None:
+    """Convert internal agent events to the browser-facing SSE payload."""
+    if event_type == "token":
+        return {"type": "token", "text": str(data)}
+    if event_type == "final":
+        text = data.get("content") if isinstance(data, dict) else ""
+        return {"type": "final", "text": str(text or "")}
+    if event_type == "tool_call":
+        name = data.get("name") if isinstance(data, dict) else ""
+        return {"type": "tool_call", "name": str(name or "")}
+    if event_type == "error":
+        text = data.get("message") if isinstance(data, dict) else data
+        return {"type": "error", "text": str(text or "")}
+    return None
 
 
 def _format_error(exc: BaseException) -> str:
