@@ -4,6 +4,7 @@ import json
 import logging
 import threading
 import time
+import sqlite3
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
@@ -16,16 +17,16 @@ logger = logging.getLogger("demo.api.sessions")
 
 def _create_sqlite_connection(db_path: str | Path) -> sqlite3.Connection:
     """Factory function to create a SQLite connection with proper setup.
-    
+
     Can be replaced with PostgreSQL/MySQL/Redis connection factory in the future.
-    
+
     Example for PostgreSQL:
         import psycopg2
         def _create_postgres_connection(dsn: str) -> psycopg2.connection:
             conn = psycopg2.connect(dsn)
             conn.autocommit = False
             return conn
-    
+
     Example for MySQL:
         import mysql.connector
         def _create_mysql_connection(config: dict) -> mysql.connector.connection:
@@ -41,7 +42,7 @@ def _create_sqlite_connection(db_path: str | Path) -> sqlite3.Connection:
 
 class SessionStore:
     """Persistent chat session history for the demo agent.
-    
+
     Uses dependency injection for database connection factory,
     allowing easy switching between SQLite, PostgreSQL, MySQL, etc.
     """
