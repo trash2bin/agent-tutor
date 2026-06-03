@@ -22,6 +22,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+logger = logging.getLogger("demo.api.server")
 
 # Enable debug logging for agent if DEMO_DEBUG is set
 if os.environ.get("DEMO_DEBUG", "").lower() in ("1", "true", "yes"):
@@ -91,17 +92,18 @@ def _sse(payload: dict[str, Any]) -> str:
 
 def _event_payload(event_type: str, data: Any) -> dict[str, Any] | None:
     """Convert internal agent events to the browser-facing SSE payload."""
+    logger.info(f"[SERVER] event_type: {event_type}, data: {data}")
     if event_type == "token":
         return {"type": "token", "text": data.get("data")}
     if event_type == "final":
         text = data.get("content") if isinstance(data, dict) else ""
-        return {"type": "final", "text": str(text or "")}
-    if event_type == "tool_call":
+        return {"type": "final", "text": text}
+    if event_type == "tool_result":
         name = data.get("name") if isinstance(data, dict) else ""
-        return {"type": "tool_call", "name": str(name or "")}
+        return {"type": "tool_call", "name": name}
     if event_type == "error":
         text = data.get("message") if isinstance(data, dict) else data
-        return {"type": "error", "text": str(text or "")}
+        return {"type": "error", "text": text}
     return None
 
 

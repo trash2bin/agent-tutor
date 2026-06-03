@@ -5,7 +5,7 @@ const chatHistoryKey = "agentTutorMessages";
 const state = {
   data: null,
   tab: "students",
-  filter: ""
+  filter: "",
 };
 
 const configs = {
@@ -15,36 +15,42 @@ const configs = {
       ["name", "ФИО"],
       ["group_name", "Группа"],
       ["speciality", "Специальность"],
-      ["course", "Курс"]
-    ]
+      ["course", "Курс"],
+    ],
   },
   schedule: {
     title: "Расписание",
     columns: [
       ["group_name", "Группа"],
       ["day", "День"],
-      ["lessons", "Пары"]
+      ["lessons", "Пары"],
     ],
     format: {
-      lessons: lessons => lessons.map(item => `${item.discipline_name}, ${item.teacher_name}, ауд. ${item.room}`).join("\n")
-    }
+      lessons: (lessons) =>
+        lessons
+          .map(
+            (item) =>
+              `${item.discipline_name}, ${item.teacher_name}, ауд. ${item.room}`,
+          )
+          .join("\n"),
+    },
   },
   disciplines: {
     title: "Дисциплины",
     columns: [
       ["name", "Название"],
-      ["description", "Описание"]
-    ]
+      ["description", "Описание"],
+    ],
   },
   teachers: {
     title: "Преподаватели",
     columns: [
       ["name", "ФИО"],
-      ["disciplines", "Дисциплины"]
+      ["disciplines", "Дисциплины"],
     ],
     format: {
-      disciplines: value => value.join(", ")
-    }
+      disciplines: (value) => value.join(", "),
+    },
   },
   documents: {
     title: "Документы",
@@ -52,8 +58,8 @@ const configs = {
       ["title", "Название"],
       ["discipline_name", "Дисциплина"],
       ["mime_type", "Тип"],
-      ["created_at", "Добавлен"]
-    ]
+      ["created_at", "Добавлен"],
+    ],
   },
   grades: {
     title: "Оценки",
@@ -61,9 +67,9 @@ const configs = {
       ["student_name", "Студент"],
       ["discipline_name", "Дисциплина"],
       ["grade", "Оценка"],
-      ["date", "Дата"]
-    ]
-  }
+      ["date", "Дата"],
+    ],
+  },
 };
 
 const metrics = [
@@ -72,10 +78,10 @@ const metrics = [
   ["disciplines", "дисциплин"],
   ["documents", "документов"],
   ["grades", "оценок"],
-  ["schedule", "дней расписания"]
+  ["schedule", "дней расписания"],
 ];
 
-const $ = selector => document.querySelector(selector);
+const $ = (selector) => document.querySelector(selector);
 
 async function init() {
   restoreChatHistory();
@@ -89,8 +95,12 @@ async function checkHealth() {
   try {
     const response = await fetch(`${apiBase}/health`);
     const data = await response.json();
-    status.textContent = data.ollama?.status === "ok" ? `API: ${data.ollama.model}` : "API: Ollama недоступна";
-    status.style.background = data.ollama?.status === "ok" ? "#eaf7f5" : "#fff7ed";
+    status.textContent =
+      data.ollama?.status === "ok"
+        ? `API: ${data.ollama.model}`
+        : "API: Ollama недоступна";
+    status.style.background =
+      data.ollama?.status === "ok" ? "#eaf7f5" : "#fff7ed";
     status.style.color = data.ollama?.status === "ok" ? "#0b5f59" : "#a15c07";
   } catch {
     status.textContent = "API: недоступен";
@@ -108,26 +118,32 @@ async function loadData() {
 
 function renderMetrics() {
   const root = $("#metrics");
-  root.innerHTML = metrics.map(([key, label]) => `
+  root.innerHTML = metrics
+    .map(
+      ([key, label]) => `
     <div class="metric">
       <b>${state.data.stats[key] ?? 0}</b>
       <span>${label}</span>
     </div>
-  `).join("");
+  `,
+    )
+    .join("");
 }
 
 function bindTabs() {
-  document.querySelectorAll(".tab").forEach(button => {
+  document.querySelectorAll(".tab").forEach((button) => {
     button.addEventListener("click", () => {
       state.tab = button.dataset.tab;
       state.filter = "";
       $("#filter").value = "";
-      document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === button));
+      document
+        .querySelectorAll(".tab")
+        .forEach((item) => item.classList.toggle("active", item === button));
       renderTable();
     });
   });
 
-  $("#filter").addEventListener("input", event => {
+  $("#filter").addEventListener("input", (event) => {
     state.filter = event.target.value.toLowerCase();
     renderTable();
   });
@@ -138,20 +154,23 @@ function renderTable() {
     return;
   }
   const config = configs[state.tab];
-  const rows = (state.data[state.tab] || []).filter(row => {
+  const rows = (state.data[state.tab] || []).filter((row) => {
     return JSON.stringify(row).toLowerCase().includes(state.filter);
   });
 
   $("#tableTitle").textContent = config.title;
-  $("#tableHead").innerHTML = `<tr>${config.columns.map(([, title]) => `<th>${escapeHtml(title)}</th>`).join("")}</tr>`;
-  $("#tableBody").innerHTML = rows.map(row => {
-    const cells = config.columns.map(([key]) => {
-      const formatter = config.format?.[key];
-      const value = formatter ? formatter(row[key] || []) : row[key];
-      return `<td>${escapeHtml(value ?? "—")}</td>`;
-    });
-    return `<tr>${cells.join("")}</tr>`;
-  }).join("");
+  $("#tableHead").innerHTML =
+    `<tr>${config.columns.map(([, title]) => `<th>${escapeHtml(title)}</th>`).join("")}</tr>`;
+  $("#tableBody").innerHTML = rows
+    .map((row) => {
+      const cells = config.columns.map(([key]) => {
+        const formatter = config.format?.[key];
+        const value = formatter ? formatter(row[key] || []) : row[key];
+        return `<td>${escapeHtml(value ?? "—")}</td>`;
+      });
+      return `<tr>${cells.join("")}</tr>`;
+    })
+    .join("");
 }
 
 function bindChat() {
@@ -171,22 +190,22 @@ function bindChat() {
     input.focus();
   });
 
-  input.addEventListener("keydown", event => {
+  input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       form.requestSubmit();
     }
   });
 
-  form.addEventListener("submit", async event => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const text = input.value.trim();
     if (!text) {
       return;
     }
     input.value = "";
-    addMessage("user", text, {persist: true});
-    const answer = addMessage("assistant", "", {persist: false});
+    addMessage("user", text, { persist: true });
+    const answer = addMessage("assistant", "", { persist: false });
     await streamChat(text, answer);
   });
 }
@@ -197,19 +216,19 @@ async function streamChat(message, target) {
   try {
     const response = await fetch(`${apiBase}/api/chat`, {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({message, session_id: sessionId})
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, session_id: sessionId }),
     });
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
 
     while (true) {
-      const {done, value} = await reader.read();
+      const { done, value } = await reader.read();
       if (done) {
         break;
       }
-      buffer += decoder.decode(value, {stream: true});
+      buffer += decoder.decode(value, { stream: true });
       const chunks = buffer.split("\n\n");
       buffer = chunks.pop();
       for (const chunk of chunks) {
@@ -238,11 +257,14 @@ function getSessionId() {
 }
 
 function createSessionId() {
-  return window.crypto?.randomUUID?.() || `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return (
+    window.crypto?.randomUUID?.() ||
+    `session-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  );
 }
 
 function handleEventChunk(chunk, target) {
-  const line = chunk.split("\n").find(item => item.startsWith("data:"));
+  const line = chunk.split("\n").find((item) => item.startsWith("data:"));
   if (!line) {
     return;
   }
@@ -261,6 +283,14 @@ function handleEventChunk(chunk, target) {
     setAssistantText(target, payload.text || "");
     if (shouldStickToBottom) {
       scrollMessagesToBottom(messages);
+    }
+  }
+  if (payload.type === "tool_call") {
+    const tools = JSON.parse(target.dataset.tools || "[]");
+    if (!tools.includes(payload.name)) {
+      tools.push(payload.name);
+      target.dataset.tools = JSON.stringify(tools);
+      setAssistantText(target, target.dataset.raw || "");
     }
   }
   if (payload.type === "done" && !(target.dataset.raw || "").trim()) {
@@ -284,25 +314,25 @@ function appendAssistantToken(target, text) {
 
 function setAssistantText(target, raw) {
   target.dataset.raw = raw;
-  target.innerHTML = renderAssistantMarkup(raw);
+  const tools = JSON.parse(target.dataset.tools || "[]");
+  target.innerHTML = renderAssistantMarkup(raw, tools);
 }
 
-function renderAssistantMarkup(raw) {
-  const toolNames = [];
-  let text = raw.replace(/\n*\[tool:([^\]]+)]\n*/g, (_, name) => {
-    toolNames.push(name);
-    return "\n";
-  }).trim();
-
+function renderAssistantMarkup(raw, toolNames = []) {
   const chunks = [];
+
+  // Вывод списка инструментов (или инструмента)
   if (toolNames.length) {
     const uniqueTools = [...new Set(toolNames)];
-    chunks.push(`<div class="tool-strip">${uniqueTools.map(name => `<span>tool: ${escapeHtml(name)}</span>`).join("")}</div>`);
+    chunks.push(
+      `<div class="tool-strip">${uniqueTools
+        .map((name) => `<span>tool: ${escapeHtml(name)}</span>`)
+        .join("")}</div>`,
+    );
   }
 
-  if (!text) {
-    return chunks.join("");
-  }
+  const text = raw.trim();
+  if (!text) return chunks.join("");
 
   const lines = text.split("\n");
   let i = 0;
@@ -323,7 +353,9 @@ function renderAssistantMarkup(raw) {
         items.push(lines[i].replace(/^\s*[-*]\s+/, ""));
         i += 1;
       }
-      chunks.push(`<ul>${items.map(item => `<li>${inlineMarkdown(item)}</li>`).join("")}</ul>`);
+      chunks.push(
+        `<ul>${items.map((item) => `<li>${inlineMarkdown(item)}</li>`).join("")}</ul>`,
+      );
       continue;
     }
 
@@ -333,7 +365,9 @@ function renderAssistantMarkup(raw) {
         items.push(lines[i].replace(/^\s*\d+\.\s+/, ""));
         i += 1;
       }
-      chunks.push(`<ol>${items.map(item => `<li>${inlineMarkdown(item)}</li>`).join("")}</ol>`);
+      chunks.push(
+        `<ol>${items.map((item) => `<li>${inlineMarkdown(item)}</li>`).join("")}</ol>`,
+      );
       continue;
     }
 
@@ -349,7 +383,9 @@ function renderAssistantMarkup(raw) {
       i += 1;
     }
     if (paragraph.length) {
-      chunks.push(`<p>${inlineMarkdown(paragraph.join("\n")).replaceAll("\n", "<br>")}</p>`);
+      chunks.push(
+        `<p>${inlineMarkdown(paragraph.join("\n")).replaceAll("\n", "<br>")}</p>`,
+      );
     }
     i += 1;
   }
@@ -359,15 +395,23 @@ function renderAssistantMarkup(raw) {
 
 function isTableStart(lines, index) {
   return Boolean(
-    lines[index]?.trim().startsWith("|") &&
-    lines[index + 1]?.includes("---")
+    lines[index]?.trim().startsWith("|") && lines[index + 1]?.includes("---"),
   );
 }
 
 function renderMarkdownTable(lines) {
   const rows = lines
-    .filter(line => !/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line))
-    .map(line => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(cell => cell.trim()));
+    .filter(
+      (line) => !/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line),
+    )
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^\|/, "")
+        .replace(/\|$/, "")
+        .split("|")
+        .map((cell) => cell.trim()),
+    );
 
   if (!rows.length) {
     return "";
@@ -377,8 +421,8 @@ function renderMarkdownTable(lines) {
   return `
     <div class="markdown-table">
       <table>
-        <thead><tr>${head.map(cell => `<th>${inlineMarkdown(cell)}</th>`).join("")}</tr></thead>
-        <tbody>${body.map(row => `<tr>${row.map(cell => `<td>${inlineMarkdown(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
+        <thead><tr>${head.map((cell) => `<th>${inlineMarkdown(cell)}</th>`).join("")}</tr></thead>
+        <tbody>${body.map((row) => `<tr>${row.map((cell) => `<td>${inlineMarkdown(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
       </table>
     </div>
   `;
@@ -395,7 +439,7 @@ function addMessage(kind, text, options = {}) {
   node.className = `message ${kind}`;
   if (kind === "assistant") {
     node.dataset.raw = text;
-    node.innerHTML = text ? renderAssistantMarkup(text) : "";
+    node.innerHTML = text ? renderAssistantMarkup(text, []) : "";
   } else {
     node.textContent = text;
   }
@@ -418,8 +462,8 @@ function restoreChatHistory() {
 
   const messages = $("#messages");
   messages.innerHTML = "";
-  storedMessages.forEach(message => {
-    addMessage(message.kind, message.text, {persist: false, scroll: false});
+  storedMessages.forEach((message) => {
+    addMessage(message.kind, message.text, { persist: false, scroll: false });
   });
   scrollMessagesToBottom(messages);
 }
@@ -439,7 +483,7 @@ function appendStoredMessage(kind, text) {
     return;
   }
   const messages = readStoredMessages();
-  messages.push({kind, text: value});
+  messages.push({ kind, text: value });
   writeStoredMessages(messages);
 }
 

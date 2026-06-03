@@ -72,7 +72,7 @@ class LLMAgent:
     ) -> None:
         """
         Initialize the agent with optional component overrides for testing.
-        
+
         Args:
             llm_client: LLM client for model interactions
             mcp_client: MCP client for tool interactions
