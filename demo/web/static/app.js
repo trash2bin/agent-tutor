@@ -114,9 +114,9 @@ async function checkHealth() {
 
 
 async function restoreServerHistory() {
-  const storageKey = "agentTutorSessionId";
   const messages = $("#messages");
   messages.innerHTML = "";
+  let pendingToolNames = [];
   
   try {
     if (!currentSessionId) {
@@ -135,18 +135,37 @@ async function restoreServerHistory() {
       if (msg.role === "user") {
         addMessage("user", msg.content || "", { persist: false, scroll: false });
       } else if (msg.role === "assistant") {
+        const toolNames = normalizeToolNames(msg.tool_calls);
+        const content = String(msg.content || "");
+
+        if (!content.trim() && toolNames.length > 0) {
+          pendingToolNames = normalizeToolNames([...pendingToolNames, ...toolNames]);
+          continue;
+        }
+
+        const mergedTools = normalizeToolNames([...pendingToolNames, ...toolNames]);
+        pendingToolNames = [];
+
         const node = document.createElement("div");
         node.className = "message assistant";
-        node.dataset.raw = msg.content || "";
-        const toolCalls = msg.tool_calls || [];
-        const toolNames = toolCalls.map(tc => tc.function?.name).filter(Boolean);
-        if (toolNames.length > 0) {
-          node.dataset.tools = JSON.stringify(toolNames);
+        node.dataset.raw = content;
+        if (mergedTools.length > 0) {
+          node.dataset.tools = JSON.stringify(mergedTools);
         }
-        node.innerHTML = msg.content ? renderAssistantMarkup(msg.content, toolNames) : "";
+        node.innerHTML = renderAssistantMarkup(content, mergedTools);
         messages.appendChild(node);
-        appendStoredMessage("assistant", msg.content || "", toolNames);
+        appendStoredMessage("assistant", content, mergedTools);
       }
+    }
+
+    if (pendingToolNames.length > 0) {
+      const node = document.createElement("div");
+      node.className = "message assistant";
+      node.dataset.raw = "";
+      node.dataset.tools = JSON.stringify(pendingToolNames);
+      node.innerHTML = renderAssistantMarkup("", pendingToolNames);
+      messages.appendChild(node);
+      appendStoredMessage("assistant", "", pendingToolNames);
     }
     
     scrollMessagesToBottom(messages);
@@ -477,6 +496,32 @@ function renderMarkdownTable(lines) {
   `;
 }
 
+function normalizeToolNames(toolCalls = []) {
+  if (!Array.isArray(toolCalls)) {
+    return [];
+  }
+
+  return toolCalls
+    .map((toolCall) => {
+      if (typeof toolCall === "string") {
+        return toolCall.trim();
+      }
+
+      if (!toolCall || typeof toolCall !== "object") {
+        return "";
+      }
+
+      const directName = toolCall.name ?? toolCall.tool_name;
+      if (typeof directName === "string") {
+        return directName.trim();
+      }
+
+      const functionName = toolCall.function?.name;
+      return typeof functionName === "string" ? functionName.trim() : "";
+    })
+    .filter(Boolean);
+}
+
 function inlineMarkdown(value) {
   return escapeHtml(value)
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
@@ -488,10 +533,11 @@ function addMessage(kind, text, options = {}) {
   node.className = `message ${kind}`;
   if (kind === "assistant") {
     node.dataset.raw = text;
-    if (options.tools) {
-      node.dataset.tools = JSON.stringify(options.tools);
+    const tools = normalizeToolNames(options.tools || []);
+    if (tools.length > 0) {
+      node.dataset.tools = JSON.stringify(tools);
     }
-    node.innerHTML = text ? renderAssistantMarkup(text, options.tools || []) : "";
+    node.innerHTML = renderAssistantMarkup(text, tools);
   } else {
     node.textContent = text;
   }
@@ -514,18 +560,41 @@ function restoreChatHistory() {
 
   const messages = $("#messages");
   messages.innerHTML = "";
+  let pendingToolNames = [];
   storedMessages.forEach((message) => {
-    if (message.kind === "assistant" && message.tools) {
+    if (message.kind === "assistant") {
+      const tools = normalizeToolNames(message.tools || []);
+      const text = String(message.text || "");
+
+      if (!text.trim() && tools.length > 0) {
+        pendingToolNames = normalizeToolNames([...pendingToolNames, ...tools]);
+        return;
+      }
+
+      const mergedTools = normalizeToolNames([...pendingToolNames, ...tools]);
+      pendingToolNames = [];
+
       const node = document.createElement("div");
       node.className = `message ${message.kind}`;
-      node.dataset.raw = message.text || "";
-      node.dataset.tools = JSON.stringify(message.tools);
-      node.innerHTML = message.text ? renderAssistantMarkup(message.text, message.tools) : "";
+      node.dataset.raw = text;
+      if (mergedTools.length > 0) {
+        node.dataset.tools = JSON.stringify(mergedTools);
+      }
+      node.innerHTML = renderAssistantMarkup(text, mergedTools);
       messages.appendChild(node);
     } else {
       addMessage(message.kind, message.text, { persist: false, scroll: false });
     }
   });
+
+  if (pendingToolNames.length > 0) {
+    const node = document.createElement("div");
+    node.className = "message assistant";
+    node.dataset.raw = "";
+    node.dataset.tools = JSON.stringify(pendingToolNames);
+    node.innerHTML = renderAssistantMarkup("", pendingToolNames);
+    messages.appendChild(node);
+  }
   scrollMessagesToBottom(messages);
 }
 
@@ -534,20 +603,21 @@ function saveAssistantMessage(target) {
     return;
   }
   const text = target.dataset.raw || target.textContent || "";
-  const tools = JSON.parse(target.dataset.tools || "[]");
+  const tools = normalizeToolNames(JSON.parse(target.dataset.tools || "[]"));
   appendStoredMessage("assistant", text, tools);
   target.dataset.saved = "true";
 }
 
 function appendStoredMessage(kind, text, tools = []) {
   const value = String(text || "").trim();
-  if (!value && tools.length === 0) {
+  const normalizedTools = normalizeToolNames(tools);
+  if (!value && normalizedTools.length === 0) {
     return;
   }
   const messages = readStoredMessages();
   const message = { kind, text: value };
-  if (tools && tools.length > 0) {
-    message.tools = tools;
+  if (normalizedTools.length > 0) {
+    message.tools = normalizedTools;
   }
   messages.push(message);
   writeStoredMessages(messages);
