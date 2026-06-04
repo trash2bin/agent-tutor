@@ -15,6 +15,7 @@ from starlette.routing import Route
 from demo.api.agent import agent
 from demo.api.backlog import backlog
 from demo.api.data import data_repository
+from demo.api.sessions import session_store
 from demo.settings import settings
 
 # Configure logging
@@ -57,6 +58,13 @@ async def backlog_detail(request: Request) -> JSONResponse:
     limit = int(request.query_params.get("limit", "500"))
     offset = int(request.query_params.get("offset", "0"))
     return JSONResponse(backlog.read_session(session_id, limit=limit, offset=offset))
+
+
+async def session_history(request: Request) -> JSONResponse:
+    """Get chat history for a session."""
+    session_id = str(request.query_params.get("session_id", "")) or "default"
+    history = session_store.history_messages(session_id)
+    return JSONResponse({"messages": history})
 
 
 async def chat(request: Request) -> StreamingResponse:
@@ -122,6 +130,7 @@ app = Starlette(
         Route("/api/chat", chat, methods=["POST"]),
         Route("/api/backlog", backlog_list),
         Route("/api/backlog/{session_id}", backlog_detail),
+        Route("/api/session/history", session_history, methods=["GET"]),
     ]
 )
 app.add_middleware(

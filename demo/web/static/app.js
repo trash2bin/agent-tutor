@@ -1,6 +1,7 @@
 const apiBase = window.DEMO_API_BASE || "http://127.0.0.1:8081";
 const sessionId = getSessionId();
 const chatHistoryKey = "agentTutorMessages";
+const storage = window.localStorage;
 
 const state = {
   data: null,
@@ -84,10 +85,9 @@ const metrics = [
 const $ = (selector) => document.querySelector(selector);
 
 async function init() {
-  restoreChatHistory();
   bindTabs();
   bindChat();
-  await Promise.all([loadData(), checkHealth()]);
+  await Promise.all([loadData(), checkHealth(), restoreServerHistory()]);
 }
 
 async function checkHealth() {
@@ -106,6 +106,62 @@ async function checkHealth() {
     status.textContent = "API: недоступен";
     status.style.background = "#fff1f3";
     status.style.color = "#b4235a";
+  }
+}
+
+async function restoreServerHistory() {
+  const storageKey = "agentTutorSessionId";
+  try {
+    const sessionId = storage.getItem(storageKey);
+    if (!sessionId) {
+      restoreChatHistory();
+      return;
+    }
+    
+    const response = await fetch(`${apiBase}/api/session/history?session_id=${encodeURIComponent(sessionId)}`);
+    if (!response.ok) {
+      restoreChatHistory();
+      return;
+    }
+    
+    const data = await response.json();
+    const serverMessages = data.messages || [];
+    
+    if (serverMessages.length === 0) {
+      restoreChatHistory();
+      return;
+    }
+    
+    // Восстанавливаем сообщения из сервера
+    const messages = $("#messages");
+    messages.innerHTML = "";
+    
+    for (const msg of serverMessages) {
+      if (msg.role === "user") {
+        addMessage("user", msg.content || "", { persist: false, scroll: false });
+      } else if (msg.role === "assistant") {
+        const node = document.createElement("div");
+        node.className = "message assistant";
+        node.dataset.raw = msg.content || "";
+        
+        // Извлекаем инструменты из tool_calls
+        const toolCalls = msg.tool_calls || [];
+        const toolNames = toolCalls.map(tc => tc.function?.name).filter(Boolean);
+        if (toolNames.length > 0) {
+          node.dataset.tools = JSON.stringify(toolNames);
+        }
+        
+        node.innerHTML = msg.content ? renderAssistantMarkup(msg.content, toolNames) : "";
+        messages.appendChild(node);
+        
+        // Сохраняем в localStorage
+        appendStoredMessage("assistant", msg.content || "", toolNames);
+      }
+    }
+    
+    scrollMessagesToBottom(messages);
+  } catch {
+    restoreChatHistory();
   }
 }
 
@@ -212,6 +268,8 @@ function bindChat() {
 
 async function streamChat(message, target) {
   target.dataset.raw = "";
+  target.dataset.tools = "[]";
+  target.dataset.saved = "false";
   target.innerHTML = '<span class="typing">Думаю и проверяю данные...</span>';
   try {
     const response = await fetch(`${apiBase}/api/chat`, {
@@ -244,12 +302,12 @@ async function streamChat(message, target) {
 function getSessionId() {
   const storageKey = "agentTutorSessionId";
   try {
-    const existing = window.sessionStorage.getItem(storageKey);
+    const existing = storage.getItem(storageKey);
     if (existing) {
       return existing;
     }
     const generated = createSessionId();
-    window.sessionStorage.setItem(storageKey, generated);
+    storage.setItem(storageKey, generated);
     return generated;
   } catch {
     return createSessionId();
@@ -290,8 +348,9 @@ function handleEventChunk(chunk, target) {
     if (!tools.includes(payload.name)) {
       tools.push(payload.name);
       target.dataset.tools = JSON.stringify(tools);
-      setAssistantText(target, target.dataset.raw || "");
     }
+    // Обновляем отображение с новыми инструментами, но не сбрасываем текст
+    setAssistantText(target, target.dataset.raw || "");
   }
   if (payload.type === "done" && !(target.dataset.raw || "").trim()) {
     const fallback = "Модель не вернула текст. Попробуйте уточнить запрос.";
@@ -439,14 +498,17 @@ function addMessage(kind, text, options = {}) {
   node.className = `message ${kind}`;
   if (kind === "assistant") {
     node.dataset.raw = text;
-    node.innerHTML = text ? renderAssistantMarkup(text, []) : "";
+    if (options.tools) {
+      node.dataset.tools = JSON.stringify(options.tools);
+    }
+    node.innerHTML = text ? renderAssistantMarkup(text, options.tools || []) : "";
   } else {
     node.textContent = text;
   }
   const messages = $("#messages");
   messages.appendChild(node);
   if (options.persist) {
-    appendStoredMessage(kind, text);
+    appendStoredMessage(kind, text, options.tools);
   }
   if (options.scroll !== false) {
     scrollMessagesToBottom(messages);
@@ -463,7 +525,16 @@ function restoreChatHistory() {
   const messages = $("#messages");
   messages.innerHTML = "";
   storedMessages.forEach((message) => {
-    addMessage(message.kind, message.text, { persist: false, scroll: false });
+    if (message.kind === "assistant" && message.tools) {
+      const node = document.createElement("div");
+      node.className = `message ${message.kind}`;
+      node.dataset.raw = message.text || "";
+      node.dataset.tools = JSON.stringify(message.tools);
+      node.innerHTML = message.text ? renderAssistantMarkup(message.text, message.tools) : "";
+      messages.appendChild(node);
+    } else {
+      addMessage(message.kind, message.text, { persist: false, scroll: false });
+    }
   });
   scrollMessagesToBottom(messages);
 }
@@ -473,23 +544,28 @@ function saveAssistantMessage(target) {
     return;
   }
   const text = target.dataset.raw || target.textContent || "";
-  appendStoredMessage("assistant", text);
+  const tools = JSON.parse(target.dataset.tools || "[]");
+  appendStoredMessage("assistant", text, tools);
   target.dataset.saved = "true";
 }
 
-function appendStoredMessage(kind, text) {
+function appendStoredMessage(kind, text, tools = []) {
   const value = String(text || "").trim();
-  if (!value) {
+  if (!value && tools.length === 0) {
     return;
   }
   const messages = readStoredMessages();
-  messages.push({ kind, text: value });
+  const message = { kind, text: value };
+  if (tools && tools.length > 0) {
+    message.tools = tools;
+  }
+  messages.push(message);
   writeStoredMessages(messages);
 }
 
 function readStoredMessages() {
   try {
-    const raw = window.sessionStorage.getItem(chatHistoryKey);
+    const raw = storage.getItem(chatHistoryKey);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) {
       return [];
@@ -502,7 +578,7 @@ function readStoredMessages() {
 
 function writeStoredMessages(messages) {
   try {
-    window.sessionStorage.setItem(chatHistoryKey, JSON.stringify(messages));
+    storage.setItem(chatHistoryKey, JSON.stringify(messages));
   } catch {
     // If browser storage is unavailable, the visible chat still works for the current page.
   }

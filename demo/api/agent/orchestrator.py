@@ -192,6 +192,7 @@ class LLMAgent:
                 )
 
                 empty_rounds = 0
+                is_finished = False
 
                 for iteration in range(self.max_iterations):
                     async for event in self._handle_iteration(
@@ -204,10 +205,12 @@ class LLMAgent:
                         tools,
                         empty_rounds,
                     ):
+                        if event.type == "final":
+                            is_finished = True
                         yield event
 
                     # Check if we should stop
-                    if empty_rounds >= self.max_empty_rounds:
+                    if is_finished or empty_rounds >= self.max_empty_rounds:
                         break
 
                 # Fallback if no final answer
