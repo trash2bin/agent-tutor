@@ -106,9 +106,12 @@ def _event_payload(event_type: str, data: Any) -> dict[str, Any] | None:
     if event_type == "final":
         text = data.get("content") if isinstance(data, dict) else ""
         return {"type": "final", "text": text}
-    if event_type == "tool_result":
+    if event_type == "tool_call":
         name = data.get("name") if isinstance(data, dict) else ""
         return {"type": "tool_call", "name": name}
+    if event_type == "tool_result":
+        name = data.get("name") if isinstance(data, dict) else ""
+        return {"type": "tool_result", "name": name}
     if event_type == "error":
         text = data.get("message") if isinstance(data, dict) else data
         return {"type": "error", "text": text}

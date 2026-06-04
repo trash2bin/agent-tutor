@@ -340,8 +340,7 @@ function handleEventChunk(chunk, target) {
       tools.push(payload.name);
       target.dataset.tools = JSON.stringify(tools);
     }
-    // Обновляем отображение с новыми инструментами, но не сбрасываем текст
-    setAssistantText(target, target.dataset.raw || "");
+    setAssistantText(target, target.textContent || target.dataset.raw || "");
   }
   if (payload.type === "done" && !(target.dataset.raw || "").trim()) {
     const fallback = "Модель не вернула текст. Попробуйте уточнить запрос.";
