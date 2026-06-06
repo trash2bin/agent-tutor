@@ -14,7 +14,7 @@ from demo.api.backlog import backlog
 from demo.settings import settings
 
 from .conversation import ConversationManager
-from .llm_client import LLMClient
+from .llm_client import LLMClient, create_client
 from .mcp_client import MCPClient
 from .tool_parser import ToolCallParser
 from .types import (
@@ -79,7 +79,7 @@ class LLMAgent:
             conversation_manager: Manager for conversation history
         """
         # Initialize components
-        self.llm_client = llm_client or self._create_llm_client()
+        self.llm_client = llm_client or create_client()
         self.mcp_client = mcp_client or MCPClient()
         self.conversation_manager = (
             conversation_manager or ConversationManager()
@@ -89,41 +89,6 @@ class LLMAgent:
         # Configuration from settings
         self.max_iterations = settings.agent_max_iterations
         self.max_empty_rounds = settings.agent_max_empty_rounds
-
-    def _create_llm_client(self) -> LLMClient:
-        """Create LLM client from settings."""
-        model_name = settings.ollama_model
-        known_providers = (
-            "ollama/",
-            "ollama_chat/",
-            "openai/",
-            "anthropic/",
-            "deepseek/",
-            "huggingface/",
-            "mistral/",
-            "groq/",
-            "together_ai/",
-        )
-
-        if settings.ollama_url and not model_name.startswith(known_providers):
-            model = f"ollama_chat/{model_name}"
-        else:
-            model = model_name
-
-        api_base = (
-            settings.ollama_url.rstrip("/")
-            if settings.ollama_url
-            else None
-        )
-
-        return LLMClient(
-            model=model,
-            api_base=api_base,
-            timeout=settings.request_timeout,
-            temperature=settings.agent_temperature,
-            max_tokens_thinking=settings.agent_max_tokens_thinking,
-            enable_thinking=settings.think_mode,
-        )
 
     async def stream_answer(
         self, user_message: str, session_id: SessionId = "default"

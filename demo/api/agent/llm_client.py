@@ -233,3 +233,50 @@ class LLMClient:
     def last_final_message(self) -> dict[str, Any] | None:
         """Get the last final message (for fallback logic)."""
         return self._last_final_message
+
+
+def create_client() -> LLMClient:
+    """
+    Factory function to create LLM client based on environment settings.
+
+    Priority order:
+    1. Mistral API (if MISTRAL_API_KEY is set)
+    2. Ollama (default fallback)
+
+    For Mistral:
+    - export MISTRAL_API_KEY="your-key"
+    - export MISTRAL_MODEL="mistral/mistral-small"  # optional
+
+    For Ollama:
+    - export OLLAMA_URL="http://127.0.0.1:11434"  # optional
+    - export OLLAMA_MODEL="qwen2.5:0.5b"  # optional
+    """
+    # Mistral takes priority if API key exists
+    if settings.mistral_api_key:
+        model = settings.mistral_model
+        if not model.startswith("mistral/"):
+            model = f"mistral/{model}"
+        api_base = None  # LiteLLM handles Mistral's default API base
+    else:
+        # Ollama configuration
+        model_name = settings.ollama_model
+        known_providers = (
+            "ollama/", "ollama_chat/", "openai/", "anthropic/",
+            "deepseek/", "huggingface/", "mistral/", "groq/", "together_ai/",
+        )
+
+        if settings.ollama_url and not model_name.startswith(known_providers):
+            model = f"ollama_chat/{model_name}"
+        else:
+            model = model_name
+
+        api_base = settings.ollama_url.rstrip("/") if settings.ollama_url else None
+
+    return LLMClient(
+        model=model,
+        api_base=api_base,
+        timeout=settings.request_timeout,
+        temperature=settings.agent_temperature,
+        max_tokens_thinking=settings.agent_max_tokens_thinking,
+        enable_thinking=settings.think_mode,
+    )

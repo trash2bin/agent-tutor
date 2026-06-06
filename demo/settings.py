@@ -15,6 +15,10 @@ class DemoSettings:
     web_port: int = int(os.environ.get("DEMO_WEB_PORT", "8080"))
     ollama_url: str = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
     ollama_model: str = os.environ.get("OLLAMA_MODEL", "qwen2.5:0.5b")
+
+    mistral_api_key: str | None = os.environ.get("MISTRAL_API_KEY")
+    mistral_model: str = os.environ.get("MISTRAL_MODEL", "mistral/mistral-small")
+
     request_timeout: float = float(os.environ.get("DEMO_REQUEST_TIMEOUT", 120*5))
     python_executable: str = os.environ.get("PYTHON_EXECUTABLE", sys.executable or "python3")
     think_mode: bool = os.environ.get("ENABLE_THINK", "true").lower() in ("1", "true", "yes")

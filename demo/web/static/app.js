@@ -9,6 +9,16 @@ const state = {
   filter: "",
 };
 
+// SSE Debug logging
+const sseDebug =
+  window.DEMO_DEBUG === "1" || window.location.search.includes("sse_debug=1");
+function sseLog(...args) {
+  if (sseDebug) console.log("[SSE]", ...args);
+}
+
+// Constants
+const THINKING_MESSAGE = "Думаю и проверяю данные...";
+
 const configs = {
   students: {
     title: "Студенты",
@@ -286,33 +296,40 @@ function bindChat() {
 
 async function streamChat(message, target) {
   target.classList.add("is-thinking");
-  target.dataset.raw = "Думаю и проверяю данные...";
+  //target.dataset.raw = THINKING_MESSAGE;
   target.dataset.tools = "[]";
   target.dataset.saved = "false";
-  target.innerHTML = renderAssistantMarkup("Думаю и проверяю данные...");
+  //target.innerHTML = renderAssistantMarkup(THINKING_MESSAGE);
+  sseLog("Stream started, message:", message.substring(0, 50));
   try {
     const response = await fetch(`${apiBase}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message, session_id: currentSessionId }),
     });
+    sseLog("SSE connection established, status:", response.status);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let chunkCount = 0;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
+        sseLog("SSE stream completed, total chunks:", chunkCount);
         break;
       }
       buffer += decoder.decode(value, { stream: true });
       const chunks = buffer.split("\n\n");
       buffer = chunks.pop();
       for (const chunk of chunks) {
+        chunkCount++;
+        sseLog("Chunk #" + chunkCount + ":", chunk.substring(0, 100));
         handleEventChunk(chunk, target);
       }
     }
   } catch (error) {
+    sseLog("SSE error:", error);
     target.classList.add("error");
     target.textContent = `Ошибка: ${error.message}`;
   }
@@ -343,15 +360,18 @@ function createSessionId() {
 function handleEventChunk(chunk, target) {
   const line = chunk.split("\n").find((item) => item.startsWith("data:"));
   if (!line) {
+    sseLog("No data line found in chunk");
     return;
   }
   const payload = JSON.parse(line.slice(5).trim());
+  sseLog("Event type:", payload.type, payload);
   const wasThinking = target.classList.contains("is-thinking");
   clearAssistantThinking(target);
   if (payload.type === "token") {
+    sseLog("Token received:", payload.text?.substring(0, 50));
     const messages = $("#messages");
     const shouldStickToBottom = isScrolledNearBottom(messages);
-    if (wasThinking) {
+    if (target.dataset.raw === THINKING_MESSAGE) {
       target.dataset.raw = "";
       target.innerHTML = "";
     }
@@ -361,11 +381,12 @@ function handleEventChunk(chunk, target) {
     }
   }
   if (payload.type === "final") {
+    sseLog("Final text received:", payload.text?.substring(0, 100));
     const messages = $("#messages");
     const shouldStickToBottom = isScrolledNearBottom(messages);
     const currentRaw = target.dataset.raw || "";
     const finalText = typeof payload.text === "string" ? payload.text : "";
-    if (wasThinking) {
+    if (target.dataset.raw === THINKING_MESSAGE) {
       target.dataset.raw = "";
       target.innerHTML = "";
     }
@@ -375,6 +396,7 @@ function handleEventChunk(chunk, target) {
     }
   }
   if (payload.type === "tool_call") {
+    sseLog("Tool call:", payload.name, payload.arguments);
     const tools = JSON.parse(target.dataset.tools || "[]");
     if (!tools.includes(payload.name)) {
       tools.push(payload.name);
@@ -383,14 +405,17 @@ function handleEventChunk(chunk, target) {
     ensureAssistantToolStrip(target, tools);
   }
   if (payload.type === "done" && !(target.dataset.raw || "").trim()) {
+    sseLog("Done event (empty response)");
     const fallback = "Модель не вернула текст. Попробуйте уточнить запрос.";
     target.dataset.raw = fallback;
     target.textContent = fallback;
   }
   if (payload.type === "done") {
+    sseLog("Done event - saving message");
     saveAssistantMessage(target);
   }
   if (payload.type === "error") {
+    sseLog("Error event:", payload.text);
     target.classList.add("error");
     target.textContent = `Ошибка: ${payload.text}`;
   }

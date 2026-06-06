@@ -179,6 +179,9 @@ uv tool install . --reinstall
 # API сервер (порт по умолчанию 8081)
 uv run python -m demo.api.server
 
+# Запуск с Mostral
+DEMO_DEBUG=1 MISTRAL_API_KEY={TOKEN} MISTRAL_MODEL=mistral-medium uv run python -m demo.api.server
+
 # Веб-сервер (порт по умолчанию 8080)
 uv run python -m demo.web.server
 ```
