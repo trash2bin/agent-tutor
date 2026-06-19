@@ -13,6 +13,8 @@ class DemoSettings:
     api_port: int = int(os.environ.get("DEMO_API_PORT", "8081"))
     web_host: str = os.environ.get("DEMO_WEB_HOST", "127.0.0.1")
     web_port: int = int(os.environ.get("DEMO_WEB_PORT", "8080"))
+    web_origin: str = os.environ.get("WEB_ORIGIN", "*")
+    api_bearer_token: str | None = os.environ.get("API_BEARER_TOKEN")
     ollama_url: str = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
     ollama_model: str = os.environ.get("OLLAMA_MODEL", "qwen2.5:0.5b")
 
