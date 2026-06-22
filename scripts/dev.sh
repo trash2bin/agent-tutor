@@ -108,7 +108,7 @@ cmd_start() {
   # Проверка что .venv синхронизирован
   if [ ! -d "$PROJECT_ROOT/.venv" ]; then
     echo "⚠️  .venv not found, running uv sync..."
-    (cd "$PROJECT_ROOT" && uv sync)
+    (cd "$PROJECT_ROOT" && uv sync --all-extras)
   fi
 
   # Напоминание про PostgreSQL, если задан DATABASE_URL

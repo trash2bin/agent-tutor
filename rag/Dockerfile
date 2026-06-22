@@ -1,5 +1,6 @@
 # ============================================================
-# RAG-сервис: embeddings, ChromaDB, документы
+# RAG service: embeddings, ChromaDB, document parsing
+# Only image that pulls sentence-transformers → torch
 # ============================================================
 FROM python:3.12-slim AS builder
 
@@ -7,9 +8,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project --no-dev
+RUN uv sync --frozen --no-install-project --no-dev --extra rag
 COPY . .
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra rag
 
 FROM python:3.12-slim
 

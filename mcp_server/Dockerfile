@@ -1,5 +1,6 @@
 # ============================================================
-# MCP-сервер: FastMCP + инструменты (чтение БД, клиент RAG)
+# MCP server: FastMCP + tools (DB reader + RAG client)
+# Core deps only — no torch, no chromadb
 # ============================================================
 FROM python:3.12-slim AS builder
 

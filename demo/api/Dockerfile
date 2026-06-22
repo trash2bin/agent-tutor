@@ -1,5 +1,6 @@
 # ============================================================
-# API-сервер: LiteLLM-агент, история сессий, бэклог
+# API server: LiteLLM agent, session history, backlog
+# Core deps + litellm — no torch, no chromadb
 # ============================================================
 FROM python:3.12-slim AS builder
 
@@ -7,9 +8,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project --no-dev
+RUN uv sync --frozen --no-install-project --no-dev --extra api
 COPY . .
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra api
 
 FROM python:3.12-slim
 
