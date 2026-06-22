@@ -1,21 +1,28 @@
-"""RAG-система."""
+"""RAG-система.
+
+Все тяжелые импорты (docling, chonkie, sentence-transformers, chromadb)
+загружаются лениво — только при вызове create_rag_pipeline().
+Это позволяет сервисам, не использующим RAG напрямую (mcp, api, web),
+не тащить эти зависимости.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from rag.config import RagConfig
-from rag.parser import DocumentParser
-from rag.chunker import TextChunker
-from rag.embeddings import SentenceTransformerEmbedding
-from rag.repository import DocumentRepository
-from rag.vector_store import ChromaDBVectorStore
-from rag.pipeline import RAGPipeline
+
+if TYPE_CHECKING:
+    from rag.chunker import TextChunker
+    from rag.embeddings import SentenceTransformerEmbedding
+    from rag.parser import DocumentParser
+    from rag.pipeline import RAGPipeline
+    from rag.repository import DocumentRepository
+    from rag.vector_store import ChromaDBVectorStore
 
 
 __all__ = [
     "RagConfig",
-    "RAGPipeline",
     "create_rag_pipeline",
 ]
 
@@ -29,13 +36,21 @@ class ConnectionProvider:
 def create_rag_pipeline(
     connection: Any | ConnectionProvider,
     config: RagConfig | None = None,
-) -> RAGPipeline:
+) -> "RAGPipeline":
     """Создать RAG-пайплайн.
 
     Принимает DBAPI2-совместимое соединение (или provider с полем connection).
     Если у соединения есть атрибут `_adapter` или передан объект Database,
     попытается получить адаптер из connector.adapt_sql.
     """
+    # Ленивые импорты — docling, chonkie, sentence-transformers, chromadb
+    from rag.chunker import TextChunker
+    from rag.embeddings import SentenceTransformerEmbedding
+    from rag.parser import DocumentParser
+    from rag.pipeline import RAGPipeline
+    from rag.repository import DocumentRepository
+    from rag.vector_store import ChromaDBVectorStore
+
     if config is None:
         config = RagConfig.from_env()
 

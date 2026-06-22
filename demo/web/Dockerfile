@@ -1,5 +1,6 @@
 # ============================================================
-# WEB-сервер: статика + reverse-proxy к API
+# WEB server: static files + reverse-proxy to API
+# Core deps only — the lightest image (<100MB)
 # ============================================================
 FROM python:3.12-slim AS builder
 

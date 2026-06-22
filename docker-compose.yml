@@ -54,6 +54,7 @@ services:
     environment:
       - CHROMA_PATH=/data/rag/chroma_db
       - DB_PATH=/data/rag/university.db
+      - DATABASE_URL=postgresql://tutor:tutor@db:5432/agent_tutor
       - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
       - RAG_DEVICE=${RAG_DEVICE:-cpu}
       - RAG_CHUNKER_TYPE=${RAG_CHUNKER_TYPE:-semantic}
@@ -62,6 +63,9 @@ services:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8082/health"]
       <<: *hc-curl
       start_period: 120s
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - agent-tutor-net
     <<: *restart
@@ -78,10 +82,13 @@ services:
     environment:
       - RAG_SERVICE_URL=http://rag:8082
       - DB_PATH=/data/app/university.db
+      - DATABASE_URL=postgresql://tutor:tutor@db:5432/agent_tutor
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8083/health"]
       <<: *hc-curl
     depends_on:
+      db:
+        condition: service_healthy
       rag:
         condition: service_healthy
     networks:
@@ -160,6 +167,7 @@ services:
     environment:
       - RAG_SERVICE_URL=http://rag:8082
       - DB_PATH=/data/app/university.db
+      - DATABASE_URL=postgresql://tutor:tutor@db:5432/agent_tutor
       - CHROMA_PATH=/data/rag/chroma_db
       - DOCGEN_MODEL=${DOCGEN_MODEL:-qwen2.5:0.5b}
       - DOCGEN_OLLAMA_URL=${DOCGEN_OLLAMA_URL:-http://host.docker.internal:11434/api/generate}
@@ -168,6 +176,8 @@ services:
       - RAG_DEVICE=${RAG_DEVICE:-cpu}
       - RAG_LOCAL_FILES_ONLY=${RAG_LOCAL_FILES_ONLY:-0}
     depends_on:
+      db:
+        condition: service_healthy
       rag:
         condition: service_healthy
     networks:
