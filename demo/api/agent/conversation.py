@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, cast
-from weakref import WeakValueDictionary
 
 from .types import SessionId, TurnMessages
 from demo.api.sessions import session_store
@@ -17,15 +16,13 @@ class ConversationManager:
     """Manages conversation history and session state."""
 
     def __init__(self) -> None:
-        self._session_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+        self._session_locks: dict[str, asyncio.Lock] = {}
 
     def get_history_messages(self, session_id: SessionId) -> list[dict[str, Any]]:
         """Get history messages for a session."""
         return session_store.history_messages(session_id)
 
-    def remember_turn(
-        self, session_id: SessionId, messages: TurnMessages
-    ) -> None:
+    def remember_turn(self, session_id: SessionId, messages: TurnMessages) -> None:
         """Save turn messages to session history."""
         session_store.append_turn(session_id, cast(list[dict[str, Any]], messages))
         logger.debug("[CONVERSATION] Stored turn for session %s", session_id)

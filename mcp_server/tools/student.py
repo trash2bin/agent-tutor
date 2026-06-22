@@ -2,6 +2,7 @@ from typing import Optional
 from db.database import Database
 from db.models import Student, ScheduleEntry
 
+
 class StudentTools:
     def __init__(self, db: Database):
         self.db = db
@@ -14,6 +15,8 @@ class StudentTools:
         """Get student information by name"""
         return self.db.get_id_student(name)
 
-    def get_schedule(self, group_id: str, day: str | None = None) -> list[ScheduleEntry]:
+    def get_schedule(
+        self, group_id: str, day: str | None = None
+    ) -> list[ScheduleEntry]:
         """Get schedule for a group"""
         return self.db.get_schedule(group_id, day)

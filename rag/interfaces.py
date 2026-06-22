@@ -3,6 +3,7 @@
 Позволяют подменять реализацию эмбеддингов и векторного хранилища
 без изменения кода пайплайна (локально → remote → микросервис).
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable

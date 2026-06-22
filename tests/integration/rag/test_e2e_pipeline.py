@@ -65,12 +65,13 @@ class TestRAGE2E:
     def test_import_and_search_roundtrip(self, e2e_pipeline, temp_dir):
         """Import a document → verify it's searchable."""
         txt = create_sample_txt(
-            temp_dir, "algorithms.txt",
+            temp_dir,
+            "algorithms.txt",
             "Quick sort is an efficient divide-and-conquer sorting algorithm. "
             "It works by selecting a pivot element and partitioning the array. "
             "Merge sort is another divide-and-conquer algorithm. "
             "Binary search finds elements in O(log n) time. "
-            "Hash tables provide O(1) average lookup time."
+            "Hash tables provide O(1) average lookup time.",
         )
 
         result = e2e_pipeline.import_document(
@@ -111,10 +112,11 @@ class TestRAGE2E:
     def test_build_rag_context(self, e2e_pipeline, temp_dir):
         """build_rag_context returns instruction + chunks."""
         txt = create_sample_txt(
-            temp_dir, "context_test.txt",
+            temp_dir,
+            "context_test.txt",
             "Python is a high-level programming language. "
             "It supports multiple programming paradigms including OOP and functional. "
-            "Python's standard library is extensive."
+            "Python's standard library is extensive.",
         )
         e2e_pipeline.import_document(path=str(txt), title="Python Guide")
 
@@ -145,10 +147,7 @@ class TestRAGE2E:
 
     def test_import_twice_reimports(self, e2e_pipeline, temp_dir):
         """Import the same file twice → replaces old version."""
-        txt = create_sample_txt(
-            temp_dir, "updated.txt",
-            "Version one of the document."
-        )
+        txt = create_sample_txt(temp_dir, "updated.txt", "Version one of the document.")
         r1 = e2e_pipeline.import_document(path=str(txt), title="Version 1")
         doc_id_1 = r1.document.id
 

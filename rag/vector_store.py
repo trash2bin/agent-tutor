@@ -1,4 +1,5 @@
 """Векторное хранилище (ChromaDB)."""
+
 from __future__ import annotations
 
 import logging
@@ -8,7 +9,6 @@ import chromadb
 from chromadb.api.types import Embeddings, Metadata
 
 from rag.config import RagConfig
-from rag.embeddings import SentenceTransformerEmbedding
 from rag.interfaces import EmbeddingProtocol, VectorStoreProtocol
 from rag.models import RagSearchResult
 
@@ -66,7 +66,9 @@ class ChromaDBVectorStore(VectorStoreProtocol):
                     }
                 )
 
-            embeddings = cast(Embeddings, self.embedding_service.encode_batched(batch_texts))
+            embeddings = cast(
+                Embeddings, self.embedding_service.encode_batched(batch_texts)
+            )
             self.collection.add(
                 ids=batch_ids,
                 documents=batch_texts,
@@ -90,7 +92,9 @@ class ChromaDBVectorStore(VectorStoreProtocol):
         limit: int = 5,
     ) -> list[RagSearchResult]:
         """Семантический поиск."""
-        query_emb: Embeddings = cast(Embeddings, self.embedding_service.encode_batched([query]))
+        query_emb: Embeddings = cast(
+            Embeddings, self.embedding_service.encode_batched([query])
+        )
 
         query_result = self.collection.query(
             query_embeddings=query_emb,
@@ -114,7 +118,8 @@ class ChromaDBVectorStore(VectorStoreProtocol):
                     document_id=self._meta_str(metadata.get("document_id", "")),
                     document_title=self._meta_str(metadata.get("document_title", "")),
                     source_path=self._meta_str(metadata.get("source_path", "")),
-                    discipline_id=self._meta_str(metadata.get("discipline_id", "")) or None,
+                    discipline_id=self._meta_str(metadata.get("discipline_id", ""))
+                    or None,
                     chunk_id=str(chunk_id),
                     chunk_index=self._meta_int(metadata.get("chunk_index", 0)),
                     page=page if page >= 0 else None,

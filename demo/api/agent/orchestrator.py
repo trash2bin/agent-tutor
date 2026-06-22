@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import uuid
@@ -22,13 +21,11 @@ from .types import (
     EventType,
     ErrorEventData,
     FinalEventData,
-    Message,
     ParsedToolCall,
     SessionId,
     StatusEventData,
     TokenEventData,
     ToolCallEventData,
-    ToolMessage,
     ToolResultEventData,
     TurnId,
     TurnMessages,
@@ -57,6 +54,7 @@ SYSTEM_PROMPT = """
 @dataclass(slots=True)
 class AgentEvent:
     """Event emitted by the agent during processing."""
+
     type: EventType
     data: AgentEventData
 
@@ -81,9 +79,7 @@ class LLMAgent:
         # Initialize components
         self.llm_client = llm_client or create_client()
         self.mcp_client = mcp_client or MCPClient()
-        self.conversation_manager = (
-            conversation_manager or ConversationManager()
-        )
+        self.conversation_manager = conversation_manager or ConversationManager()
         self.tool_parser = ToolCallParser()
 
         # Configuration from settings
@@ -102,14 +98,10 @@ class LLMAgent:
                 yield token
             elif event.type == "final":
                 content = (
-                    event.data.get("content")
-                    if isinstance(event.data, dict)
-                    else None
+                    event.data.get("content") if isinstance(event.data, dict) else None
                 )
                 if content:
-                    suffix = self._unstreamed_suffix(
-                        streamed_text, str(content)
-                    )
+                    suffix = self._unstreamed_suffix(streamed_text, str(content))
                     if suffix:
                         yield suffix
 
@@ -141,7 +133,9 @@ class LLMAgent:
     ) -> AsyncIterator[AgentEvent]:
         """Execute a single conversation turn with multiple iterations."""
         # Build initial messages
-        messages: list[dict[str, Any]] = self._build_messages_raw(user_message, session_id)
+        messages: list[dict[str, Any]] = self._build_messages_raw(
+            user_message, session_id
+        )
         turn_messages: list[dict[str, Any]] = [
             {"role": "user", "content": user_message}
         ]
@@ -205,14 +199,15 @@ class LLMAgent:
                 # Fallback only when no final answer was produced.
                 if not is_finished:
                     async for event in self._run_fallback(
-                        messages, turn_messages, session_id, is_finished,
+                        messages,
+                        turn_messages,
+                        session_id,
+                        is_finished,
                     ):
                         yield event
 
         except Exception as exc:
-            backlog.error(
-                session_id, turn_id, self.max_iterations, str(exc)
-            )
+            backlog.error(session_id, turn_id, self.max_iterations, str(exc))
             yield AgentEvent("error", ErrorEventData(message=str(exc)))
 
     async def _handle_iteration(
@@ -236,9 +231,7 @@ class LLMAgent:
 
         # Call LLM and stream tokens
         final_message: dict[str, Any] | None = None
-        async for token, final in self.llm_client.stream_completion(
-            messages, tools
-        ):
+        async for token, final in self.llm_client.stream_completion(messages, tools):
             if token:
                 yield AgentEvent("token", TokenEventData(data=token))
             elif final:
@@ -357,7 +350,9 @@ class LLMAgent:
         for tool_call in tool_calls:
             name: str = tool_call["name"]
             arguments: dict[str, Any] = tool_call["arguments"]
-            tool_call_id: str = tool_call.get("id") or f"call_{name}_{uuid.uuid4().hex[:8]}"
+            tool_call_id: str = (
+                tool_call.get("id") or f"call_{name}_{uuid.uuid4().hex[:8]}"
+            )
 
             # Log tool call
             backlog.tool_call(session_id, turn_id, iteration, name, arguments)
@@ -371,9 +366,7 @@ class LLMAgent:
             )
 
             # Call the tool
-            tool_result: str = await self.mcp_client.call_tool(
-                session, name, arguments
-            )
+            tool_result: str = await self.mcp_client.call_tool(session, name, arguments)
             backlog.tool_result(
                 session_id, turn_id, iteration, name, tool_result, duration_ms=0
             )
@@ -409,7 +402,9 @@ class LLMAgent:
         final_message["content"] = content
         messages.append(final_message)
         turn_messages.append(final_message)
-        self.conversation_manager.remember_turn(session_id, cast(TurnMessages, turn_messages))
+        self.conversation_manager.remember_turn(
+            session_id, cast(TurnMessages, turn_messages)
+        )
 
         yield AgentEvent("final", FinalEventData(content=content))
 
@@ -474,7 +469,9 @@ class LLMAgent:
             yield AgentEvent("token", TokenEventData(data=fallback_msg))
 
         turn_messages.append({"role": "assistant", "content": "".join(final_parts)})
-        self.conversation_manager.remember_turn(session_id, cast(TurnMessages, turn_messages))
+        self.conversation_manager.remember_turn(
+            session_id, cast(TurnMessages, turn_messages)
+        )
 
     def _build_messages_raw(
         self, user_message: str, session_id: SessionId

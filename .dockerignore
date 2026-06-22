@@ -1,0 +1,33 @@
+# === Системное (хост-специфичное) ===
+.venv/
+.git/
+__pycache__/
+*.pyc
+
+# === Пользовательские данные (маунтятся через volumes, не в image) ===
+.data/
+generated_materials/
+backlog/
+*.db
+*.sqlite*
+
+# === Секреты ===
+.env*
+!.env.example
+
+# === Dev-артефакты ===
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+tests/
+
+# === IDE ===
+.idea/
+.vscode/
+
+# === OS ===
+.DS_Store
+Thumbs.db

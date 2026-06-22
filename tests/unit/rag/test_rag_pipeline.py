@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,7 +7,6 @@ from rag.config import RagConfig
 from rag.parser import DocumentParser
 from rag.chunker import (
     TextChunker,
-    SemanticChunkerStrategy,
     RecursiveChunkerStrategy,
     SentenceChunkerStrategy,
 )
@@ -16,10 +14,14 @@ from rag.chunker import (
 
 # --- RAG Config Tests ---
 
+
 def test_rag_config_defaults():
     """Test default values of RagConfig dataclass."""
     config = RagConfig()
-    assert config.embedding_model == "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    assert (
+        config.embedding_model
+        == "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    )
     assert config.embedding_batch_size == 64
     assert config.chunker_type == "semantic"
     assert config.chunk_size == 512
@@ -59,6 +61,7 @@ def test_rag_config_from_env():
 
 # --- Document Parser Tests ---
 
+
 def test_document_parser_text_files(temp_dir):
     """Test parsing simple text files (TXT, MD) directly without Docling."""
     config = RagConfig()
@@ -67,7 +70,7 @@ def test_document_parser_text_files(temp_dir):
     # 1. TXT File
     txt_file = temp_dir / "test.txt"
     txt_file.write_text("Hello from a simple text file.", encoding="utf-8")
-    
+
     pages = parser.extract_pages(txt_file)
     assert len(pages) == 1
     assert pages[0]["page"] is None
@@ -76,7 +79,7 @@ def test_document_parser_text_files(temp_dir):
     # 2. Markdown File
     md_file = temp_dir / "test.md"
     md_file.write_text("# Title\nSome content.", encoding="utf-8")
-    
+
     pages = parser.extract_pages(md_file)
     assert len(pages) == 1
     assert "Title" in pages[0]["text"]
@@ -91,7 +94,7 @@ def test_document_parser_pdf_mocked(temp_dir):
     mock_converter = MagicMock()
     mock_result = MagicMock()
     mock_document = MagicMock()
-    
+
     # Use a simpler approach to mocking that avoids complex Pydantic instantiation
     from docling_core.types.doc.document import TextItem, DocItemLabel
 
@@ -109,14 +112,14 @@ def test_document_parser_pdf_mocked(temp_dir):
     mock_document.iterate_items.return_value = [mock_item1, mock_item2]
     mock_result.document = mock_document
     mock_converter.convert.return_value = mock_result
-    
+
     parser._doc_converter = mock_converter
 
     pdf_file = temp_dir / "test.pdf"
     pdf_file.write_text("", encoding="utf-8")  # dummy empty file
 
     pages = parser.extract_pages(pdf_file)
-    
+
     assert len(pages) == 2
     assert pages[0]["page"] == 1
     assert pages[0]["text"] == "This is text on page 1"
@@ -126,6 +129,7 @@ def test_document_parser_pdf_mocked(temp_dir):
 
 # --- Text Chunker Tests ---
 
+
 def test_chunker_recursive_strategy():
     """Test recursive chunker strategy with custom parameters."""
     config = RagConfig(chunk_size=50, chunk_overlap=10)
@@ -133,7 +137,7 @@ def test_chunker_recursive_strategy():
 
     text = "First long paragraph. Second long paragraph. Third one."
     chunks = strategy.chunk(text)
-    
+
     assert len(chunks) > 0
     # Every chunk should be under limit or equal to chunk_size (except if a word is too long)
     for c in chunks:
@@ -147,7 +151,7 @@ def test_chunker_sentence_strategy():
 
     text = "Первое предложение. Второе предложение! Третье предложение?"
     chunks = strategy.chunk(text)
-    
+
     assert len(chunks) > 0
     # Check that sentences are normalized
     assert "Первое предложение." in text
@@ -159,12 +163,15 @@ def test_text_chunker_page_overlapping():
     chunker = TextChunker(config)
 
     pages = [
-        {"page": 1, "text": "This is page number one which contains some simple content."},
-        {"page": 2, "text": "This is page number two with more detailed descriptions."}
+        {
+            "page": 1,
+            "text": "This is page number one which contains some simple content.",
+        },
+        {"page": 2, "text": "This is page number two with more detailed descriptions."},
     ]
 
     chunks = chunker.chunk_pages(pages)
-    
+
     assert len(chunks) > 0
     assert chunks[0]["page"] == 1
     # Check that pages are processed
@@ -287,6 +294,7 @@ def test_pipeline_import_roundtrip(temp_dir, rag_config, mock_embedding):
 
     # Init schema using real schema
     from db.schema import create_schema
+
     create_schema(conn)
 
     parser = DocumentParser(rag_config)

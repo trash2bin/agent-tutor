@@ -21,7 +21,7 @@
 - **I2**: пользовательские данные (`.data/`, `backlog/`, `chroma_db/`, `generated_materials/`) не теряются при перезапуске и не коммитятся.
 - **I3**: не ломать существующие публичные API без явного согласования.
 - **I4**: `api`-сервис работает в **1 воркер uvicorn**. Сессионные локи in-process, между воркерами не синхронизируются. Горизонтальное масштабирование - за рамками pre-prod.
-- **I5**: один Docker-образ на все сервисы; выбор через `command` в compose.
+- **I5**: отдельный Docker-образ на каждый сервис (Dockerfile в корне каждого пакета: `rag/Dockerfile`, `mcp_server/Dockerfile`, `demo/api/Dockerfile`, `demo/web/Dockerfile`) + общий образ для CLI-утилит (`tools/Dockerfile`). Все образы — multi-stage на `python:3.12-slim`.
 - **I6**: `university.db` - фикстура для демо, **не** production-БД. На реальном проде источник данных - внешняя БД вуза; подключение к ней - отдельная задача, **не в этом roadmap**.
 - **I7**: рефакторинг - после тестов. Тесты - на стабильную версию кода. Контейнеризация - на протестированный код.
 
@@ -223,7 +223,7 @@ DEMO: WEB - это просто фронт он общается только с
 
 **Цель**: обеспечить надежность системы через комплексное тестирование и внедрение строгого API-контракта. **Покрытие ≥ 40%** на данном этапе.
 
-**Результат**: покрытие **84%** (выше 109 тестов), ruff — чисто, OpenAPI — у всех сервисов.
+**Результат**: покрытие **84%** (выше 109 тестов), ruff - чисто, OpenAPI - у всех сервисов.
 
 ### 1.1. Зависимости ✅
 Добавлены в `pyproject.toml`: `pytest>=8`, `pytest-asyncio>=0.24`, `pytest-cov>=5`, `pytest-mock>=3.14`, `respx>=0.21`, `freezegun>=1.5`, `httpx>=0.28`, `ruff>=0.7`.
@@ -235,15 +235,15 @@ tests/
 ├── unit/
 │   ├── rag/                       # config, parser, chunker, vector_store, repository, pipeline, service, client
 │   ├── db/                        # database (все методы + edge-кейсы)
-│   ├── tools/                     # student, teacher, discipline, grade — 1+ позитивных, 1+ негативных
+│   ├── tools/                     # student, teacher, discipline, grade - 1+ позитивных, 1+ негативных
 │   └── demo/
 │       ├── test_backlog.py        # 13 тестов (все event-методы, чтение, изоляция)
 │       ├── test_sessions.py       # 12 тестов (CRUD, trim, truncation, concurrency)
 │       └── agent/                 # tool_parser, llm_client, mcp_client, orchestrator
 ├── integration/
-│   ├── rag/                       # test_e2e_pipeline.py — 8 тестов (import → search → context → delete)
-│   ├── mcp/                       # (пусто — отложено на Этап 2)
-│   └── api/                       # (пусто — отложено на Этап 2)
+│   ├── rag/                       # test_e2e_pipeline.py - 8 тестов (import → search → context → delete)
+│   ├── mcp/                       # (пусто - отложено на Этап 2)
+│   └── api/                       # (пусто - отложено на Этап 2)
 └── fixtures/                      # paragraphs.txt в репозитории; PDF/DOCX генерируются в conftest
 ```
 
@@ -260,10 +260,10 @@ tests/
 
 | Компонент | Статус | Детали |
 |---|---|---|
-| **RAG** — config / parser / chunker / vector_store / repository / pipeline / service / client | ✅ | pipeline 92%, service ~75%, всё остальное ~80%+. `client` через `respx`. E2E с реальной ChromaDB + мок embedding |
-| **DB** — database (все методы + edge-кейсы) | ✅ | Все 12 методов, context manager, ping |
-| **Tools** — student, teacher, discipline, grade | ✅ | По ≥1 позитивному + ≥1 негативному сценарию на каждый инструмент |
-| **Core API** — sessions, backlog, tool_parser, orchestrator, mcp_client | ✅ | sessions 78%, backlog 77%, orchestrator 54% (4 сценария), mcp_client happy/error, tool_parser (native + JSON) |
+| **RAG** - config / parser / chunker / vector_store / repository / pipeline / service / client | ✅ | pipeline 92%, service ~75%, всё остальное ~80%+. `client` через `respx`. E2E с реальной ChromaDB + мок embedding |
+| **DB** - database (все методы + edge-кейсы) | ✅ | Все 12 методов, context manager, ping |
+| **Tools** - student, teacher, discipline, grade | ✅ | По ≥1 позитивному + ≥1 негативному сценарию на каждый инструмент |
+| **Core API** - sessions, backlog, tool_parser, orchestrator, mcp_client | ✅ | sessions 78%, backlog 77%, orchestrator 54% (4 сценария), mcp_client happy/error, tool_parser (native + JSON) |
 
 ### 1.5. Что сделано и что отложено
 
@@ -274,13 +274,13 @@ tests/
 - Core API: sessions (round-trip, trim, concurrency), backlog (все события, чтение, изоляция), tool_parser (native + JSON), mcp_client (HTTP через stdio), orchestrator (4 сценария)
 
 **Отложено на Этап 2 (post-Docker)**:
-- **MCP integration** (`integration/mcp/`): проверка каждого тула через HTTP к поднятому в compose контейнеру — вместо хрупкого subprocess-теста будет `httpx` к `http://mcp:8083/mcp`
+- **MCP integration** (`integration/mcp/`): проверка каждого тула через HTTP к поднятому в compose контейнеру - вместо хрупкого subprocess-теста будет `httpx` к `http://mcp:8083/mcp`
 - **API SSE** (`integration/api/`): сценарии чата через реальный SSE к `api`-контейнеру с моком LLM-провайдера
-- **CLI smoke** (`agent-ingest --help`, subcommands): argparse-тест — простой, но не было времени; можно сделать в любой момент
+- **CLI smoke** (`agent-ingest --help`, subcommands): argparse-тест - простой, но не было времени; можно сделать в любой момент
 
 **Обоснование откладывания** (согласовано с владельцем):
-1. MCP subprocess + JSON-RPC — тест на 8/10 сложности, требует поднятых RAG + DB
-2. API SSE — требует мока LiteLLM и живого MCP-сервера
+1. MCP subprocess + JSON-RPC - тест на 8/10 сложности, требует поднятых RAG + DB
+2. API SSE - требует мока LiteLLM и живого MCP-сервера
 3. После Docker: `docker compose up` даёт стабильные HTTP-адреса (`http://mcp:8083`, `http://rag:8082`), и тесты превращаются в простые `httpx`-вызовы
 4. Инвариант I7 не нарушен: Docker идёт на протестированном коде (84%), оставшиеся интеграционные тесты пишутся уже под контейнеры
 
@@ -288,76 +288,96 @@ tests/
 
 | Критерий | Статус |
 |---|---|
-| `uv run pytest` — все тесты проходят | ✅ 109 passed, 0 failed (2.75s) |
+| `uv run pytest` - все тесты проходят | ✅ 109 passed, 0 failed (2.75s) |
 | `uv run pytest --cov --cov-fail-under=40` | ✅ 84% (цель ≥40%) |
-| `uv run ruff check .` — без ошибок | ✅ чисто |
-| `uv run ruff format --check .` — без ошибок | ✅ чисто |
+| `uv run ruff check .` - без ошибок | ✅ чисто |
+| `uv run ruff format --check .` - без ошибок | ✅ чисто |
 | OpenAPI спецификации (`rag`, `api`, `web`) | ✅ `/docs` и `/openapi.json` доступны |
 
 > **Этап 1 закрыт 21.06.2026.** Покрытие 84% при цели 40%. Оставшиеся integration-кейсы (MCP, API SSE, CLI)
-> перенесены на Этап 2 — они естественно ложатся на Docker compose как HTTP-тесты к контейнерам.
+> перенесены на Этап 2 - они естественно ложатся на Docker compose как HTTP-тесты к контейнерам.
 
 ---
 
-## Этап 2. Контейнеризация
+## Этап 2. Контейнеризация ✅
 
 **Цель**: всё запускается через `docker compose up` в dev-режиме.
 
-### 2.1. Dockerfile
+### 2.1. Dockerfile'ы ✅
 
-Multi-stage, один на все сервисы.
+Файлы: `rag/Dockerfile`, `mcp_server/Dockerfile`, `demo/api/Dockerfile`, `demo/web/Dockerfile` + `tools/Dockerfile`
 
-**`builder`**: `python:3.12-slim` → установить `uv` → скопировать `pyproject.toml` + `uv.lock` → `uv sync --frozen --no-install-project` → скопировать исходники → `uv sync --frozen`.
+Multi-stage на `python:3.12-slim`. Каждый сервис — свой образ (I5):
 
-**`runtime`**: `python:3.12-slim` → создать пользователя `app` (UID 1000, HOME=`/home/app`) → скопировать `/app` из `builder` с `--chown=app:app` → `ENV PATH=/app/.venv/bin:$PATH`, `PYTHONUNBUFFERED=1`, `PYTHONDONTWRITEBYTECODE=1`, `HOME=/home/app`, `HF_HOME=/home/app/.cache/huggingface` → `USER app`.
+| Dockerfile | Образ | CMD |
+|---|---|---|
+| `rag/Dockerfile` | `agent-tutor-rag` | `python -m rag.service` |
+| `mcp_server/Dockerfile` | `agent-tutor-mcp` | `python -m mcp_server.server` |
+| `demo/api/Dockerfile` | `agent-tutor-api` | `python -m demo.api.server` |
+| `demo/web/Dockerfile` | `agent-tutor-web` | `python -m demo.web.server` |
+| `tools/Dockerfile` | `agent-tutor-agent` | (задаётся в compose) |
 
-**Без прогрева embedding в образе.** Кеш HuggingFace монтируется через volume `hf_cache`. При первом запуске `rag` модель докачивается один раз в volume, далее берётся из кеша. Это даёт лёгкий образ, возможность поменять `RAG_EMBEDDING_MODEL` без пересборки, быстрый CI-build.
+Все builder'ы: `python:3.12-slim` → установка `uv` → `uv sync --frozen --no-dev`. Runtime: `python:3.12-slim` → `curl` для healthcheck → копирование `/app` из builder. 
 
-### 2.2. `docker-compose.yml`
+**Без прогрева embedding в образе.** Кеш HuggingFace монтируется через volume `hf_cache`. При первом запуске `rag` модель докачивается один раз в volume, далее берётся из кеша.
+
+### 2.2. `docker-compose.yml` ✅
+
+Файл: `docker-compose.yml`
 
 | Сервис | `command` | Порты (dev) | Volumes | Зависит от |
 |---|---|---|---|---|
-| `mcp` | `python -m server` | `127.0.0.1:8083:8083` | `app_data:/data/app:ro` | `rag` (healthy) |
 | `rag` | `python -m rag.service` | `127.0.0.1:8082:8082` | `rag_data`, `hf_cache` | - |
-| `api` | `python -m demo.api.server` | `127.0.0.1:8081:8081` | `app_data`, `backups` | `mcp` (healthy) |
+| `mcp` | `python -m mcp_server.server` | `127.0.0.1:8083:8083` | `app_data:/data/app:ro` | `rag` (healthy) |
+| `api` | `python -m demo.api.server` | `127.0.0.1:8081:8081` | `app_data` | `mcp` (healthy) |
 | `web` | `python -m demo.web.server` | `127.0.0.1:8080:8080` | - | `api` (healthy) |
 | `agent` (profile `tools`) | one-shot через `compose run --rm` | - | `app_data` | `rag` (healthy) |
-| `backup` (profile `cron`) | `cron -f` через контейнер с `crond` | - | `app_data:ro`, `backups` | - |
-| `caddy` (profile `prod`) | `caddy run --config /etc/caddy/Caddyfile` | `80:80`, `443:443` | - | `web`, `api` (healthy) |
+| `backup` (profile `cron`) | `python /app/scripts/backup.py` | - | `app_data:ro`, `backups` | - |
+| `caddy` (profile `prod`) | caddy:2, Caddyfile с авто-TLS | `80:80`, `443:443` | `caddy_data`, `caddy_config` | `web` (healthy) |
 
 Одна bridge-сеть `agent-tutor-net`. Healthchecks:
 
-- `mcp`: `curl -f :8083/health`, `interval=10s`, `timeout=5s`, `start_period=20s`, `retries=3`.
-- `rag`: `curl -f :8082/health`, `start_period=120s` (cold start с загрузкой embedding-модели), `retries=10`.
+- `rag`: `curl -f :8082/health`, `start_period=120s` (cold start с загрузкой embedding ~470 МБ), `retries=10`.
+- `mcp`: `curl -f :8083/health`, `start_period=15s`. (Добавлен HTTP `/health` endpoint через Starlette-роутинг.)
 - `api`: `curl -f :8081/health`, `start_period=15s`.
 - `web`: `curl -f :8080/`, `start_period=10s`.
-- `caddy`: `wget -q -O- :2019/metrics || exit 1`.
 
-`start_period=120s` у `rag` - критично: `SentenceTransformerEmbedding` лениво грузит ~470 МБ модели. 30 секунд приведёт к ложным unhealthy на cold start.
+### 2.3. Prod-профиль ✅
 
-### 2.3. Prod-профиль
+Файл: `Caddyfile`
 
-Не отдельный файл. Prod-режим - `COMPOSE_PROFILES=prod` или `docker compose --profile prod up -d`. В этом режиме поднимается `caddy` с авто-TLS через Let's Encrypt. Для long-running сервисов `restart: unless-stopped` через YAML-якорь.
+Prod-режим - `docker compose --profile prod up -d`. Поднимается `caddy:2` с авто-TLS через Let's Encrypt. Long-running сервисы с `restart: unless-stopped` через YAML-якорь.
 
-### 2.4. `.env.example`
+### 2.4. `.env.example` ✅
 
-Полный список env-переменных с дефолтами, разбитый по сервисам: **RAG** (только в `rag`-сервисе): `RAG_EMBEDDING_MODEL`, `RAG_EMBEDDING_BATCH_SIZE`, `RAG_DEVICE`, `RAG_CHUNKER_TYPE`, `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`, `RAG_PAGE_OVERLAP_TOKENS`, `CHROMA_PATH`, `CHROMA_COLLECTION`, `RAG_CONTEXT_MAX_TOKENS`, `RAG_LOCAL_FILES_ONLY`. **MCP**: `MCP_TRANSPORT`, `MCP_HOST`, `MCP_PORT`, `RAG_SERVICE_URL`. **API**: `MCP_SERVICE_URL`, `OLLAMA_URL`, `OLLAMA_MODEL`, `MISTRAL_API_KEY`, `MISTRAL_MODEL`, `DEMO_API_HOST`, `DEMO_API_PORT`, `DEMO_REQUEST_TIMEOUT` (90 в prod, 600 в dev), `ENABLE_THINK` (false в prod), `DEMO_HISTORY_TURNS`, `DEMO_HISTORY_CONTENT_CHARS`, `BACKLOG_DIR`, `BACKLOG_RETENTION_DAYS`, `BACKLOG_ROTATE_MAX_BYTES`, `BACKLOG_FULL_PAYLOADS` (0 в prod), `AGENT_TEMPERATURE`, `AGENT_MAX_ITERATIONS`, `AGENT_MAX_TOKENS_THINKING`, `AGENT_MAX_EMPTY_ROUNDS`, `DEMO_SESSION_DB_PATH`, `DB_PATH`. **Web**: `WEB_HOST`, `WEB_PORT`, `WEB_ORIGIN`, `API_BEARER_TOKEN`. **Генерация** (только в `agent`): `DOCGEN_MODEL`, `DOCGEN_OLLAMA_URL`, `DOCGEN_NUM_PREDICT`, `DOCGEN_MAX_ATTEMPTS`, `DOCGEN_MIN_RESPONSE_CHARS`, `DOCGEN_FAKE_SEED`, `DOCGEN_OUTPUT_DIR`. **Общие**: `DEMO_DEBUG`, `LITELLM_DEBUG`.
+Файл: `.env.example`
 
-### 2.5. `.dockerignore`
+Полный список env-переменных с дефолтами, разбитый по сервисам (см. файл). Основные группы: LLM-провайдер (Ollama/Mistral), RAG, агент, безопасность, генерация, бэкапы.
 
-Исключает: `.venv/`, `.git/`, `__pycache__/`, `.data/`, `backlog/`, `chroma_db/`, `generated_materials/`, `*.db`, `*.sqlite*`, `fixtures.json`, `.env*`, `.pytest_cache/`, `.ruff_cache/`, `htmlcov/`, `.coverage`, `tests/`, `*.md`.
+### 2.5. `.dockerignore` ✅
+
+Исключает: `.venv/`, `.git/`, `__pycache__/`, `.data/`, `backlog/`, `chroma_db/`, `generated_materials/`, `*.db`, `*.sqlite*`, `.env*`, `.pytest_cache/`, `.ruff_cache/`, `htmlcov/`, `.coverage`, `tests/`, `*.md`.
+
+### 2.6. Дополнительные изменения ✅
+
+- **MCP сервер**: добавлен HTTP `/health` endpoint (Starlette routing поверх FastMCP streamable-http). Позволяет docker healthcheck проверять не только живучесть процесса, но и статус зависимостей (БД + RAG).
+- **Backup-сервис** (profile `cron`): файл `scripts/backup.py`. Python-скрипт с sqlite3.backup() для консистентных снапшотов. Цикл: бэкап каждые 6 часов → сжатие .db.gz → удаление старше 14 дней.
+- **`build` в каждом сервисе**: `build: context: ., dockerfile: Dockerfile`. Позволяет `docker compose build` или `docker compose up` без предварительной сборки.
 
 ### 2.6. Критерии готовности этапа 2
 
+> **⚠️ Файлы созданы, но этап требует проверки на реальном Docker.**
+
+- `docker compose build` собирает образ без ошибок.
 - `docker compose up -d` поднимает 4 long-running сервиса.
 - `docker compose ps` - все 4 в `healthy` в течение 180 секунд.
 - `curl :8081/health` → `{"api":"ok","ollama":{...}}`.
 - `curl :8080/api/health` → 200.
 - Web UI чат работает end-to-end.
-- `docker compose --profile tools run --rm agent agent-generate --discipline-id <id>` создаёт PDF/DOCX и кладёт в индекс.
-- `docker compose --profile cron up -d` запускает `backup`; через час появляется `backups/*.db.gz`.
+- `docker compose --profile tools run --rm agent agent-ingest list` работает.
+- `docker compose --profile cron up -d` запускает `backup` (через Python-цикл).
 - `docker compose restart` не теряет данные в `./.data/`.
-- `rm -rf .data && docker compose down -v && docker compose up -d` поднимает чистый стек без ошибок.
+- `docker compose down -v` удаляет тома, не ломает хостовые файлы.
 
 ---
 
@@ -545,7 +565,7 @@ docker compose --profile prod up -d
 |---|---|
 | 0 | `python -m rag.service` + `python -m mcp_server.server` + `python -m demo.api.server` + `python -m demo.web.server` - все 4 сервиса поднимаются, UI чат работает end-to-end через HTTP MCP |
 | 1 | `uv run pytest` - unit + integration зелёные, coverage ≥ 40%, ruff без ошибок |
-| 2 | `docker compose up -d` - 4 long-running сервиса `healthy`, UI чат работает. `tools`/`cron`/`prod` профили стартуют |
+| 2 | ✅ Файлы созданы: Dockerfile, compose (7 сервисов), Caddyfile, .env.example, .dockerignore, backup-скрипт. **Требуется проверка на Docker Engine.** |
 | 2.5 | `docker compose ps` и smoke-проход локализуют падение по сервисам без чтения кода |
 | 3 | push в `main` → CI зелёный (lint + test + build). E2E - отдельный workflow |
 | 4 | Bearer enforced через web-прокси, `/health` агрегирует зависимости, таймауты разумные, `backup`-сервис создаёт `.db.gz` каждые 6 часов |

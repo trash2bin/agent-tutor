@@ -1,6 +1,5 @@
-import pytest
 from db.database import Database
-from db.models import Student, Teacher, Group, Discipline, Grade, ScheduleEntry
+from db.models import Discipline
 
 
 def test_database_initialization(test_db):
@@ -83,7 +82,7 @@ def test_get_teacher_schedule(test_db):
     # In the schedule table, there are lessons with teacher names
     row = test_db.fetch_one("SELECT lessons_json FROM schedule LIMIT 5")
     assert row is not None
-    
+
     # Let's get any schedule entry or teacher name from database
     teacher_row = test_db.fetch_one("SELECT name FROM teachers LIMIT 1")
     assert teacher_row is not None
@@ -163,7 +162,9 @@ def test_get_student_grades(test_db):
     assert isinstance(grades, list)
 
     # Get grades with discipline_id filter if possible
-    row_with_grade = test_db.fetch_one("SELECT student_id, discipline_id FROM grades LIMIT 1")
+    row_with_grade = test_db.fetch_one(
+        "SELECT student_id, discipline_id FROM grades LIMIT 1"
+    )
     if row_with_grade:
         s_id = row_with_grade["student_id"]
         d_id = row_with_grade["discipline_id"]
@@ -179,6 +180,6 @@ def test_ping_and_context_manager(db_path):
         # Commit / Rollback smoke test
         db.commit()
         db.rollback()
-    
+
     # After exit, db connection should be closed
     assert db._closed is True

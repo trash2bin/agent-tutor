@@ -1,4 +1,5 @@
 """Чанкинг текста с поддержкой разных стратегий."""
+
 from __future__ import annotations
 
 import re
@@ -93,7 +94,11 @@ class RecursiveChunkerStrategy:
         # Склеиваем куски в чанки нужного размера
         current_chunk = ""
         for piece in splits:
-            candidate = (current_chunk + separator + piece).strip() if current_chunk else piece.strip()
+            candidate = (
+                (current_chunk + separator + piece).strip()
+                if current_chunk
+                else piece.strip()
+            )
 
             if len(candidate) <= self.config.chunk_size:
                 current_chunk = candidate
@@ -105,11 +110,15 @@ class RecursiveChunkerStrategy:
                 if len(piece.strip()) > self.config.chunk_size:
                     remaining_seps = separators[separators.index(separator) + 1 :]
                     if remaining_seps:
-                        final_chunks.extend(self._split_recursive(piece.strip(), remaining_seps))
+                        final_chunks.extend(
+                            self._split_recursive(piece.strip(), remaining_seps)
+                        )
                     else:
                         # Жёсткая нарезка по символам (fallback)
                         for i in range(0, len(piece), self.config.chunk_size):
-                            final_chunks.append(piece[i : i + self.config.chunk_size].strip())
+                            final_chunks.append(
+                                piece[i : i + self.config.chunk_size].strip()
+                            )
                 else:
                     current_chunk = piece.strip()
                     continue
@@ -147,8 +156,8 @@ class SentenceChunkerStrategy:
 
     # Разбиваем по . ! ? с учётом пробелов и переносов строк
     SENTENCE_SPLIT_RE = re.compile(
-        r'(?<=[.!?])\s+(?=[A-ZА-ЯЁ])|'  # Точка/воскл/вопрос + пробел + Заглавная
-        r'(?<=[.!?])\n+'                 # Точка/воскл/вопрос + перенос строки
+        r"(?<=[.!?])\s+(?=[A-ZА-ЯЁ])|"  # Точка/воскл/вопрос + пробел + Заглавная
+        r"(?<=[.!?])\n+"  # Точка/воскл/вопрос + перенос строки
     )
 
     def __init__(self, config: RagConfig) -> None:
@@ -183,7 +192,7 @@ class SentenceChunkerStrategy:
     def _split_sentences(self, text: str) -> list[str]:
         """Разбить текст на предложения регуляркой."""
         # Заменяем множественные пробелы
-        text = re.sub(r'\s+', ' ', text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
 
         sentences = self.SENTENCE_SPLIT_RE.split(text)
         return [s.strip() for s in sentences if s.strip()]
@@ -204,10 +213,13 @@ class SentenceChunkerStrategy:
                 result.append(chunks[i])
         return result
 
+
 class TextChunker:
     """Чанкер с постраничной обработкой и overlap между страницами."""
 
-    def __init__(self, config: RagConfig, strategy: ChunkerStrategy | None = None) -> None:
+    def __init__(
+        self, config: RagConfig, strategy: ChunkerStrategy | None = None
+    ) -> None:
         self.config = config
         self.strategy = strategy or self._create_strategy(config)
 
@@ -249,20 +261,24 @@ class TextChunker:
                     continue
 
                 # Убираем overlap-часть из результата
-                if previous_page_tail and chunk_text.startswith(previous_page_tail[:20]):
-                    chunk_text = chunk_text[len(previous_page_tail):].strip()
+                if previous_page_tail and chunk_text.startswith(
+                    previous_page_tail[:20]
+                ):
+                    chunk_text = chunk_text[len(previous_page_tail) :].strip()
                     if not chunk_text:
                         continue
 
-                all_chunks.append({
-                    "page": page.get("page"),
-                    "content": chunk_text,
-                })
+                all_chunks.append(
+                    {
+                        "page": page.get("page"),
+                        "content": chunk_text,
+                    }
+                )
 
             # Сохраняем хвост для overlap
             words = text.split()
             if len(words) > self.config.page_overlap_tokens:
-                previous_page_tail = " ".join(words[-self.config.page_overlap_tokens:])
+                previous_page_tail = " ".join(words[-self.config.page_overlap_tokens :])
             else:
                 previous_page_tail = text
 

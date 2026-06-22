@@ -1,4 +1,5 @@
 """Чистые утилиты для обработки текста."""
+
 from __future__ import annotations
 
 import re

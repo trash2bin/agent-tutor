@@ -19,6 +19,7 @@ logger = logging.getLogger("demo.api.agent.llm_client")
 @dataclass(slots=True)
 class LLMResponse:
     """Container for LLM response."""
+
     role: str
     content: str
     tool_calls: list[dict[str, Any]]
@@ -125,7 +126,6 @@ class LLMClient:
         final = litellm.stream_chunk_builder(chunks, messages=messages)
         self._validate_final_response(final)
 
-
         # Проверка на корректный тип данных от LiteLLM
         if final is None:
             raise RuntimeError("stream_chunk_builder returned None")
@@ -134,9 +134,7 @@ class LLMClient:
                 "Expected ModelResponse, got %s",
                 type(final).__name__,
             )
-            raise TypeError(
-                f"Expected ModelResponse, got {type(final).__name__}"
-            )
+            raise TypeError(f"Expected ModelResponse, got {type(final).__name__}")
 
         msg_obj = final.choices[0].message
         if msg_obj is None:
@@ -261,8 +259,15 @@ def create_client() -> LLMClient:
         # Ollama configuration
         model_name = settings.ollama_model
         known_providers = (
-            "ollama/", "ollama_chat/", "openai/", "anthropic/",
-            "deepseek/", "huggingface/", "mistral/", "groq/", "together_ai/",
+            "ollama/",
+            "ollama_chat/",
+            "openai/",
+            "anthropic/",
+            "deepseek/",
+            "huggingface/",
+            "mistral/",
+            "groq/",
+            "together_ai/",
         )
 
         if settings.ollama_url and not model_name.startswith(known_providers):

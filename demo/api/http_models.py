@@ -2,23 +2,30 @@
 
 Определяет контракты взаимодействия между Web-фронтендом и API-сервером.
 """
+
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 
 # === Запросы ===
 
+
 class ChatRequest(BaseModel):
     """Запрос на начало или продолжение чата."""
 
-    message: str = Field(..., min_length=1, description="Текст сообщения от пользователя")
-    session_id: Optional[str] = Field(default="default", description="ID сессии для сохранения истории")
+    message: str = Field(
+        ..., min_length=1, description="Текст сообщения от пользователя"
+    )
+    session_id: Optional[str] = Field(
+        default="default", description="ID сессии для сохранения истории"
+    )
 
 
 # === Ответы ===
+
 
 class HealthResponse(BaseModel):
     """Состояние API сервиса и его связей с LLM."""

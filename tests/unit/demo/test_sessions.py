@@ -1,6 +1,5 @@
 """Tests for SessionStore — persistent chat session history."""
 
-import json
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -21,11 +20,13 @@ def session_db_path():
 @pytest.fixture
 def connection_factory(session_db_path):
     """Factory creating isolated connections to the same session DB."""
+
     def _factory():
         conn = sqlite3.connect(str(session_db_path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
+
     return _factory
 
 
@@ -59,14 +60,20 @@ def test_append_and_get_turns(store):
 
 def test_history_messages(store):
     """history_messages returns flattened, compacted messages."""
-    store.append_turn("session-1", [
-        {"role": "user", "content": "Hello"},
-        {"role": "assistant", "content": "Hi!"},
-    ])
-    store.append_turn("session-1", [
-        {"role": "user", "content": "How are you?"},
-        {"role": "assistant", "content": "I'm fine!"},
-    ])
+    store.append_turn(
+        "session-1",
+        [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi!"},
+        ],
+    )
+    store.append_turn(
+        "session-1",
+        [
+            {"role": "user", "content": "How are you?"},
+            {"role": "assistant", "content": "I'm fine!"},
+        ],
+    )
 
     messages = store.history_messages("session-1")
     assert len(messages) == 4  # 2 turns × 2 messages
@@ -77,9 +84,12 @@ def test_history_messages(store):
 def test_append_multiple_turns(store):
     """Multiple turns are stored and returned in order."""
     for i in range(3):
-        store.append_turn("session-1", [
-            {"role": "user", "content": f"Message {i}"},
-        ])
+        store.append_turn(
+            "session-1",
+            [
+                {"role": "user", "content": f"Message {i}"},
+            ],
+        )
 
     turns = store.get_turns("session-1")
     assert len(turns) == 3
@@ -93,9 +103,12 @@ def test_append_multiple_turns(store):
 def test_trim_exceeds_max_turns(store):
     """Session longer than max_turns gets trimmed to max_turns most recent."""
     for i in range(10):  # max_turns=5
-        store.append_turn("session-1", [
-            {"role": "user", "content": f"Turn {i}"},
-        ])
+        store.append_turn(
+            "session-1",
+            [
+                {"role": "user", "content": f"Turn {i}"},
+            ],
+        )
 
     turns = store.get_turns("session-1")
     assert len(turns) == 5  # trimmed to max_turns
@@ -115,9 +128,12 @@ def test_trim_to_one_turn(store):
         max_content_chars=200,
     )
     for i in range(3):
-        tiny_store.append_turn("session-1", [
-            {"role": "user", "content": f"Turn {i}"},
-        ])
+        tiny_store.append_turn(
+            "session-1",
+            [
+                {"role": "user", "content": f"Turn {i}"},
+            ],
+        )
 
     turns = tiny_store.get_turns("session-1")
     assert len(turns) == 1
@@ -130,9 +146,12 @@ def test_trim_to_one_turn(store):
 def test_long_content_truncated(store):
     """Content longer than max_content_chars gets truncated with indicator."""
     very_long = "A" * 500  # max_content_chars=200
-    store.append_turn("session-1", [
-        {"role": "user", "content": very_long},
-    ])
+    store.append_turn(
+        "session-1",
+        [
+            {"role": "user", "content": very_long},
+        ],
+    )
 
     messages = store.history_messages("session-1")
     truncated = messages[0]["content"]
@@ -145,10 +164,13 @@ def test_long_content_truncated(store):
 
 def test_empty_assistant_turn_skipped(store):
     """Assistant message with no content and no tool_calls is filtered out."""
-    store.append_turn("session-1", [
-        {"role": "user", "content": "Hello"},
-        {"role": "assistant", "content": "", "tool_calls": []},
-    ])
+    store.append_turn(
+        "session-1",
+        [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "", "tool_calls": []},
+        ],
+    )
     turns = store.get_turns("session-1")
     assert len(turns) == 1  # the assistant-only turn was filtered
     assert turns[0][0]["role"] == "user"
@@ -156,9 +178,12 @@ def test_empty_assistant_turn_skipped(store):
 
 def test_assistant_with_tool_calls_kept(store):
     """Assistant message with tool_calls but empty content is kept."""
-    store.append_turn("session-1", [
-        {"role": "assistant", "content": "", "tool_calls": [{"name": "search"}]},
-    ])
+    store.append_turn(
+        "session-1",
+        [
+            {"role": "assistant", "content": "", "tool_calls": [{"name": "search"}]},
+        ],
+    )
     turns = store.get_turns("session-1")
     assert len(turns) == 1
     assert turns[0][0]["role"] == "assistant"
@@ -200,9 +225,16 @@ def test_multiple_sessions_isolated(store):
 
 def test_reasoning_content_stripped(store):
     """reasoning_content is stripped from messages in history."""
-    store.append_turn("session-1", [
-        {"role": "assistant", "content": "Answer", "reasoning_content": "Thinking..."},
-    ])
+    store.append_turn(
+        "session-1",
+        [
+            {
+                "role": "assistant",
+                "content": "Answer",
+                "reasoning_content": "Thinking...",
+            },
+        ],
+    )
 
     messages = store.history_messages("session-1")
     assert "reasoning_content" not in messages[0]
@@ -219,9 +251,12 @@ def test_concurrent_writes(store):
 
     def writer(n):
         for i in range(5):
-            store.append_turn(f"shared-session", [
-                {"role": "user", "content": f"Thread {n} turn {i}"},
-            ])
+            store.append_turn(
+                "shared-session",
+                [
+                    {"role": "user", "content": f"Thread {n} turn {i}"},
+                ],
+            )
         results.append("done")
 
     threads = [threading.Thread(target=writer, args=(n,)) for n in range(3)]

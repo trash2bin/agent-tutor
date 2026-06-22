@@ -21,24 +21,38 @@ class DemoSettings:
     mistral_api_key: str | None = os.environ.get("MISTRAL_API_KEY")
     mistral_model: str = os.environ.get("MISTRAL_MODEL", "mistral/mistral-small")
 
-    request_timeout: float = float(os.environ.get("DEMO_REQUEST_TIMEOUT", 120*5))
-    python_executable: str = os.environ.get("PYTHON_EXECUTABLE", sys.executable or "python3")
-    think_mode: bool = os.environ.get("ENABLE_THINK", "true").lower() in ("1", "true", "yes")
+    request_timeout: float = float(os.environ.get("DEMO_REQUEST_TIMEOUT", 120 * 5))
+    python_executable: str = os.environ.get(
+        "PYTHON_EXECUTABLE", sys.executable or "python3"
+    )
+    think_mode: bool = os.environ.get("ENABLE_THINK", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     history_turns: int = int(os.environ.get("DEMO_HISTORY_TURNS", "8"))
-    history_content_chars: int = int(os.environ.get("DEMO_HISTORY_CONTENT_CHARS", "6000"))
-    session_db_path: str = os.environ.get("DEMO_SESSION_DB_PATH", str(PROJECT_ROOT / "demo_sessions.sqlite"))
+    history_content_chars: int = int(
+        os.environ.get("DEMO_HISTORY_CONTENT_CHARS", "6000")
+    )
+    session_db_path: str = os.environ.get(
+        "DEMO_SESSION_DB_PATH", str(PROJECT_ROOT / "demo_sessions.sqlite")
+    )
 
     # Model backlog (full interaction tracing)
     backlog_dir: str = os.environ.get("BACKLOG_DIR", str(PROJECT_ROOT / "backlog"))
     backlog_retention_days: int = int(os.environ.get("BACKLOG_RETENTION_DAYS", "30"))
 
     # MCP service URL for HTTP transport
-    mcp_service_url: str = os.environ.get("MCP_SERVICE_URL", "http://127.0.0.1:8000/mcp")
+    mcp_service_url: str = os.environ.get(
+        "MCP_SERVICE_URL", "http://127.0.0.1:8083/mcp"
+    )
 
     # Model parameters
     agent_temperature: float = float(os.environ.get("AGENT_TEMPERATURE", "0.5"))
     agent_max_iterations: int = int(os.environ.get("AGENT_MAX_ITERATIONS", "5"))
-    agent_max_tokens_thinking: int = int(os.environ.get("AGENT_MAX_TOKENS_THINKING", "4096"))
+    agent_max_tokens_thinking: int = int(
+        os.environ.get("AGENT_MAX_TOKENS_THINKING", "4096")
+    )
     agent_max_empty_rounds: int = int(os.environ.get("AGENT_MAX_EMPTY_ROUNDS", "3"))
 
 

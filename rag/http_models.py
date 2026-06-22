@@ -3,6 +3,7 @@
 Разделены от внутренних моделей `rag.models`, чтобы HTTP-контракт
 не зависел от внутренних TypedDict'ов пайплайна.
 """
+
 from __future__ import annotations
 
 from typing import List, Literal, Optional
@@ -17,30 +18,46 @@ class SearchRequest(BaseModel):
     """Запрос семантического поиска."""
 
     query: str = Field(..., min_length=1, description="Поисковый запрос")
-    discipline_id: Optional[str] = Field(default=None, description="ID дисциплины для фильтрации")
-    limit: int = Field(default=5, ge=1, le=20, description="Количество результатов (1–20)")
+    discipline_id: Optional[str] = Field(
+        default=None, description="ID дисциплины для фильтрации"
+    )
+    limit: int = Field(
+        default=5, ge=1, le=20, description="Количество результатов (1–20)"
+    )
 
 
 class ContextRequest(BaseModel):
     """Запрос готового RAG-контекста для LLM."""
 
     query: str = Field(..., min_length=1, description="Вопрос пользователя")
-    discipline_id: Optional[str] = Field(default=None, description="ID дисциплины для фильтрации")
-    limit: int = Field(default=5, ge=1, le=20, description="Фрагментов в контексте (1–20)")
+    discipline_id: Optional[str] = Field(
+        default=None, description="ID дисциплины для фильтрации"
+    )
+    limit: int = Field(
+        default=5, ge=1, le=20, description="Фрагментов в контексте (1–20)"
+    )
 
 
 class ListDocumentsRequest(BaseModel):
     """Запрос списка документов."""
 
-    discipline_id: Optional[str] = Field(default=None, description="ID дисциплины для фильтрации")
-    limit: Optional[int] = Field(default=None, ge=1, le=1000, description="Максимум документов (1–1000)")
+    discipline_id: Optional[str] = Field(
+        default=None, description="ID дисциплины для фильтрации"
+    )
+    limit: Optional[int] = Field(
+        default=None, ge=1, le=1000, description="Максимум документов (1–1000)"
+    )
 
 
 class ImportDocumentRequest(BaseModel):
     """Запрос импорта документа."""
 
-    path: str = Field(..., min_length=1, description="Путь к файлу (PDF, DOCX, TXT, MD, HTML)")
-    discipline_id: Optional[str] = Field(default=None, description="ID дисциплины для привязки")
+    path: str = Field(
+        ..., min_length=1, description="Путь к файлу (PDF, DOCX, TXT, MD, HTML)"
+    )
+    discipline_id: Optional[str] = Field(
+        default=None, description="ID дисциплины для привязки"
+    )
     title: Optional[str] = Field(default=None, description="Человекочитаемое название")
 
 
@@ -81,8 +98,13 @@ class DeleteDocumentResponse(BaseModel):
     """Результат удаления документа."""
 
     deleted: Optional[str] = Field(default=None, description="ID удалённого документа")
-    title: Optional[str] = Field(default=None, description="Название удалённого документа")
-    message: Optional[str] = Field(default=None, description="Сообщение о результате (например, если документ не найден)")
+    title: Optional[str] = Field(
+        default=None, description="Название удалённого документа"
+    )
+    message: Optional[str] = Field(
+        default=None,
+        description="Сообщение о результате (например, если документ не найден)",
+    )
 
 
 class SearchResponse(BaseModel):
@@ -96,7 +118,9 @@ class ContextResponse(BaseModel):
     """Сформированный контекст для LLM."""
 
     context: str = Field(..., description="Объединённый текст релевантных фрагментов")
-    sources: List[dict] = Field(..., description="Список источников, использованных в контексте")
+    sources: List[dict] = Field(
+        ..., description="Список источников, использованных в контексте"
+    )
 
 
 class ErrorResponse(BaseModel):

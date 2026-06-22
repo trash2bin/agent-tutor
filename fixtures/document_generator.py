@@ -26,7 +26,6 @@ from fixtures.catalog import (
     GROUP_SPECIALTY_MAP,
     SPECIALITIES,
 )
-from rag.repository import DocumentRepository
 from mcp_server.tools.rag import RagTools
 
 
@@ -349,9 +348,7 @@ class DocumentTextGenerator:
         material: MaterialSpec | str,
     ) -> str:
         spec = (
-            material
-            if isinstance(material, MaterialSpec)
-            else _material_spec(material)
+            material if isinstance(material, MaterialSpec) else _material_spec(material)
         )
         scenario = self.scenario_factory.build(discipline, spec)
         body = self.client.generate(self.build_prompt(scenario))
@@ -705,8 +702,7 @@ def _practice_fragment(scenario: DocumentScenario) -> str:
 
 def _control_questions(scenario: DocumentScenario) -> tuple[str, ...]:
     questions = [
-        f"Какую роль играет тема «{topic}» в дисциплине "
-        f"«{scenario.discipline.name}»?"
+        f"Какую роль играет тема «{topic}» в дисциплине «{scenario.discipline.name}»?"
         for topic in scenario.topics[:3]
     ]
     questions.append(
@@ -1041,7 +1037,7 @@ def _split_bold(text: str) -> list[tuple[str, bool]]:
     position = 0
     for match in re.finditer(r"\*\*(.+?)\*\*", text):
         if match.start() > position:
-            parts.append((text[position:match.start()], False))
+            parts.append((text[position : match.start()], False))
         parts.append((match.group(1), True))
         position = match.end()
     if position < len(text):

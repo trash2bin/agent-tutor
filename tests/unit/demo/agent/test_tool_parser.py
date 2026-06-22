@@ -2,9 +2,11 @@ import pytest
 from demo.api.agent.tool_parser import ToolCallParser
 from demo.api.agent.types import ParsedToolCall
 
+
 @pytest.fixture
 def parser():
     return ToolCallParser()
+
 
 def test_extract_native_tool_calls(parser):
     message = {
@@ -13,8 +15,8 @@ def test_extract_native_tool_calls(parser):
                 "id": "1",
                 "function": {
                     "name": "get_student",
-                    "arguments": '{"student_id": "123"}'
-                }
+                    "arguments": '{"student_id": "123"}',
+                },
             }
         ]
     }
@@ -22,6 +24,7 @@ def test_extract_native_tool_calls(parser):
     assert len(calls) == 1
     assert calls[0]["name"] == "get_student"
     assert calls[0]["arguments"] == {"student_id": "123"}
+
 
 def test_extract_json_tool_calls_markdown(parser):
     message = {
@@ -32,9 +35,11 @@ def test_extract_json_tool_calls_markdown(parser):
     assert calls[0]["name"] == "get_disciplines"
     assert calls[0]["arguments"] == {"student_id": "456"}
 
+
 def test_parse_tool_arguments_invalid(parser):
     assert parser.parse_tool_arguments("invalid-json") == {}
     assert parser.parse_tool_arguments(123) == {}
+
 
 def test_format_for_model(parser):
     tool_call = ParsedToolCall(id="1", name="test_tool", arguments={"key": "val"})

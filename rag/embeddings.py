@@ -1,4 +1,5 @@
 """Сервис для вычисления эмбеддингов (SentenceTransformer)."""
+
 from __future__ import annotations
 
 import logging
@@ -29,6 +30,7 @@ class SentenceTransformerEmbedding(EmbeddingProtocol):
         if self._model is None:
             try:
                 from sentence_transformers import SentenceTransformer
+
                 self._model = SentenceTransformer(
                     self.config.embedding_model,
                     local_files_only=self.config.embedding_local_files_only,

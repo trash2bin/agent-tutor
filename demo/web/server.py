@@ -45,17 +45,17 @@ async def _get_proxy_headers(request: Request) -> dict[str, str]:
         "accept-language": request.headers.get("accept-language", ""),
         "accept-encoding": request.headers.get("accept-encoding", ""),
     }
-    
+
     # Forward content-type for requests with body
     if request.method in ("POST", "PUT", "PATCH"):
         ct = request.headers.get("content-type")
         if ct:
             headers["content-type"] = ct
-    
+
     # Add bearer token if configured
     if settings.api_bearer_token:
         headers["authorization"] = f"Bearer {settings.api_bearer_token}"
-    
+
     return headers
 
 
@@ -68,14 +68,14 @@ async def _proxy_to_api(
     http_client = request.app.state.http_client
     url = _build_api_url(api_path)
     headers = await _get_proxy_headers(request)
-    
+
     body = await request.body() if request.method != "GET" else None
-    
+
     logger.debug(f"Proxy {request.method} {api_path} -> {url}")
     logger.debug(f"Proxy headers: {headers}")
     if body:
         logger.debug(f"Proxy body size: {len(body)} bytes")
-    
+
     try:
         proxy_req = http_client.build_request(
             request.method,
@@ -84,27 +84,28 @@ async def _proxy_to_api(
             content=body,
             params=dict(request.query_params),
         )
-        
+
         if stream:
             response = await http_client.send(proxy_req, stream=True)
-            
+
             if response.status_code != 200:
                 return Response(
                     content=response.content,
                     status_code=response.status_code,
                     headers=dict(response.headers),
                 )
-            
+
             async def stream_gen():
                 async for chunk in response.aiter_bytes():
                     yield chunk
-            
+
             # Filter out hop-by-hop headers
             response_headers = {
-                k: v for k, v in response.headers.items()
+                k: v
+                for k, v in response.headers.items()
                 if k.lower() not in ("transfer-encoding", "connection")
             }
-            
+
             return StreamingResponse(
                 stream_gen(),
                 status_code=response.status_code,
@@ -119,7 +120,7 @@ async def _proxy_to_api(
                 headers=dict(response.headers),
                 media_type=response.headers.get("content-type"),
             )
-    
+
     except httpx.ConnectError as exc:
         logger.error(f"API connection error: {exc}")
         return Response(
@@ -148,15 +149,15 @@ async def lifespan(app: FastAPI):
     # Create HTTP client for API proxying
     http_client = httpx.AsyncClient(timeout=30.0)
     app.state.http_client = http_client
-    
+
     # Startup
     logger.info(f"Web server starting on {settings.web_host}:{settings.web_port}")
     logger.info(f"API URL: {API_BASE_URL}")
     if settings.api_bearer_token:
         logger.info("Bearer token configured")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Web server shutting down")
     await http_client.aclose()
@@ -181,6 +182,7 @@ app.add_middleware(
 
 # --- Routes ---
 
+
 @app.get("/")
 async def index() -> FileResponse:
     """Serve the main index.html page."""
@@ -202,6 +204,7 @@ async def health() -> dict[str, Any]:
 
 
 # --- API Reverse Proxy Routes ---
+
 
 @app.get("/api/health")
 async def proxy_health(request: Request) -> Response:
@@ -244,10 +247,10 @@ async def proxy_api_any(request: Request, path: str):
     return await _proxy_to_api(request, f"/{path}", stream=is_sse)
 
 
-
 def main() -> None:
     """Run the web server."""
     import uvicorn
+
     uvicorn.run(
         "demo.web.server:app",
         host=settings.web_host,

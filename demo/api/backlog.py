@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 import uuid
 from datetime import datetime, timezone
@@ -46,7 +45,9 @@ class ModelBacklog:
         try:
             text = json.dumps(record, ensure_ascii=False, indent=2, default=str)
         except Exception:
-            logger.exception("Failed to serialize backlog record for session %s", session_id)
+            logger.exception(
+                "Failed to serialize backlog record for session %s", session_id
+            )
             return
         try:
             with open(path, "a", encoding="utf-8") as f:
@@ -90,14 +91,17 @@ class ModelBacklog:
 
     def turn_start(self, session_id: str, user_message: str) -> str:
         turn_id = uuid.uuid4().hex[:12]
-        self._write(session_id, {
-            "session_id": session_id,
-            "turn_id": turn_id,
-            "iteration": 0,
-            "event": "turn_start",
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "data": {"user_message": user_message},
-        })
+        self._write(
+            session_id,
+            {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "iteration": 0,
+                "event": "turn_start",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "data": {"user_message": user_message},
+            },
+        )
         return turn_id
 
     def model_request(
@@ -108,21 +112,24 @@ class ModelBacklog:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> None:
-        self._write(session_id, {
-            "session_id": session_id,
-            "turn_id": turn_id,
-            "iteration": iteration,
-            "event": "model_request",
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "data": {
-                "num_messages": len(messages),
-                "messages": messages,
-                "num_tools": len(tools),
-                "tools": tools,
-                "model": getattr(settings, "ollama_model", None),
-                "api_base": getattr(settings, "ollama_url", None),
+        self._write(
+            session_id,
+            {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "iteration": iteration,
+                "event": "model_request",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "data": {
+                    "num_messages": len(messages),
+                    "messages": messages,
+                    "num_tools": len(tools),
+                    "tools": tools,
+                    "model": getattr(settings, "ollama_model", None),
+                    "api_base": getattr(settings, "ollama_url", None),
+                },
             },
-        })
+        )
 
     def model_response(
         self,
@@ -133,21 +140,24 @@ class ModelBacklog:
         duration_ms: float,
         token_usage: dict[str, int] | None = None,
     ) -> None:
-        self._write(session_id, {
-            "session_id": session_id,
-            "turn_id": turn_id,
-            "iteration": iteration,
-            "event": "model_response",
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "duration_ms": round(duration_ms, 1),
-            "tokens": token_usage,
-            "data": {
-                "content": response.get("content", ""),
-                "tool_calls": response.get("tool_calls"),
-                "reasoning_content": response.get("reasoning_content"),
-                "finish_reason": response.get("finish_reason"),
+        self._write(
+            session_id,
+            {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "iteration": iteration,
+                "event": "model_response",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "duration_ms": round(duration_ms, 1),
+                "tokens": token_usage,
+                "data": {
+                    "content": response.get("content", ""),
+                    "tool_calls": response.get("tool_calls"),
+                    "reasoning_content": response.get("reasoning_content"),
+                    "finish_reason": response.get("finish_reason"),
+                },
             },
-        })
+        )
 
     def stream_start(
         self,
@@ -156,17 +166,20 @@ class ModelBacklog:
         iteration: int,
         messages: list[dict[str, Any]],
     ) -> None:
-        self._write(session_id, {
-            "session_id": session_id,
-            "turn_id": turn_id,
-            "iteration": iteration,
-            "event": "stream_start",
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "data": {
-                "num_messages": len(messages),
-                "messages": messages,
+        self._write(
+            session_id,
+            {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "iteration": iteration,
+                "event": "stream_start",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "data": {
+                    "num_messages": len(messages),
+                    "messages": messages,
+                },
             },
-        })
+        )
 
     def stream_end(
         self,
@@ -177,19 +190,22 @@ class ModelBacklog:
         duration_ms: float,
         token_usage: dict[str, int] | None = None,
     ) -> None:
-        self._write(session_id, {
-            "session_id": session_id,
-            "turn_id": turn_id,
-            "iteration": iteration,
-            "event": "stream_end",
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "duration_ms": round(duration_ms, 1),
-            "tokens": token_usage,
-            "data": {
-                "full_text": full_text,
-                "chars": len(full_text),
+        self._write(
+            session_id,
+            {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "iteration": iteration,
+                "event": "stream_end",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "duration_ms": round(duration_ms, 1),
+                "tokens": token_usage,
+                "data": {
+                    "full_text": full_text,
+                    "chars": len(full_text),
+                },
             },
-        })
+        )
 
     def tool_call(
         self,
@@ -199,14 +215,17 @@ class ModelBacklog:
         name: str,
         arguments: dict[str, Any],
     ) -> None:
-        self._write(session_id, {
-            "session_id": session_id,
-            "turn_id": turn_id,
-            "iteration": iteration,
-            "event": "tool_call",
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "data": {"name": name, "arguments": arguments},
-        })
+        self._write(
+            session_id,
+            {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "iteration": iteration,
+                "event": "tool_call",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "data": {"name": name, "arguments": arguments},
+            },
+        )
 
     def tool_result(
         self,
@@ -217,19 +236,22 @@ class ModelBacklog:
         result: str,
         duration_ms: float,
     ) -> None:
-        self._write(session_id, {
-            "session_id": session_id,
-            "turn_id": turn_id,
-            "iteration": iteration,
-            "event": "tool_result",
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "duration_ms": round(duration_ms, 1),
-            "data": {
-                "name": name,
-                "result": result,
-                "result_chars": len(result),
+        self._write(
+            session_id,
+            {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "iteration": iteration,
+                "event": "tool_result",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "duration_ms": round(duration_ms, 1),
+                "data": {
+                    "name": name,
+                    "result": result,
+                    "result_chars": len(result),
+                },
             },
-        })
+        )
 
     def empty_round(
         self,
@@ -239,18 +261,21 @@ class ModelBacklog:
         reasoning_content: str | None,
         messages: list[dict[str, Any]],
     ) -> None:
-        self._write(session_id, {
-            "session_id": session_id,
-            "turn_id": turn_id,
-            "iteration": iteration,
-            "event": "empty_round",
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "data": {
-                "reasoning_content": reasoning_content or "",
-                "num_messages": len(messages),
-                "messages": messages,
+        self._write(
+            session_id,
+            {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "iteration": iteration,
+                "event": "empty_round",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "data": {
+                    "reasoning_content": reasoning_content or "",
+                    "num_messages": len(messages),
+                    "messages": messages,
+                },
             },
-        })
+        )
 
     def error(
         self,
@@ -260,14 +285,17 @@ class ModelBacklog:
         error: str,
         context: dict[str, Any] | None = None,
     ) -> None:
-        self._write(session_id, {
-            "session_id": session_id,
-            "turn_id": turn_id,
-            "iteration": iteration,
-            "event": "error",
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "data": {"error": error, "context": context or {}},
-        })
+        self._write(
+            session_id,
+            {
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "iteration": iteration,
+                "event": "error",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "data": {"error": error, "context": context or {}},
+            },
+        )
 
     #  Reading
 
@@ -279,14 +307,18 @@ class ModelBacklog:
             records = self._read_records(session_id)
             first = records[0] if records else None
             last = records[-1] if records else None
-            result.append({
-                "session_id": session_id,
-                "size_bytes": path.stat().st_size,
-                "num_events": len(records),
-                "first_event": first,
-                "last_event": last,
-            })
-        return sorted(result, key=lambda s: s.get("first_event", {}).get("ts", ""), reverse=True)
+            result.append(
+                {
+                    "session_id": session_id,
+                    "size_bytes": path.stat().st_size,
+                    "num_events": len(records),
+                    "first_event": first,
+                    "last_event": last,
+                }
+            )
+        return sorted(
+            result, key=lambda s: s.get("first_event", {}).get("ts", ""), reverse=True
+        )
 
     def read_session(
         self,
@@ -295,7 +327,7 @@ class ModelBacklog:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         records = self._read_records(session_id)
-        return records[offset:offset + limit]
+        return records[offset : offset + limit]
 
     #  Maintenance
 

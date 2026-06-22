@@ -5,7 +5,6 @@ from pydantic import Field
 from db.database import Database
 from db.models import (
     Grade,
-    Material,
     ScheduleEntry,
     Discipline,
     Student,
@@ -34,9 +33,12 @@ mcp = FastMCP("University Server")
 
 # СТУДЕНТ
 
+
 @mcp.tool()
 def find_student_by_name(
-    name: Annotated[str, Field(description="Полное ФИО студента. Пример: 'Иван Петров Иванович'")]
+    name: Annotated[
+        str, Field(description="Полное ФИО студента. Пример: 'Иван Петров Иванович'")
+    ],
 ) -> Optional[Student]:
     """Найти студента по имени.
 
@@ -50,7 +52,12 @@ def find_student_by_name(
 
 @mcp.tool()
 def get_student(
-    student_id: Annotated[str, Field(description="ID студента (UUID или число). Получи через find_student_by_name.")]
+    student_id: Annotated[
+        str,
+        Field(
+            description="ID студента (UUID или число). Получи через find_student_by_name."
+        ),
+    ],
 ) -> Optional[Student]:
     """Получить карточку студента по ID.
 
@@ -62,13 +69,19 @@ def get_student(
 
 # РАСПИСАНИЕ
 
+
 @mcp.tool()
 def get_schedule(
-    group_id: Annotated[str, Field(description="ID группы (UUID). Берётся из поля group.id студента.")],
-    day: Annotated[Optional[str], Field(
-        description="День недели по-русски: 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'. "
-                    "Не передавай если нужно всё расписание."
-    )] = None
+    group_id: Annotated[
+        str, Field(description="ID группы (UUID). Берётся из поля group.id студента.")
+    ],
+    day: Annotated[
+        Optional[str],
+        Field(
+            description="День недели по-русски: 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'. "
+            "Не передавай если нужно всё расписание."
+        ),
+    ] = None,
 ) -> List[ScheduleEntry]:
     """Расписание группы студента.
 
@@ -80,9 +93,12 @@ def get_schedule(
 
 # ДИСЦИПЛИНЫ И ОЦЕНКИ
 
+
 @mcp.tool()
 def get_disciplines(
-    student_id: Annotated[str, Field(description="ID студента из find_student_by_name или get_student.")]
+    student_id: Annotated[
+        str, Field(description="ID студента из find_student_by_name или get_student.")
+    ],
 ) -> List[Discipline]:
     """Список дисциплин студента.
 
@@ -94,11 +110,16 @@ def get_disciplines(
 
 @mcp.tool()
 def get_student_grades(
-    student_id: Annotated[str, Field(description="ID студента из find_student_by_name.")],
-    discipline_id: Annotated[Optional[str], Field(
-        description="ID дисциплины из get_disciplines для фильтрации по предмету. "
-                    "Не передавай если нужны все оценки — вызов без discipline_id вернёт их все."
-    )] = None
+    student_id: Annotated[
+        str, Field(description="ID студента из find_student_by_name.")
+    ],
+    discipline_id: Annotated[
+        Optional[str],
+        Field(
+            description="ID дисциплины из get_disciplines для фильтрации по предмету. "
+            "Не передавай если нужны все оценки — вызов без discipline_id вернёт их все."
+        ),
+    ] = None,
 ) -> List[Grade]:
     """Оценки студента.
 
@@ -111,9 +132,15 @@ def get_student_grades(
 
 # ПРЕПОДАВАТЕЛЬ
 
+
 @mcp.tool()
 def get_teacher_by_name(
-    name: Annotated[str, Field(description="Полное ФИО преподавателя. Пример: 'Оксана Ниловна Константинова'")]
+    name: Annotated[
+        str,
+        Field(
+            description="Полное ФИО преподавателя. Пример: 'Оксана Ниловна Константинова'"
+        ),
+    ],
 ) -> Optional[Teacher]:
     """Найти преподавателя по имени.
 
@@ -125,9 +152,12 @@ def get_teacher_by_name(
 @mcp.tool()
 def get_teacher_schedule(
     teacher_name: Annotated[str, Field(description="Полное ФИО преподавателя.")],
-    day: Annotated[Optional[str], Field(
-        description="День недели по-русски. Не передавай если нужно всё расписание."
-    )] = None
+    day: Annotated[
+        Optional[str],
+        Field(
+            description="День недели по-русски. Не передавай если нужно всё расписание."
+        ),
+    ] = None,
 ) -> List[ScheduleEntry]:
     """Расписание преподавателя.
 
@@ -139,12 +169,18 @@ def get_teacher_schedule(
 
 # ДОКУМЕНТЫ / RAG
 
+
 @mcp.tool()
 def list_documents(
-    discipline_id: Annotated[Optional[str], Field(
-        description="ID дисциплины для фильтрации. Не передавай для получения всех документов."
-    )] = None,
-    limit: Annotated[Optional[int], Field(description="Максимум документов (1–1000).", ge=1, le=1000)] = None
+    discipline_id: Annotated[
+        Optional[str],
+        Field(
+            description="ID дисциплины для фильтрации. Не передавай для получения всех документов."
+        ),
+    ] = None,
+    limit: Annotated[
+        Optional[int], Field(description="Максимум документов (1–1000).", ge=1, le=1000)
+    ] = None,
 ) -> List[Document]:
     """Список документов, доступных для RAG-поиска.
 
@@ -156,10 +192,13 @@ def list_documents(
 @mcp.tool()
 def search_documents(
     query: Annotated[str, Field(description="Поисковый запрос по документам.")],
-    discipline_id: Annotated[Optional[str], Field(
-        description="ID дисциплины для сужения поиска. Опционально."
-    )] = None,
-    limit: Annotated[int, Field(description="Количество фрагментов (1–20).", ge=1, le=20)] = 5,
+    discipline_id: Annotated[
+        Optional[str],
+        Field(description="ID дисциплины для сужения поиска. Опционально."),
+    ] = None,
+    limit: Annotated[
+        int, Field(description="Количество фрагментов (1–20).", ge=1, le=20)
+    ] = 5,
 ) -> List[RagSearchResult]:
     """Поиск релевантных фрагментов документов (RAG).
 
@@ -171,11 +210,16 @@ def search_documents(
 
 @mcp.tool()
 def context_search_in_documents(
-    query: Annotated[str, Field(description="Вопрос пользователя для поиска по документам.")],
-    discipline_id: Annotated[Optional[str], Field(
-        description="ID дисциплины для сужения контекста. Опционально."
-    )] = None,
-    limit: Annotated[int, Field(description="Фрагментов в контексте (1–20).", ge=1, le=20)] = 5,
+    query: Annotated[
+        str, Field(description="Вопрос пользователя для поиска по документам.")
+    ],
+    discipline_id: Annotated[
+        Optional[str],
+        Field(description="ID дисциплины для сужения контекста. Опционально."),
+    ] = None,
+    limit: Annotated[
+        int, Field(description="Фрагментов в контексте (1–20).", ge=1, le=20)
+    ] = 5,
 ) -> RagContext:
     """Готовый RAG-контекст для ответа модели.
 
@@ -187,6 +231,7 @@ def context_search_in_documents(
 
 
 # СЛУЖЕБНОЕ
+
 
 @mcp.tool()
 def get_health_status() -> dict:
@@ -213,7 +258,31 @@ def get_health_status() -> dict:
 
 
 def main():
-    mcp.run(transport="streamable-http", mount_path="/mcp")
+    """Запустить MCP-сервер с HTTP-транспортом и health endpoint'ом.
+
+    FastMCP streamable-HTTP уже содержит маршрут /mcp.
+    Добавляем /health для docker healthcheck.
+    """
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    async def health(request):
+        status = get_health_status()
+        overall = all(v.get("status") == "ok" for v in status.values())
+        return JSONResponse(
+            {"status": "ok" if overall else "degraded", **status},
+            status_code=200 if overall else 503,
+        )
+
+    # Берём готовое Starlette-приложение от FastMCP и добавляем /health
+    app = mcp.streamable_http_app()
+    app.routes.append(Route("/health", endpoint=health))
+
+    import uvicorn
+
+    port = int(os.environ.get("MCP_PORT", "8083"))
+    host = os.environ.get("MCP_HOST", "0.0.0.0")
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":
