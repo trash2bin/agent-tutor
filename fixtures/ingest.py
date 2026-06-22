@@ -24,7 +24,7 @@ def cmd_import(args):
             discipline_id=args.discipline_id,
             title=args.title,
         )
-        print(f"  done — {result.chunks_count} chunks, {time.monotonic()-t0:.1f}s")
+        print(f"  done — {result.chunks_count} chunks, {time.monotonic() - t0:.1f}s")
     except (FileNotFoundError, ValueError) as e:
         print(f"ERR {e}", file=sys.stderr)
         sys.exit(1)
@@ -82,7 +82,10 @@ def _delete_documents(db: Database, rag: RagClient, rows) -> int:
             try:
                 source_path.unlink()
             except OSError as exc:
-                print(f"WARN не удалось удалить файл {source_path}: {exc}", file=sys.stderr)
+                print(
+                    f"WARN не удалось удалить файл {source_path}: {exc}",
+                    file=sys.stderr,
+                )
         deleted += 1
     db.commit()
     return deleted
@@ -92,7 +95,9 @@ def _cleanup_empty_generated_dirs() -> None:
     generated_dir = Path("generated_materials").resolve()
     if not generated_dir.exists():
         return
-    for path in sorted(generated_dir.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+    for path in sorted(
+        generated_dir.rglob("*"), key=lambda item: len(item.parts), reverse=True
+    ):
         if not path.is_dir():
             continue
         try:

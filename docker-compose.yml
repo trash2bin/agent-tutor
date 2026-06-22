@@ -1,0 +1,254 @@
+# docker compose with 4 long-running services + optional profiles
+# Dev:   docker compose up -d
+# Prod:  docker compose --profile prod up -d
+# Tools: docker compose --profile tools run --rm agent agent-ingest list
+# Cron:  docker compose --profile cron up -d
+
+x-restart: &restart
+  restart: unless-stopped
+
+x-healthcheck: &hc-curl
+  interval: 10s
+  timeout: 5s
+  retries: 3
+  start_period: 15s
+
+services:
+  # ──────────────────────────────────────────────────────────────────
+  # PostgreSQL (локальная БД для разработки / pre-prod)
+  # Поднять:  docker compose up db
+  #          docker compose up -d db
+  # Проверить: docker compose exec db psql -U tutor -d agent_tutor -c '\dt'
+  # ──────────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      POSTGRES_USER: tutor
+      POSTGRES_PASSWORD: tutor
+      POSTGRES_DB: agent_tutor
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tutor -d agent_tutor"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - agent-tutor-net
+    <<: *restart
+
+  rag:
+    image: agent-tutor-rag:latest
+    build:
+      context: .
+      dockerfile: rag/Dockerfile
+    ports:
+      - "127.0.0.1:8082:8082"
+    volumes:
+      - rag_data:/data/rag
+      - hf_cache:/home/app/.cache/huggingface
+    environment:
+      - CHROMA_PATH=/data/rag/chroma_db
+      - DB_PATH=/data/rag/university.db
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      - RAG_DEVICE=${RAG_DEVICE:-cpu}
+      - RAG_CHUNKER_TYPE=${RAG_CHUNKER_TYPE:-semantic}
+      - RAG_LOCAL_FILES_ONLY=${RAG_LOCAL_FILES_ONLY:-0}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8082/health"]
+      <<: *hc-curl
+      start_period: 120s
+    networks:
+      - agent-tutor-net
+    <<: *restart
+
+  mcp:
+    image: agent-tutor-mcp:latest
+    build:
+      context: .
+      dockerfile: mcp_server/Dockerfile
+    ports:
+      - "127.0.0.1:8083:8083"
+    volumes:
+      - app_data:/data/app:ro
+    environment:
+      - RAG_SERVICE_URL=http://rag:8082
+      - DB_PATH=/data/app/university.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8083/health"]
+      <<: *hc-curl
+    depends_on:
+      rag:
+        condition: service_healthy
+    networks:
+      - agent-tutor-net
+    <<: *restart
+
+  api:
+    image: agent-tutor-api:latest
+    build:
+      context: .
+      dockerfile: demo/api/Dockerfile
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - app_data:/data/app
+    environment:
+      - MCP_SERVICE_URL=http://mcp:8083/mcp
+      - DB_PATH=/data/app/university.db
+      - DEMO_SESSION_DB_PATH=/data/app/demo_sessions.sqlite
+      - BACKLOG_DIR=/data/app/backlog
+      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:0.5b}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - MISTRAL_MODEL=${MISTRAL_MODEL:-mistral/mistral-small}
+      - ENABLE_THINK=${ENABLE_THINK:-true}
+      - DEMO_REQUEST_TIMEOUT=${DEMO_REQUEST_TIMEOUT:-600}
+      - DEMO_HISTORY_TURNS=${DEMO_HISTORY_TURNS:-8}
+      - DEMO_HISTORY_CONTENT_CHARS=${DEMO_HISTORY_CONTENT_CHARS:-6000}
+      - AGENT_TEMPERATURE=${AGENT_TEMPERATURE:-0.5}
+      - AGENT_MAX_ITERATIONS=${AGENT_MAX_ITERATIONS:-5}
+      - AGENT_MAX_TOKENS_THINKING=${AGENT_MAX_TOKENS_THINKING:-4096}
+      - AGENT_MAX_EMPTY_ROUNDS=${AGENT_MAX_EMPTY_ROUNDS:-3}
+      - BACKLOG_RETENTION_DAYS=${BACKLOG_RETENTION_DAYS:-30}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8081/health"]
+      <<: *hc-curl
+    depends_on:
+      mcp:
+        condition: service_healthy
+    networks:
+      - agent-tutor-net
+    <<: *restart
+
+  web:
+    image: agent-tutor-web:latest
+    build:
+      context: .
+      dockerfile: demo/web/Dockerfile
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - WEB_ORIGIN=${WEB_ORIGIN:-*}
+      - API_BEARER_TOKEN=${API_BEARER_TOKEN:-}
+      - DEMO_API_HOST=api
+      - DEMO_API_PORT=8081
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/"]
+      <<: *hc-curl
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - agent-tutor-net
+    <<: *restart
+
+  agent:
+    image: agent-tutor-agent:latest
+    build:
+      context: .
+      dockerfile: tools/Dockerfile
+    profiles:
+      - tools
+    volumes:
+      - app_data:/data/app
+      - rag_data:/data/rag:ro
+    environment:
+      - RAG_SERVICE_URL=http://rag:8082
+      - DB_PATH=/data/app/university.db
+      - CHROMA_PATH=/data/rag/chroma_db
+      - DOCGEN_MODEL=${DOCGEN_MODEL:-qwen2.5:0.5b}
+      - DOCGEN_OLLAMA_URL=${DOCGEN_OLLAMA_URL:-http://host.docker.internal:11434/api/generate}
+      - DOCGEN_OUTPUT_DIR=${DOCGEN_OUTPUT_DIR:-/data/app/generated_materials}
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      - RAG_DEVICE=${RAG_DEVICE:-cpu}
+      - RAG_LOCAL_FILES_ONLY=${RAG_LOCAL_FILES_ONLY:-0}
+    depends_on:
+      rag:
+        condition: service_healthy
+    networks:
+      - agent-tutor-net
+
+  # BACKUP (profile: cron): SQLite-backups every 6 hours
+  # Esed image for agent (Python + SQLite)
+  backup:
+    image: agent-tutor-agent:latest
+    build:
+      context: .
+      dockerfile: tools/Dockerfile
+    profiles:
+      - cron
+    command: python /app/scripts/backup.py
+    volumes:
+      - app_data:/data/app:ro
+      - backups:/data/backups
+    environment:
+      - BACKUP_DATA_DIR=/data/app
+      - BACKUP_DIR=/data/backups
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-14}
+      - BACKUP_INTERVAL_HOURS=${BACKUP_INTERVAL_HOURS:-6}
+    networks:
+      - agent-tutor-net
+
+  # CADDY (profile: prod): HTTPS + reverse-proxy to web
+  caddy:
+    image: caddy:2
+    profiles:
+      - prod
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+    depends_on:
+      web:
+        condition: service_healthy
+    networks:
+      - agent-tutor-net
+    <<: *restart
+
+volumes:
+  app_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./.data/app
+  rag_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./.data/rag
+  hf_cache:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./.data/hf_cache
+  backups:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./.data/backups
+  pg_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./.data/pg
+  caddy_data:
+  caddy_config:
+
+networks:
+  agent-tutor-net:
+    driver: bridge

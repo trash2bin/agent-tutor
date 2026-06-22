@@ -9,7 +9,6 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
-from db.connection import SqliteConnector
 from demo.settings import PROJECT_ROOT, settings
 
 logger = logging.getLogger("demo.api.sessions")
@@ -58,7 +57,9 @@ class SessionStore:
         self._connection_factory = connection_factory
         self.max_turns = max(1, max_turns)
         self.max_content_chars = max(1, max_content_chars)
-        self.legacy_memory_path = Path(legacy_memory_path) if legacy_memory_path else None
+        self.legacy_memory_path = (
+            Path(legacy_memory_path) if legacy_memory_path else None
+        )
         self._lock = threading.RLock()
 
         self._init_schema()
@@ -195,10 +196,17 @@ class SessionStore:
         return filtered
 
     def _compact_message(self, message: dict[str, Any]) -> dict[str, Any]:
-        compact = {key: deepcopy(value) for key, value in message.items() if key != "reasoning_content"}
+        compact = {
+            key: deepcopy(value)
+            for key, value in message.items()
+            if key != "reasoning_content"
+        }
         content = compact.get("content")
         if isinstance(content, str) and len(content) > self.max_content_chars:
-            compact["content"] = content[: self.max_content_chars] + "\n\n...[обрезано в истории диалога]"
+            compact["content"] = (
+                content[: self.max_content_chars]
+                + "\n\n...[обрезано в истории диалога]"
+            )
         return compact
 
     def _trim_session(self, conn, session_id: str) -> None:

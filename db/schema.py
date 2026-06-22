@@ -1,7 +1,15 @@
+"""DDL для обеих БД.
+
+Используем диалект, общий для SQLite (3.24+) и PostgreSQL:
+  - CREATE TABLE IF NOT EXISTS
+  - INSERT … ON CONFLICT DO NOTHING  (вместо INSERT OR IGNORE)
+  - TEXT / INTEGER — общие типы
+  - ON DELETE CASCADE — поддерживается обеими
+"""
+
 from __future__ import annotations
 
-import sqlite3
-
+from typing import Any
 
 SCHEMA_STATEMENTS = (
     """
@@ -98,7 +106,16 @@ SCHEMA_STATEMENTS = (
 )
 
 
-def create_schema(connection: sqlite3.Connection) -> None:
+def create_schema(connection: Any, *, adapter: Any = None) -> None:
+    """Создать таблицы через connection.
+
+    Args:
+        connection: DBAPI2-совместимое соединение (sqlite3 или psycopg2)
+        adapter: функция adapt_sql(sql) для подстановки параметрического стиля
+    """
+    cursor = connection.cursor()
     for statement in SCHEMA_STATEMENTS:
-        connection.execute(statement)
+        sql = adapter(statement) if adapter else statement
+        cursor.execute(sql)
+    cursor.close()
     connection.commit()

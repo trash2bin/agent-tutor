@@ -52,7 +52,9 @@ def cmd_generate_all(args):
                 print(f"  {material.type}: {material.file_name}")
             created_total += len(materials)
 
-        print(f"\nГотово. Дисциплин: {len(disciplines)}, файлов в базе: {created_total}")
+        print(
+            f"\nГотово. Дисциплин: {len(disciplines)}, файлов в базе: {created_total}"
+        )
     except RuntimeError as e:
         print(f"ERR {e}", file=sys.stderr)
         sys.exit(1)
@@ -66,13 +68,17 @@ def main():
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_gen = sub.add_parser("generate", help="Сгенерировать материалы для одной дисциплины")
+    p_gen = sub.add_parser(
+        "generate", help="Сгенерировать материалы для одной дисциплины"
+    )
     p_gen.add_argument("--discipline-id", "-d", required=True, help="ID дисциплины")
     p_gen.add_argument("--force", action="store_true", help="Пересоздать файлы")
     p_gen.add_argument("--model", "-m", help="Модель Ollama")
     p_gen.set_defaults(func=cmd_generate)
 
-    p_all = sub.add_parser("generate-all", help="Сгенерировать материалы для всех дисциплин")
+    p_all = sub.add_parser(
+        "generate-all", help="Сгенерировать материалы для всех дисциплин"
+    )
     p_all.add_argument("--force", action="store_true", help="Пересоздать файлы")
     p_all.add_argument("--model", "-m", help="Модель Ollama")
     p_all.set_defaults(func=cmd_generate_all)

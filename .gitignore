@@ -11,3 +11,7 @@ TECHNICAL_DOC.md
 .agent_memory.json
 backlog/
 .coverage
+.data/
+.ruff_cache/
+.pytest_cache/
+.env

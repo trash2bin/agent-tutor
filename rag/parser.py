@@ -1,4 +1,5 @@
 """Парсинг документов в список страниц."""
+
 from __future__ import annotations
 
 import logging
@@ -82,8 +83,10 @@ class DocumentParser:
         # Собираем результат
         result_pages: list[PageDict] = []
         for page_no in sorted(page_lines):
-            result_pages.append({
-                "page": page_no if page_no > 0 else None,
-                "text": "\n".join(page_lines[page_no]),
-            })
+            result_pages.append(
+                {
+                    "page": page_no if page_no > 0 else None,
+                    "text": "\n".join(page_lines[page_no]),
+                }
+            )
         return result_pages

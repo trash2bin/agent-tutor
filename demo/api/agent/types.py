@@ -18,6 +18,7 @@ EventType = Literal[
 # Message types for LLM conversation
 class MessageRole(str):
     """Valid message roles in a conversation."""
+
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
@@ -30,28 +31,33 @@ MessageContent = str | list[dict[str, Any]]
 
 class BaseMessage(TypedDict):
     """Base message structure."""
+
     role: MessageRole
     content: MessageContent
 
 
 class SystemMessage(BaseMessage):
     """System message."""
+
     role: Literal["system"]
 
 
 class UserMessage(BaseMessage):
     """User message."""
+
     role: Literal["user"]
 
 
 class AssistantMessage(BaseMessage):
     """Assistant message with optional tool calls."""
+
     role: Literal["assistant"]
     tool_calls: NotRequired[list[ToolCall]]
 
 
 class ToolMessage(BaseMessage):
     """Tool response message."""
+
     role: Literal["tool"]
     tool_call_id: str
     name: str
@@ -64,12 +70,14 @@ Message = SystemMessage | UserMessage | AssistantMessage | ToolMessage
 # Tool call types
 class FunctionCall(TypedDict):
     """Function call structure."""
+
     name: str
     arguments: str  # JSON string
 
 
 class ToolCall(TypedDict):
     """Tool call structure."""
+
     id: str | None
     type: Literal["function"]
     function: FunctionCall
@@ -78,6 +86,7 @@ class ToolCall(TypedDict):
 # Parsed tool call (internal representation)
 class ParsedToolCall(TypedDict):
     """Internal representation of a parsed tool call."""
+
     id: str
     name: str
     arguments: dict[str, Any]
@@ -86,6 +95,7 @@ class ParsedToolCall(TypedDict):
 # MCP tool definition (flexible to match MCP library output)
 class MCPToolParameter(TypedDict, total=False):
     """MCP tool parameter."""
+
     type: str
     description: str | None
     enum: NotRequired[list[str]]
@@ -95,6 +105,7 @@ class MCPToolParameter(TypedDict, total=False):
 
 class MCPToolSchema(TypedDict, total=False):
     """MCP tool schema."""
+
     type: str
     properties: NotRequired[dict[str, MCPToolParameter]]
     required: NotRequired[list[str]]
@@ -102,6 +113,7 @@ class MCPToolSchema(TypedDict, total=False):
 
 class MCPToolFunction(TypedDict, total=False):
     """MCP tool function definition."""
+
     name: str
     description: NotRequired[str]
     parameters: NotRequired[MCPToolSchema | dict[str, Any]]
@@ -109,6 +121,7 @@ class MCPToolFunction(TypedDict, total=False):
 
 class MCPTool(TypedDict, total=False):
     """MCP tool definition."""
+
     type: Literal["function"]
     function: MCPToolFunction | dict[str, Any]
 
@@ -116,6 +129,7 @@ class MCPTool(TypedDict, total=False):
 # LLM response types
 class UsageInfo(TypedDict):
     """Token usage information."""
+
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
@@ -123,6 +137,7 @@ class UsageInfo(TypedDict):
 
 class LLMResponse(TypedDict):
     """Complete LLM response."""
+
     role: str
     content: str
     tool_calls: NotRequired[list[ToolCall]]
@@ -133,6 +148,7 @@ class LLMResponse(TypedDict):
 # Agent event data types
 class StatusEventData(TypedDict):
     """Data for status events."""
+
     phase: Literal["empty_round", "tool_calls"]
     iteration: int
     empty_rounds: NotRequired[int]
@@ -141,11 +157,13 @@ class StatusEventData(TypedDict):
 
 class TokenEventData(TypedDict):
     """Data for token events."""
+
     data: str
 
 
 class ToolCallEventData(TypedDict):
     """Data for tool_call events."""
+
     id: str
     name: str
     arguments: dict[str, Any]
@@ -153,6 +171,7 @@ class ToolCallEventData(TypedDict):
 
 class ToolResultEventData(TypedDict):
     """Data for tool_result events."""
+
     id: str
     name: str
     result: str
@@ -160,11 +179,13 @@ class ToolResultEventData(TypedDict):
 
 class FinalEventData(TypedDict):
     """Data for final events."""
+
     content: str
 
 
 class ErrorEventData(TypedDict):
     """Data for error events."""
+
     message: str
 
 

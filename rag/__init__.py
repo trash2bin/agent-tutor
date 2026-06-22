@@ -1,8 +1,8 @@
 """RAG-система."""
+
 from __future__ import annotations
 
-import sqlite3
-from typing import Protocol
+from typing import Any, Callable
 
 from rag.config import RagConfig
 from rag.parser import DocumentParser
@@ -20,27 +20,40 @@ __all__ = [
 ]
 
 
-class ConnectionProvider(Protocol):
-    @property
-    def connection(self) -> sqlite3.Connection:
-        ...
+class ConnectionProvider:
+    """Протокол: объект с полем connection (например Database.connector)."""
+
+    def connection(self) -> Any: ...
 
 
 def create_rag_pipeline(
-    connection: sqlite3.Connection | ConnectionProvider,
+    connection: Any | ConnectionProvider,
     config: RagConfig | None = None,
 ) -> RAGPipeline:
     """Создать RAG-пайплайн.
 
-    Принимает sqlite3.Connection или маленький provider с полем connection.
+    Принимает DBAPI2-совместимое соединение (или provider с полем connection).
+    Если у соединения есть атрибут `_adapter` или передан объект Database,
+    попытается получить адаптер из connector.adapt_sql.
     """
     if config is None:
         config = RagConfig.from_env()
 
+    # Извлекаем adapter для SQL-параметризации
+    # Если передан Connector (SqliteConnector/PostgresConnector) — у него есть .adapt_sql
+    # Если передан Database — у неё есть .connector.adapt_sql
+    adapter: Callable[[str], str] | None = None
+    if hasattr(connection, "adapt_sql"):
+        adapter = connection.adapt_sql  # type: ignore[union-attr]
+    elif hasattr(connection, "connector") and hasattr(
+        connection.connector, "adapt_sql"
+    ):
+        adapter = connection.connector.adapt_sql  # type: ignore[union-attr]
+
     embedding_service = SentenceTransformerEmbedding(config)
     parser = DocumentParser(config)
     chunker = TextChunker(config)
-    repository = DocumentRepository(connection, config)
+    repository = DocumentRepository(connection, config, adapter=adapter)
     vector_store = ChromaDBVectorStore(config, embedding_service)
 
     return RAGPipeline(

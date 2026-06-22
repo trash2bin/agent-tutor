@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from sqlite3.dbapi2 import Row
 from typing import Any
 
 from db.database import Database
@@ -26,11 +25,25 @@ class DemoDataRepository:
         }
 
     def _stats(self) -> dict[str, int]:
-        names = ["students", "teachers", "disciplines", "documents", "grades", "schedule"]
+        names = [
+            "students",
+            "teachers",
+            "disciplines",
+            "documents",
+            "grades",
+            "schedule",
+        ]
         return {name: self._count(name) for name in names}
 
     def _count(self, table: str) -> int:
-        if table not in {"students", "teachers", "disciplines", "documents", "grades", "schedule"}:
+        if table not in {
+            "students",
+            "teachers",
+            "disciplines",
+            "documents",
+            "grades",
+            "schedule",
+        }:
             raise ValueError(f"Unsupported stats table: {table}")
 
         fetch = self.db.fetch_one(f"SELECT COUNT(*) AS total FROM {table}")
@@ -53,7 +66,9 @@ class DemoDataRepository:
         return [dict(row) for row in rows]
 
     def _teachers(self) -> list[dict[str, Any]]:
-        rows = self.db.fetch_all("SELECT id, name, disciplines_json FROM teachers ORDER BY name")
+        rows = self.db.fetch_all(
+            "SELECT id, name, disciplines_json FROM teachers ORDER BY name"
+        )
         return [
             {
                 "id": row["id"],
@@ -64,7 +79,9 @@ class DemoDataRepository:
         ]
 
     def _disciplines(self) -> list[dict[str, Any]]:
-        rows = self.db.fetch_all("SELECT id, name, description FROM disciplines ORDER BY name")
+        rows = self.db.fetch_all(
+            "SELECT id, name, description FROM disciplines ORDER BY name"
+        )
         return [dict(row) for row in rows]
 
     def _schedule(self) -> list[dict[str, Any]]:

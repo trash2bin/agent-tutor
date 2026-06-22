@@ -3,6 +3,7 @@
 Запускается как `python -m rag.service` (или через entrypoint `rag-service`).
 Предоставляет типизированный HTTP-фасад над `RAGPipeline` с использованием FastAPI.
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,7 +20,6 @@ from rag.http_models import (
     ContextResponse,
     DeleteDocumentRequest,
     DeleteDocumentResponse,
-    ErrorResponse,
     HealthResponse,
     ImportDocumentRequest,
     ImportDocumentResponse,
@@ -38,6 +38,7 @@ RAG_PORT: int = int(os.environ.get("RAG_PORT", "8082"))
 
 
 # === Состояние сервиса (singleton) ===
+
 
 class ServiceState:
     """Lazy-инициализируемое состояние процесса RAG-сервиса."""
@@ -84,6 +85,7 @@ app.add_middleware(
 
 # === Эндпоинты ===
 
+
 @app.get(
     "/health",
     response_model=HealthResponse,
@@ -110,21 +112,20 @@ async def health() -> HealthResponse:
         chroma_status = {"status": "error", "error": str(exc)}
         embedding_status = {"status": "error", "error": str(exc), "model": None}
 
-    overall_ok = (
-        db_status["status"] == "ok"
-        and chroma_status["status"] == "ok"
-    )
-    
+    overall_ok = db_status["status"] == "ok" and chroma_status["status"] == "ok"
+
+    from fastapi.responses import JSONResponse
+
     if not overall_ok:
-        # We return 503 if degraded, but still provide the HealthResponse body
-        # FastAPI's response_model doesn't automatically change status code.
-        # We can use raise HTTPException or just return the model and let the caller see status.
-        # However, for /health, returning a 503 is standard for load balancers.
-        # To do this while keeping the body, we can use a custom response or just let it be 200
-        # and let the 'status' field indicate degradation. 
-        # Let's stick to 200 but with "degraded" status to avoid breaking simple clients,
-        # OR use a custom response. Let's use 200 and rely on the 'status' field.
-        pass
+        return JSONResponse(
+            status_code=503,
+            content=HealthResponse(
+                status="degraded",
+                database=db_status,
+                chroma=chroma_status,
+                embedding=embedding_status,
+            ).model_dump(),
+        )
 
     return HealthResponse(
         status="ok" if overall_ok else "degraded",
@@ -153,8 +154,8 @@ async def list_documents(req: ListDocumentsRequest) -> ListDocumentsResponse:
     except Exception as exc:
         logger.exception("list_documents failed")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Failed to list documents: {exc}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list documents: {exc}",
         )
 
 
@@ -180,8 +181,8 @@ async def list_documents_get(
     except Exception as exc:
         logger.exception("list_documents_get failed")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Failed to list documents: {exc}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list documents: {exc}",
         )
 
 
@@ -206,12 +207,14 @@ async def import_document(req: ImportDocumentRequest) -> ImportDocumentResponse:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        )
     except Exception as exc:
         logger.exception("import_document failed")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Failed to import document: {exc}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to import document: {exc}",
         )
 
 
@@ -224,8 +227,8 @@ async def import_document(req: ImportDocumentRequest) -> ImportDocumentResponse:
 async def delete_document(req: DeleteDocumentRequest) -> DeleteDocumentResponse:
     if not req.path and not req.document_id:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Provide `path` or `document_id`"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide `path` or `document_id`",
         )
 
     try:
@@ -235,13 +238,17 @@ async def delete_document(req: DeleteDocumentRequest) -> DeleteDocumentResponse:
             source_path=req.path,
             document_id=req.document_id,
         )
-        
+
         if not row:
-            logger.info("Delete requested for non-existent document (path=%s, document_id=%s)", req.path, req.document_id)
+            logger.info(
+                "Delete requested for non-existent document (path=%s, document_id=%s)",
+                req.path,
+                req.document_id,
+            )
             return DeleteDocumentResponse(
-                deleted=None, 
-                title=None, 
-                message="Document not found, already deleted or never existed"
+                deleted=None,
+                title=None,
+                message="Document not found, already deleted or never existed",
             )
 
         doc_id = row["id"]
@@ -249,14 +256,14 @@ async def delete_document(req: DeleteDocumentRequest) -> DeleteDocumentResponse:
             pipeline.delete_document_vectors(doc_id)
         except Exception as exc:
             logger.warning("Vector deletion failed for %s: %s", doc_id, exc)
-        
+
         repo.delete_document_record(doc_id, commit=True)
         return DeleteDocumentResponse(deleted=doc_id, title=row["title"])
     except Exception as exc:
         logger.exception("delete_document failed")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Failed to delete document: {exc}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete document: {exc}",
         )
 
 
@@ -280,8 +287,8 @@ async def search(req: SearchRequest) -> SearchResponse:
     except Exception as exc:
         logger.exception("search failed")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Search failed: {exc}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Search failed: {exc}",
         )
 
 
@@ -298,12 +305,15 @@ async def context(req: ContextRequest) -> ContextResponse:
             discipline_id=req.discipline_id,
             limit=req.limit,
         )
-        return ContextResponse(**rag_context.model_dump(mode="json"))
+        return ContextResponse(
+            context=rag_context.answer_instruction,
+            sources=[chunk.model_dump(mode="json") for chunk in rag_context.chunks],
+        )
     except Exception as exc:
         logger.exception("context failed")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Context build failed: {exc}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Context build failed: {exc}",
         )
 
 

@@ -6,9 +6,9 @@ import os
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Request, Query, status
+from fastapi import FastAPI, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 
 from demo.api.agent import agent
 from demo.api.agent.types import AgentEventData
@@ -41,6 +41,7 @@ if os.environ.get("DEMO_DEBUG", "").lower() in ("1", "true", "yes"):
 
 # === Business Logic Handlers ===
 
+
 async def get_health() -> HealthResponse:
     """Health check endpoint."""
     payload: dict[str, Any] = {"api": "ok"}
@@ -61,13 +62,13 @@ async def get_backlog_list() -> BacklogListResponse:
     return BacklogListResponse(sessions=backlog.list_sessions())
 
 
-async def get_backlog_detail(session_id: str, limit: int = 500, offset: int = 0) -> BacklogDetailResponse:
+async def get_backlog_detail(
+    session_id: str, limit: int = 500, offset: int = 0
+) -> BacklogDetailResponse:
     """Read records of a specific backlog session."""
     records = backlog.read_session(session_id, limit=limit, offset=offset)
     return BacklogDetailResponse(
-        records=records,
-        session_id=session_id,
-        count=len(records)
+        records=records, session_id=session_id, count=len(records)
     )
 
 
@@ -83,16 +84,23 @@ async def chat_handler(request: Request) -> StreamingResponse:
         body = await request.json()
         chat_req = ChatRequest(**body)
     except Exception as exc:
-        return StreamingResponse(_single_error(f"Invalid request body: {exc}"), media_type="text/event-stream")
+        return StreamingResponse(
+            _single_error(f"Invalid request body: {exc}"),
+            media_type="text/event-stream",
+        )
 
     message = chat_req.message
     session_id = chat_req.session_id
 
     if not message:
-        return StreamingResponse(_single_error("Введите вопрос."), media_type="text/event-stream")
+        return StreamingResponse(
+            _single_error("Введите вопрос."), media_type="text/event-stream"
+        )
 
     if not session_id:
-        return StreamingResponse(_single_error("Введите session_id."), media_type="text/event-stream")
+        return StreamingResponse(
+            _single_error("Введите session_id."), media_type="text/event-stream"
+        )
 
     async def events():
         try:
@@ -165,7 +173,7 @@ app.add_middleware(
     "/health",
     response_model=HealthResponse,
     summary="Проверка здоровья API",
-    description="Проверяет работоспособность API и доступность LLM провайдера."
+    description="Проверяет работоспособность API и доступность LLM провайдера.",
 )
 async def health_endpoint():
     return await get_health()
@@ -175,7 +183,7 @@ async def health_endpoint():
     "/api/data",
     response_model=DataOverviewResponse,
     summary="Обзор данных",
-    description="Возвращает сводную информацию о доступных данных университета."
+    description="Возвращает сводную информацию о доступных данных университета.",
 )
 async def data_endpoint():
     return await get_data()
@@ -184,7 +192,7 @@ async def data_endpoint():
 @app.post(
     "/api/chat",
     summary="Стриминг чата",
-    description="Основной эндпоинт для общения с агентом. Возвращает поток SSE событий."
+    description="Основной эндпоинт для общения с агентом. Возвращает поток SSE событий.",
 )
 async def chat_endpoint(request: Request) -> StreamingResponse:
     return await chat_handler(request)
@@ -194,7 +202,7 @@ async def chat_endpoint(request: Request) -> StreamingResponse:
     "/api/backlog",
     response_model=BacklogListResponse,
     summary="Список сессий бэклога",
-    description="Возвращает список всех сохраненных сессий из бэклога."
+    description="Возвращает список всех сохраненных сессий из бэклога.",
 )
 async def backlog_list_endpoint():
     return await get_backlog_list()
@@ -204,12 +212,10 @@ async def backlog_list_endpoint():
     "/api/backlog/{session_id}",
     response_model=BacklogDetailResponse,
     summary="Детали сессии бэклога",
-    description="Возвращает все события конкретной сессии."
+    description="Возвращает все события конкретной сессии.",
 )
 async def backlog_detail_endpoint(
-    session_id: str,
-    limit: int = Query(500, ge=1),
-    offset: int = Query(0, ge=0)
+    session_id: str, limit: int = Query(500, ge=1), offset: int = Query(0, ge=0)
 ):
     return await get_backlog_detail(session_id, limit, offset)
 
@@ -218,7 +224,7 @@ async def backlog_detail_endpoint(
     "/api/session/history",
     response_model=SessionHistoryResponse,
     summary="История сессии",
-    description="Возвращает историю сообщений для указанной сессии."
+    description="Возвращает историю сообщений для указанной сессии.",
 )
 async def session_history_endpoint(session_id: str = Query("default")):
     return await get_session_history(session_id)
@@ -226,7 +232,12 @@ async def session_history_endpoint(session_id: str = Query("default")):
 
 def main() -> None:
     """Run the API server."""
-    uvicorn.run("demo.api.server:app", host=settings.api_host, port=settings.api_port, reload=False)
+    uvicorn.run(
+        "demo.api.server:app",
+        host=settings.api_host,
+        port=settings.api_port,
+        reload=False,
+    )
 
 
 if __name__ == "__main__":

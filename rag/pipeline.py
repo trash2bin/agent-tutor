@@ -1,4 +1,5 @@
 """Основной пайплайн RAG — оркестрация без raw SQL."""
+
 from __future__ import annotations
 
 import logging
@@ -6,13 +7,11 @@ from pathlib import Path
 from typing import Callable
 
 from rag.config import RagConfig
-from rag.embeddings import SentenceTransformerEmbedding
 from rag.interfaces import EmbeddingProtocol, VectorStoreProtocol
 from rag.models import DocumentImportResult, RagContext, RagSearchResult
 from rag.parser import DocumentParser
 from rag.chunker import TextChunker
 from rag.repository import DocumentRepository
-from rag.vector_store import ChromaDBVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +78,9 @@ class RAGPipeline:
 
         return result
 
-    def list_documents(self, discipline_id: str | None = None, limit: int | None = None) -> list:
+    def list_documents(
+        self, discipline_id: str | None = None, limit: int | None = None
+    ) -> list:
         """Список документов.
 
         Args:

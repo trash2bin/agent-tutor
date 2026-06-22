@@ -1,8 +1,9 @@
 """Конфигурация RAG-системы."""
+
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -52,7 +53,8 @@ class RagConfig:
             ),
             embedding_batch_size=int(os.environ.get("RAG_EMBEDDING_BATCH_SIZE", "64")),
             embedding_device=os.environ.get("RAG_DEVICE", "cpu"),
-            embedding_local_files_only=os.environ.get("RAG_LOCAL_FILES_ONLY", "0") == "1",
+            embedding_local_files_only=os.environ.get("RAG_LOCAL_FILES_ONLY", "0")
+            == "1",
             chunker_type=os.environ.get("RAG_CHUNKER_TYPE", "semantic"),
             chunk_size=int(os.environ.get("RAG_CHUNK_SIZE", "512")),
             chunk_overlap=int(os.environ.get("RAG_CHUNK_OVERLAP", "80")),

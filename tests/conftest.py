@@ -1,8 +1,6 @@
-import os
 import shutil
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -37,6 +35,7 @@ def test_db(db_path):
 @pytest.fixture
 def mock_embedding():
     """Provides a mocked EmbeddingProtocol implementation."""
+
     class MockEmbedding(EmbeddingProtocol):
         def encode_batched(self, texts: list[str]) -> list[list[float]]:
             # Return mock 384-dimensional vectors (typical for paraphrase-multilingual-MiniLM-L12-v2)

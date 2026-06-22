@@ -72,9 +72,7 @@ class MCPClient:
 
             structured = getattr(result, "structuredContent", None)
             if structured is not None:
-                return json.dumps(
-                    {"ok": True, "data": structured}, ensure_ascii=False
-                )
+                return json.dumps({"ok": True, "data": structured}, ensure_ascii=False)
 
             content = self._collect_text_content(result)
             return json.dumps({"ok": True, "data": content}, ensure_ascii=False)

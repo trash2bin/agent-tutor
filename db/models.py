@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel
 
@@ -12,10 +12,12 @@ from rag.models import (  # noqa: F401
     RagSearchResult,
 )
 
+
 class Group(BaseModel):
     id: str
     name: str
     speciality: str
+
 
 class Student(BaseModel):
     id: str
@@ -23,15 +25,18 @@ class Student(BaseModel):
     group: Group | None
     course: int
 
+
 class Teacher(BaseModel):
     id: str
     name: str
     disciplines: List[str]
 
+
 class Discipline(BaseModel):
     id: str
     name: str
     description: str
+
 
 class Grade(BaseModel):
     id: str
@@ -41,11 +46,13 @@ class Grade(BaseModel):
     grade: str
     date: str
 
+
 class Lesson(BaseModel):
     discipline_id: str
     discipline_name: str
     teacher_name: str
     room: int
+
 
 class ScheduleEntry(BaseModel):
     id: str

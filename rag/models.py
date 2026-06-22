@@ -1,4 +1,5 @@
 """Внутренние и внешние модели данных RAG-системы."""
+
 from __future__ import annotations
 
 from typing import List, TypedDict
@@ -11,12 +12,14 @@ from pydantic import BaseModel
 
 class PageDict(TypedDict):
     """Страница документа после парсинга."""
+
     page: int | None
     text: str
 
 
 class ChunkDict(TypedDict):
     """Чанк текста с привязкой к странице."""
+
     page: int | None
     content: str
 
@@ -26,6 +29,7 @@ class ChunkDict(TypedDict):
 
 class Document(BaseModel):
     """Документ, загруженный в RAG-индекс."""
+
     id: str
     title: str
     source_path: str
@@ -36,6 +40,7 @@ class Document(BaseModel):
 
 class DocumentChunk(BaseModel):
     """Чанк текста документа."""
+
     id: str
     document_id: str
     chunk_index: int
@@ -45,12 +50,14 @@ class DocumentChunk(BaseModel):
 
 class DocumentImportResult(BaseModel):
     """Результат импорта документа."""
+
     document: Document
     chunks_count: int
 
 
 class RagSearchResult(BaseModel):
     """Результат семантического поиска по документам."""
+
     document_id: str
     document_title: str
     source_path: str
@@ -64,6 +71,7 @@ class RagSearchResult(BaseModel):
 
 class Material(BaseModel):
     """Учебный материал (документ, представленный как материал дисциплины)."""
+
     id: str
     discipline_id: str
     type: str
@@ -76,6 +84,7 @@ class Material(BaseModel):
 
 class RagContext(BaseModel):
     """Готовый контекст для LLM с инструкцией и найденными чанками."""
+
     query: str
     answer_instruction: str
     chunks: List[RagSearchResult]

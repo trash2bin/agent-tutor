@@ -1,14 +1,18 @@
-"""Репозиторий для работы с SQLite (документы и чанки)."""
+"""Репозиторий для работы с документами и чанками в SQL/реляционной БД.
+
+Принимает DBAPI2-совместимое соединение (sqlite3 / psycopg2).
+Вся SQL-адаптация под параметрический стиль — через переданный adapter.
+"""
+
 from __future__ import annotations
 
 import json
 import logging
 import mimetypes
-import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Callable, Protocol
 
 from rag.config import RagConfig
 from rag.models import ChunkDict, Document, DocumentImportResult, Material
@@ -17,37 +21,57 @@ logger = logging.getLogger(__name__)
 
 
 class ConnectionProvider(Protocol):
+    """Маленький provider с полем connection (например Database)."""
+
     @property
-    def connection(self) -> sqlite3.Connection:
-        ...
+    def connection(self) -> Any: ...
 
 
 class DocumentRepository:
-    """CRUD для документов и чанков в SQLite.
+    """CRUD для документов и чанков через DBAPI2-совместимое соединение."""
 
-    Принимает маленький connection provider или sqlite3.Connection, чтобы RAG
-    оставался отделен от application-level Database.
-    """
-
-    def __init__(self, connection: sqlite3.Connection | ConnectionProvider, config: RagConfig) -> None:
+    def __init__(
+        self,
+        connection: Any | ConnectionProvider,
+        config: RagConfig,
+        *,
+        adapter: Callable[[str], str] | None = None,
+    ) -> None:
+        """Args:
+        connection: DBAPI2-соединение (sqlite3.Connection или psycopg2.connection)
+                   или объект с полем .connection
+        config: конфигурация RAG
+        adapter: функция adapt_sql(sql) — подстановка параметрического стиля
+        """
         self._connection = connection
         self.config = config
+        self._adapter = adapter or (lambda s: s)
 
     @property
-    def conn(self) -> sqlite3.Connection:
-        if isinstance(self._connection, sqlite3.Connection):
-            return self._connection
-        return self._connection.connection
+    def conn(self) -> Any:
+        if hasattr(self._connection, "connection"):
+            return self._connection.connection
+        return self._connection
 
-    def list_documents(self, discipline_id: str | None = None, limit: int | None = None) -> list[Document]:
-        """Список загруженных документов (опционально по дисциплине).
+    def _sql(self, sql: str) -> str:
+        return self._adapter(sql)
 
-        Args:
-            discipline_id: Опциональный ID дисциплины для фильтрации
-            limit: Максимальное количество возвращаемых документов (None = без ограничения)
+    def _exec(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> Any:
+        """Создать курсор, выполнить SQL, вернуть курсор.
+
+        Нужно для совместимости: psycopg2.cursor.execute() возвращает None,
+        а sqlite3 возвращает курсор. Не цепляем .fetchone() после .execute().
         """
         cursor = self.conn.cursor()
-        params = []
+        cursor.execute(self._sql(sql), params)
+        return cursor
+
+    # ── READ ────────────────────────────────────────────────────────
+
+    def list_documents(
+        self, discipline_id: str | None = None, limit: int | None = None
+    ) -> list[Document]:
+        params: list[Any] = []
 
         if discipline_id:
             sql = """
@@ -65,16 +89,17 @@ class DocumentRepository:
             sql += " LIMIT ?"
             params.append(limit)
 
-        rows = cursor.execute(sql, params).fetchall()
+        cursor = self._exec(sql, params)
+        rows = cursor.fetchall()
+        cursor.close()
         return [self._document_from_row(row) for row in rows]
 
     def find_existing_by_path(self, source_path: str) -> str | None:
-        """Найти ID документа по пути."""
-        cursor = self.conn.cursor()
-        row = cursor.execute(
-            "SELECT id FROM documents WHERE source_path = ?",
-            (source_path,),
-        ).fetchone()
+        cursor = self._exec(
+            "SELECT id FROM documents WHERE source_path = ?", (source_path,)
+        )
+        row = cursor.fetchone()
+        cursor.close()
         return row["id"] if row else None
 
     def find_document_for_delete(
@@ -82,54 +107,61 @@ class DocumentRepository:
         *,
         source_path: str | None = None,
         document_id: str | None = None,
-    ) -> sqlite3.Row | None:
-        """Find minimal document info used by delete flows."""
+    ) -> Any | None:  # sqlite3.Row-like dict
         if source_path:
-            return self.conn.execute(
+            cursor = self._exec(
                 "SELECT id, title, source_path FROM documents WHERE source_path = ?",
                 (source_path,),
-            ).fetchone()
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            return row
         if document_id:
-            return self.conn.execute(
+            cursor = self._exec(
                 "SELECT id, title, source_path FROM documents WHERE id = ?",
                 (document_id,),
-            ).fetchone()
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            return row
         return None
 
     def get_document_by_id(self, document_id: str) -> Document | None:
-        """Получить документ по ID."""
-        cursor = self.conn.cursor()
-        row = cursor.execute(
+        cursor = self._exec(
             "SELECT id, title, source_path, mime_type, discipline_id, created_at "
             "FROM documents WHERE id = ?",
             (document_id,),
-        ).fetchone()
+        )
+        row = cursor.fetchone()
+        cursor.close()
         return self._document_from_row(row) if row else None
 
-    def get_materials(self, discipline_id: str, material_type: str | None = None) -> list[Material]:
-        """Получить документы как учебные материалы."""
+    def get_materials(
+        self, discipline_id: str, material_type: str | None = None
+    ) -> list[Material]:
         cursor = self.conn.cursor()
         cursor.execute(
-            """
-            SELECT id, title, source_path, mime_type, discipline_id, created_at
-            FROM documents WHERE discipline_id = ?
-            ORDER BY title ASC
-            """,
+            self._sql(
+                """
+                SELECT id, title, source_path, mime_type, discipline_id, created_at
+                FROM documents WHERE discipline_id = ?
+                ORDER BY title ASC
+                """
+            ),
             (discipline_id,),
         )
         materials = [self._material_from_row(row) for row in cursor.fetchall()]
+        cursor.close()
         if material_type:
             normalized_type = material_type.lower()
-            return [
-                m for m in materials
-                if normalized_type in m.type.lower()
-            ]
+            return [m for m in materials if normalized_type in m.type.lower()]
         return materials
 
-    def search_materials(self, query: str, discipline_id: str | None = None) -> list[Material]:
-        """Полнотекстовый поиск по документам (title + chunk content)."""
+    def search_materials(
+        self, query: str, discipline_id: str | None = None
+    ) -> list[Material]:
         cursor = self.conn.cursor()
-        params: list = [f"%{query}%"]
+        params: list[Any] = [f"%{query}%"]
         sql = """
             SELECT DISTINCT
                 documents.id,
@@ -146,26 +178,29 @@ class DocumentRepository:
         if discipline_id:
             sql += " AND documents.discipline_id = ?"
             params.append(discipline_id)
-
         sql += " ORDER BY documents.title ASC"
-        cursor.execute(sql, params)
-        return [self._material_from_row(row) for row in cursor.fetchall()]
+        cursor.execute(self._sql(sql), params)
+        results = [self._material_from_row(row) for row in cursor.fetchall()]
+        cursor.close()
+        return results
 
     def list_generated_document_rows(
         self,
         *,
         path_marker: str,
         discipline_id: str | None = None,
-    ) -> list[sqlite3.Row]:
-        """Return generated document rows matched by source path marker."""
-        params: list[str] = [f"%{path_marker}%"]
+    ) -> list[Any]:
+        params: list[Any] = [f"%{path_marker}%"]
         sql = "SELECT id, source_path FROM documents WHERE source_path LIKE ?"
         if discipline_id:
             sql += " AND discipline_id = ?"
             params.append(discipline_id)
-        return self.conn.execute(sql, params).fetchall()
+        cursor = self._exec(sql, params)
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
 
-    # === Транзакционный save ===
+    # ── WRITE (save_document_with_chunks) ──────────────────────────
 
     def save_document_with_chunks(
         self,
@@ -175,11 +210,6 @@ class DocumentRepository:
         title: str | None,
         vector_store=None,
     ) -> DocumentImportResult:
-        """Сохранить документ с чанками в одной транзакции (SQLite + ChromaDB).
-
-        Если передан vector_store, сперва пишет в ChromaDB, потом коммитит SQLite.
-        При ошибке ChromaDB откатывает SQLite и чистит векторы.
-        """
         document_id = str(uuid.uuid4())
         mime_type = mimetypes.guess_type(source_path)[0] or "application/octet-stream"
         document_title = title or Path(source_path).stem
@@ -193,17 +223,22 @@ class DocumentRepository:
                 try:
                     vector_store.delete_by_document_id(existing_id)
                 except Exception as exc:
-                    logger.warning("Failed to delete vectors for %s: %s", existing_id, exc)
-            self.delete_document(cursor, existing_id)
+                    logger.warning(
+                        "Failed to delete vectors for %s: %s", existing_id, exc
+                    )
+            # Используем fresh cursor для удаления
+            self._delete_document(self.conn, existing_id)
 
         # Вставляем документ
         created_at = datetime.now(timezone.utc).isoformat()
         cursor.execute(
-            """
-            INSERT INTO documents (
-                id, title, source_path, mime_type, discipline_id, created_at, metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
+            self._sql(
+                """
+                INSERT INTO documents (
+                    id, title, source_path, mime_type, discipline_id, created_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """
+            ),
             (
                 document_id,
                 document_title,
@@ -222,13 +257,15 @@ class DocumentRepository:
             ),
         )
 
+        cursor.close()
+
         chunk_ids, chunk_texts, chunk_metadatas = self._insert_chunks(
-            cursor, document_id, chunks,
+            document_id,
+            chunks,
         )
 
         if vector_store:
             try:
-                # Сначала ChromaDB
                 vector_store.add_chunks(
                     chunk_ids=chunk_ids,
                     chunk_texts=chunk_texts,
@@ -238,7 +275,6 @@ class DocumentRepository:
                     source_path=source_path,
                     discipline_id=discipline_id,
                 )
-                # Потом SQLite
                 self.conn.commit()
             except Exception as exc:
                 self.conn.rollback()
@@ -262,52 +298,49 @@ class DocumentRepository:
             chunks_count=len(chunks),
         )
 
-    # === Нижний уровень ===
-
-    def delete_document(self, cursor: sqlite3.Cursor, document_id: str) -> None:
-        """Удалить документ и его чанки из SQLite."""
+    def _delete_document(self, connection: Any, document_id: str) -> None:
+        cursor = connection.cursor()
         cursor.execute(
-            "DELETE FROM document_chunks WHERE document_id = ?", (document_id,)
+            self._sql("DELETE FROM document_chunks WHERE document_id = ?"),
+            (document_id,),
         )
-        cursor.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+        cursor.execute(
+            self._sql("DELETE FROM documents WHERE id = ?"),
+            (document_id,),
+        )
+        cursor.close()
 
     def delete_document_record(self, document_id: str, *, commit: bool = True) -> None:
-        cursor = self.conn.cursor()
-        self.delete_document(cursor, document_id)
+        self._delete_document(self.conn, document_id)
         if commit:
             self.conn.commit()
 
-    def commit(self) -> None:
-        self.conn.commit()
-
-    def rollback(self) -> None:
-        self.conn.rollback()
-
-    # === Внутренние helpers ===
+    # ── chunks ──────────────────────────────────────────────────────
 
     def _insert_chunks(
         self,
-        cursor: sqlite3.Cursor,
         document_id: str,
         chunks: list[ChunkDict],
     ) -> tuple[list[str], list[str], list[dict]]:
-        """Вставить чанки, вернуть (ids, texts, metadatas) для ChromaDB."""
         from rag.utils import tokenize
 
         chunk_ids = []
         chunk_texts = []
         chunk_metadatas = []
+        cursor = self.conn.cursor()
 
         for index, chunk in enumerate(chunks):
             content = chunk["content"]
             chunk_id = str(uuid.uuid4())
             cursor.execute(
-                """
-                INSERT INTO document_chunks (
-                    id, document_id, chunk_index, page, content,
-                    embedding_json, token_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
+                self._sql(
+                    """
+                    INSERT INTO document_chunks (
+                        id, document_id, chunk_index, page, content,
+                        embedding_json, token_count
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """
+                ),
                 (
                     chunk_id,
                     document_id,
@@ -320,15 +353,24 @@ class DocumentRepository:
             )
             chunk_ids.append(chunk_id)
             chunk_texts.append(content)
-            chunk_metadatas.append({
-                "document_id": document_id,
-                "chunk_index": index,
-                "page": int(chunk["page"]) if chunk["page"] is not None else -1,
-            })
+            chunk_metadatas.append(
+                {
+                    "document_id": document_id,
+                    "chunk_index": index,
+                    "page": int(chunk["page"]) if chunk["page"] is not None else -1,
+                }
+            )
 
+        cursor.close()
         return chunk_ids, chunk_texts, chunk_metadatas
 
-    # === Специфичные для document_generator ===
+    def commit(self) -> None:
+        self.conn.commit()
+
+    def rollback(self) -> None:
+        self.conn.rollback()
+
+    # ── специфичные для document_generator ──────────────────────────
 
     def save_generated_document_fallback(
         self,
@@ -337,27 +379,27 @@ class DocumentRepository:
         title: str,
         text: str,
     ) -> None:
-        """Записать сгенерированный документ в SQLite без векторного индекса."""
         source_path = str(Path(path).resolve())
         document_id = str(uuid.uuid4())
         mime_type = mimetypes.guess_type(source_path)[0] or "application/octet-stream"
         created_at = datetime.now(timezone.utc).isoformat()
-        cursor = self.conn.cursor()
-
-        existing = cursor.execute(
+        cursor = self._exec(
             "SELECT id FROM documents WHERE source_path = ?",
             (source_path,),
-        ).fetchone()
+        )
+        existing = cursor.fetchone()
         if existing:
-            self.delete_document(cursor, existing["id"])
+            self._delete_document(self.conn, existing["id"])
 
         cursor.execute(
-            """
-            INSERT INTO documents (
-                id, title, source_path, mime_type, discipline_id,
-                created_at, metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
+            self._sql(
+                """
+                INSERT INTO documents (
+                    id, title, source_path, mime_type, discipline_id,
+                    created_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """
+            ),
             (
                 document_id,
                 title,
@@ -369,12 +411,14 @@ class DocumentRepository:
             ),
         )
         cursor.execute(
-            """
-            INSERT INTO document_chunks (
-                id, document_id, chunk_index, page, content,
-                embedding_json, token_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
+            self._sql(
+                """
+                INSERT INTO document_chunks (
+                    id, document_id, chunk_index, page, content,
+                    embedding_json, token_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """
+            ),
             (
                 str(uuid.uuid4()),
                 document_id,
@@ -385,12 +429,13 @@ class DocumentRepository:
                 len(text.split()),
             ),
         )
+        cursor.close()
         self.conn.commit()
 
-    # === Статические helpers ===
+    # ── static helpers ──────────────────────────────────────────────
 
     @staticmethod
-    def _document_from_row(row) -> Document:
+    def _document_from_row(row: Any) -> Document:
         return Document(
             id=row["id"],
             title=row["title"],
@@ -411,11 +456,11 @@ class DocumentRepository:
             return "Лабораторная работа"
         return "Документ"
 
-    def _material_from_row(self, row) -> Material:
+    def _material_from_row(self, row: Any) -> Material:
         source_path = row["source_path"]
         return Material(
             id=row["id"],
-            discipline_id=row["discipline_id"],
+            discipline_id=row.get("discipline_id"),
             type=self._material_type_from_title(row["title"], source_path),
             title=row["title"],
             file_name=Path(source_path).name,

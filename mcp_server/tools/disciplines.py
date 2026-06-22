@@ -1,7 +1,7 @@
 """Инструменты для работы с дисциплинами и учебными материалами."""
+
 from __future__ import annotations
 
-from typing import Optional
 
 from db.database import Database
 from db.models import Discipline

@@ -2,6 +2,7 @@
 
 Используется MCP-сервером и другими компонентами для вызовов к standalone RAG-сервису.
 """
+
 from __future__ import annotations
 
 import logging

@@ -1,0 +1,4 @@
+-- Инициализация PostgreSQL для Agent-Tutor.
+-- Таблицы создаются самими сервисами через db/schema.py на старте.
+-- Этот файл — заглушка для docker-entrypoint-initdb.d.
+-- Если нужны будут расширения (pgvector, pgcrypto) — добавлять сюда.
