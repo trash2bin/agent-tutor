@@ -10,10 +10,11 @@ import logging
 import os
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from agent_tutor_sdk.db.database import Database
+from agent_tutor_sdk.db.database import Database, get_db
 from rag import create_rag_pipeline
 from rag.http_models import (
     ContextRequest,
@@ -47,9 +48,9 @@ class ServiceState:
         self._db: Database | None = None
         self._pipeline = None
 
-    def get_db(self) -> Database:
+    def get_db(self):
         if self._db is None:
-            self._db = Database()
+            self._db = get_db()
         return self._db
 
     def get_pipeline(self):
@@ -73,6 +74,7 @@ app = FastAPI(
     title="RAG Service",
     description="HTTP API for RAG pipeline (indexing and semantic search)",
     version="0.1.0",
+    swagger_ui_parameters={"tryItOutEnabled": True},
 )
 
 app.add_middleware(
@@ -92,7 +94,7 @@ app.add_middleware(
     summary="Проверка состояния сервиса",
     description="Проверяет доступность SQLite, ChromaDB и загрузку embedding-модели.",
 )
-async def health() -> HealthResponse:
+async def health() -> JSONResponse:
     db_status: dict[str, Any] = {"status": "ok", "error": None}
     chroma_status: dict[str, Any] = {"status": "ok", "error": None}
     embedding_status: dict[str, Any] = {"status": "ok", "error": None, "model": None}
@@ -114,8 +116,6 @@ async def health() -> HealthResponse:
 
     overall_ok = db_status["status"] == "ok" and chroma_status["status"] == "ok"
 
-    from fastapi.responses import JSONResponse
-
     if not overall_ok:
         return JSONResponse(
             status_code=503,
@@ -127,11 +127,13 @@ async def health() -> HealthResponse:
             ).model_dump(),
         )
 
-    return HealthResponse(
-        status="ok" if overall_ok else "degraded",
-        database=db_status,
-        chroma=chroma_status,
-        embedding=embedding_status,
+    return JSONResponse(
+        content=HealthResponse(
+            status="ok",
+            database=db_status,
+            chroma=chroma_status,
+            embedding=embedding_status,
+        ).model_dump(),
     )
 
 
@@ -153,33 +155,6 @@ async def list_documents(req: ListDocumentsRequest) -> ListDocumentsResponse:
         )
     except Exception as exc:
         logger.exception("list_documents failed")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list documents: {exc}",
-        )
-
-
-@app.get(
-    "/documents/list",
-    response_model=ListDocumentsResponse,
-    summary="Список документов (GET)",
-    description="Аналог POST /documents/list, но через query-параметры.",
-)
-async def list_documents_get(
-    discipline_id: str | None = Query(None),
-    limit: int | None = Query(None, ge=1, le=1000),
-) -> ListDocumentsResponse:
-    try:
-        docs = state.get_pipeline().list_documents(
-            discipline_id=discipline_id,
-            limit=limit,
-        )
-        return ListDocumentsResponse(
-            documents=[doc.model_dump(mode="json") for doc in docs],
-            count=len(docs),
-        )
-    except Exception as exc:
-        logger.exception("list_documents_get failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list documents: {exc}",

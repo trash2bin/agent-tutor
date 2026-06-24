@@ -214,7 +214,6 @@ agent-tutor/
 │   │   └── rag_tools.py     # Фасад RagTools для document_generator
 ├── scripts/
 │   ├── dev.sh               # Нативный запуск всех сервисов
-│   ├── backup.py            # Бэкап SQLite
 │   └── init-db.sql          # Инициализация PostgreSQL
 ├── conftest.py              # Корневые shared fixture для всех тестов
 ├── doc/                     # ROADMAP.md, TASK.md
@@ -418,7 +417,7 @@ uv run agent-ingest clear-generated                  # Удалить сгене
 
 - **Этап 0** (0.0–0.5): Разделение на 4 независимых HTTP-сервиса, FastAPI, CLI-утилиты, HTTP-транспорт MCP
 - **Этап 1**: Тестовая инфраструктура (84% покрытие, 109 тестов, ruff, OpenAPI/Swagger)
-- **Этап 2**: Контейнеризация (5 Dockerfile'ов, docker-compose с 7 сервисами, Caddy, healthchecks, backup)
+- **Этап 2**: Контейнеризация (5 Dockerfile'ов, docker-compose с 7 сервисами, Caddy, healthchecks)
 - **Этап 2.x**: Тесты разнесены по сервисам (rag/tests/, mcp_server/tests/, demo/api/tests/, agent-tutor-sdk/tests/),
   Dockerfile'ы копируют только нужные исходники, а не весь проект целиком
 - **Этап 2.6 (выполнен)**: Инкапсуляция сервисов — перекрёстные импорты убраны,
@@ -436,7 +435,7 @@ uv run agent-ingest clear-generated                  # Удалить сгене
 - База: SQLite (по умолчанию) или PostgreSQL (через `DATABASE_URL`)
 - `agent-tutor-sdk/` — абстракция БД, моделей и RAG-клиента
 - `scripts/dev.sh` — нативный запуск всех сервисов
-- Docker: 5 образов, docker-compose, Caddy, backup-сервис, healthchecks
+- Docker: 5 образов, docker-compose, Caddy, healthchecks
 - 109 тестов, 84% покрытие, ruff чисто
 - OpenAPI/Swagger у всех HTTP-сервисов
 - Тесты разнесены по пакетам сервисов: `uv run pytest rag/tests/`, `uv run pytest mcp_server/tests/`

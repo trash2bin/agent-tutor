@@ -22,47 +22,11 @@ paths:
       description: Возвращает список документов в индексе с фильтрацией по дисциплине.
       operationId: list_documents_documents_list_post
       requestBody:
-        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/ListDocumentsRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListDocumentsResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    get:
-      summary: Список документов (GET)
-      description: Аналог POST /documents/list, но через query-параметры.
-      operationId: list_documents_get_documents_list_get
-      parameters:
-      - name: discipline_id
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Discipline Id
-      - name: limit
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: integer
-            maximum: 1000
-            minimum: 1
-          - type: 'null'
-          title: Limit
+        required: true
       responses:
         '200':
           description: Successful Response

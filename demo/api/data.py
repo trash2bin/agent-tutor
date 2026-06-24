@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agent_tutor_sdk.db.database import Database
+from agent_tutor_sdk.db.database import get_db
 
 
 class DemoDataRepository:
     """Repository for demo data access."""
 
     def __init__(self) -> None:
-        self.db = Database()
+        self.db = get_db()
 
     def overview(self) -> dict[str, Any]:
         """Get an overview of all demo data."""

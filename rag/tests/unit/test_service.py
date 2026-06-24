@@ -96,10 +96,6 @@ async def test_list_documents_success(mock_state):
         assert data["count"] == 1
         assert data["documents"][0]["id"] == "doc1"
 
-        # Тест GET версии
-        response_get = await ac.get("/documents/list", params={"discipline_id": "d1"})
-        assert response_get.status_code == 200
-        assert response_get.json()["count"] == 1
 
 
 @pytest.mark.asyncio

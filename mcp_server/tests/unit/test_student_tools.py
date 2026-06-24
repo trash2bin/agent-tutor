@@ -1,38 +1,39 @@
-from mcp_server.tools.student import StudentTools
+"""Тесты StudentRepo — студенты и расписание."""
+
+from agent_tutor_sdk.db.repositories import StudentRepo
 
 
 def test_get_student(test_db):
     """Test getting student information by valid ID."""
-    tools = StudentTools(test_db)
+    repo = StudentRepo(test_db.connector)
 
     # Use a known student from fixtures.json
-    student = test_db.get_id_student("Валерия Константиновна Макарова")
+    student = repo.get_id_student("Валерия Константиновна Макарова")
     assert student is not None
 
-    result = tools.get_student(student.id)
+    result = repo.get_student(student.id)
     assert result is not None
     assert result.name == "Валерия Константиновна Макарова"
 
 
 def test_find_student_by_name(test_db):
     """Test finding student by name."""
-    tools = StudentTools(test_db)
+    repo = StudentRepo(test_db.connector)
 
-    result = tools.get_id_student("Валерия Константиновна Макарова")
+    result = repo.get_id_student("Валерия Константиновна Макарова")
     assert result is not None
     assert result.name == "Валерия Константиновна Макарова"
 
 
 def test_get_schedule(test_db):
     """Test getting schedule for a group."""
-    tools = StudentTools(test_db)
+    repo = StudentRepo(test_db.connector)
 
     # Need a valid group_id. Let's get it from the student
-    student = test_db.get_id_student("Валерия Константиновна Макарова")
+    student = repo.get_id_student("Валерия Константиновна Макарова")
     assert student is not None
     assert student.group is not None
 
-    schedule = tools.get_schedule(student.group.id)
+    schedule = repo.get_schedule(student.group.id)
     assert isinstance(schedule, list)
-    # The fixture might have schedule entries
     assert len(schedule) >= 0

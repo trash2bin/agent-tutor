@@ -28,6 +28,14 @@ from agent_tutor_sdk.db.models import (  # RAG models re-exported for convenienc
     RagContext,
     RagSearchResult,
 )
+from agent_tutor_sdk.db.repositories import (
+    BaseRepository,
+    GroupRepo,
+    StudentRepo,
+    TeacherRepo,
+    GradeRepo,
+    DisciplineRepo,
+)
 
 __all__ = [
     "PROJECT_ROOT",
@@ -41,6 +49,12 @@ __all__ = [
     "Database",
     "get_db",
     "reset_db",
+    "BaseRepository",
+    "GroupRepo",
+    "StudentRepo",
+    "TeacherRepo",
+    "GradeRepo",
+    "DisciplineRepo",
     "Student",
     "Teacher",
     "Group",

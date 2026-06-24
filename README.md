@@ -85,7 +85,7 @@ uv run ruff format .
 │   │   └── agent/       # orchestrator, llm_client, mcp_client, tool_parser
 │   └── web/             # Веб-интерфейс (FastAPI, :8080)
 ├── fixtures/            # Генерация тестовых данных и CLI-утилиты для этого
-├── scripts/             # dev.sh, backup.py, init-db.sql
+├── scripts/             # dev.sh, init-db.sql
 ├── doc/                 # Makrdown
 ├── docker-compose.yml
 └── .env.example         # Все переменные окружения

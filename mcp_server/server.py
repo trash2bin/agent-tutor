@@ -2,7 +2,7 @@ import os
 from mcp.server.fastmcp import FastMCP
 from typing import Annotated, Optional, List
 from pydantic import Field
-from agent_tutor_sdk.db.database import Database
+from agent_tutor_sdk.db.database import get_db
 from agent_tutor_sdk.db.models import (
     Grade,
     ScheduleEntry,
@@ -10,20 +10,16 @@ from agent_tutor_sdk.db.models import (
     Student,
     Teacher,
 )
-from mcp_server.tools.student import StudentTools
-from mcp_server.tools.disciplines import DisciplineTools
-from mcp_server.tools.grades import GradeTools
-from mcp_server.tools.teacher import TeacherTools
 from agent_tutor_sdk.rag.client import RagClient, RAG_SERVICE_URL
 from agent_tutor_sdk.rag.models import Document, RagContext, RagSearchResult
 
 
-# Инициализация инструментов БД
-db = Database()
-student_tools = StudentTools(db)
-grade_tools = GradeTools(db)
-teacher_tools = TeacherTools(db)
-discipline_tools = DisciplineTools(db)
+# Инициализация БД и репозиториев
+db = get_db()
+student_repo = db.student_repo
+teacher_repo = db.teacher_repo
+grade_repo = db.grade_repo
+discipline_repo = db.discipline_repo
 
 # HTTP-клиент к RAG-сервису
 rag_client = RagClient(RAG_SERVICE_URL)
@@ -47,7 +43,7 @@ def find_student_by_name(
     group.id нужен для get_schedule. id нужен для get_student_grades и get_disciplines.
     Возвращает null если не найден.
     """
-    return student_tools.get_id_student(name)
+    return student_repo.get_id_student(name)
 
 
 @mcp.tool()
@@ -64,7 +60,7 @@ def get_student(
     Возвращает Student: id, name, course, group {id, name, speciality}.
     Возвращает null если не найден.
     """
-    return student_tools.get_student(student_id)
+    return student_repo.get_student(student_id)
 
 
 # РАСПИСАНИЕ
@@ -88,7 +84,7 @@ def get_schedule(
     ВАЖНО: принимает group.id (из карточки студента), а НЕ student.id.
     Возвращает список ScheduleEntry: day, group, lessons[{discipline_id, discipline_name, teacher_name, room}].
     """
-    return student_tools.get_schedule(group_id, day) or []
+    return student_repo.get_schedule(group_id, day) or []
 
 
 # ДИСЦИПЛИНЫ И ОЦЕНКИ
@@ -105,7 +101,7 @@ def get_disciplines(
     Возвращает List[Discipline]: id, name, description.
     discipline.id можно передать в get_student_grades для фильтрации по предмету.
     """
-    return discipline_tools.get_disciplines(student_id) or []
+    return discipline_repo.get_disciplines(student_id) or []
 
 
 @mcp.tool()
@@ -127,7 +123,7 @@ def get_student_grades(
     ВАЖНО: не перебирай discipline_id вручную — вызови один раз без него, чтобы получить всё.
     Возвращает List[Grade]: id, student_id, discipline_id, discipline_name, grade, date.
     """
-    return grade_tools.get_student_grades(student_id, discipline_id) or []
+    return grade_repo.get_student_grades(student_id, discipline_id) or []
 
 
 # ПРЕПОДАВАТЕЛЬ
@@ -146,7 +142,7 @@ def get_teacher_by_name(
 
     Возвращает Teacher: id, name, disciplines[]. Null если не найден.
     """
-    return teacher_tools.get_teacher_by_name(name)
+    return teacher_repo.get_teacher_by_name(name)
 
 
 @mcp.tool()
@@ -164,7 +160,7 @@ def get_teacher_schedule(
     Принимает имя напрямую, отдельный вызов get_teacher_by_name не нужен.
     Возвращает List[ScheduleEntry]: day, group, lessons[].
     """
-    return teacher_tools.get_teacher_schedule(teacher_name, day) or []
+    return teacher_repo.get_teacher_schedule(teacher_name, day) or []
 
 
 # ДОКУМЕНТЫ / RAG

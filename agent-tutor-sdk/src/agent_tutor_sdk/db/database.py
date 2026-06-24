@@ -2,13 +2,14 @@
 
 Через Database.get_db() возвращается синглтон, работающий либо с SQLite
 (no DATABASE_URL), либо с PostgreSQL (DATABASE_URL задана).
+
+Делегирует доменные запросы в специализированные репозитории.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from agent_tutor_sdk.db.connector import (
     PROJECT_ROOT,
@@ -18,7 +19,21 @@ from agent_tutor_sdk.db.connector import (
 from agent_tutor_sdk.db.fixtures import load_fixtures
 from agent_tutor_sdk.db.schema import create_schema
 
-from .models import Discipline, Grade, Group, Lesson, ScheduleEntry, Student, Teacher
+from .models import (
+    Discipline,
+    Grade,
+    Group,
+    ScheduleEntry,
+    Student,
+    Teacher,
+)
+from .repositories import (
+    DisciplineRepo,
+    GradeRepo,
+    GroupRepo,
+    StudentRepo,
+    TeacherRepo,
+)
 
 FIXTURES_PATH = PROJECT_ROOT / "fixtures.json"
 
@@ -47,7 +62,11 @@ def reset_db() -> None:
 
 
 class Database:
-    """Application database facade over a managed connector."""
+    """Application database facade over a managed connector.
+
+    Делегирует доменные запросы в специализированные репозитории.
+    Сохраняет execute/fetch_one/fetch_all для прямого SQL-доступа (fixtures, demo).
+    """
 
     def __init__(
         self,
@@ -60,7 +79,14 @@ class Database:
         self.connector = connector or create_connector(database_url, db_path)
         self.conn = self.connector.connection
         self._closed = False
-        self._adapt: Callable[[str], str] = self.connector.adapt_sql
+        self._adapt = self.connector.adapt_sql
+
+        # Инициализация репозиториев
+        self.group_repo = GroupRepo(self.connector)
+        self.student_repo = StudentRepo(self.connector, group_repo=self.group_repo)
+        self.teacher_repo = TeacherRepo(self.connector, group_repo=self.group_repo)
+        self.grade_repo = GradeRepo(self.connector)
+        self.discipline_repo = DisciplineRepo(self.connector)
 
         create_schema(self.conn, adapter=self._adapt)
         if load_seed_data:
@@ -72,14 +98,10 @@ class Database:
             return str(self.connector.db_path)  # type: ignore[union-attr]
         return self.connector.database_url  # type: ignore[union-attr]
 
-    # ── raw helpers ──────────────────────────────────────────────────
+    # ── raw SQL helpers ──────────────────────────────────────────────
 
     def execute(self, sql: str, parameters: tuple[Any, ...] | list[Any] = ()) -> Any:
-        """Запустить SQL и вернуть курсор.
-
-        sqlite3.Connection.execute() возвращает курсор напрямую.
-        psycopg2.Connection.execute() не существует — создаём курсор явно.
-        """
+        """Запустить SQL и вернуть курсор."""
         adapted = self._adapt(sql)
         cursor = self.conn.cursor()
         cursor.execute(adapted, parameters)
@@ -93,135 +115,55 @@ class Database:
     ) -> list[Any]:
         return self.execute(sql, parameters).fetchall()
 
-    # ── domain methods ───────────────────────────────────────────────
+    # ── domain methods (делегированы репозиториям) ───────────────────
 
     def get_group(self, group_id: str) -> Group | None:
-        row = self.fetch_one("SELECT * FROM groups WHERE id = ?", (group_id,))
-        if not row:
-            return None
-        return Group(
-            id=row["id"],
-            name=row["name"],
-            speciality=row["speciality"],
-        )
+        """Получить группу по ID."""
+        return self.group_repo.get_group(group_id)
 
     def get_student(self, student_id: str) -> Student | None:
-        row = self.fetch_one("SELECT * FROM students WHERE id = ?", (student_id,))
-        return self._student_from_row(row) if row else None
+        """Получить студента по ID."""
+        return self.student_repo.get_student(student_id)
 
     def get_id_student(self, name: str | None) -> Student | None:
-        if name is None:
-            return None
-        row = self.fetch_one("SELECT * FROM students WHERE name = ?", (name,))
-        return self._student_from_row(row) if row else None
+        """Найти студента по полному имени."""
+        return self.student_repo.get_id_student(name)
 
     def get_teacher_by_name(self, name: str) -> Teacher | None:
-        row = self.fetch_one("SELECT * FROM teachers WHERE name = ?", (name,))
-        if not row:
-            return None
-        return Teacher(
-            id=row["id"],
-            name=row["name"],
-            disciplines=json.loads(row["disciplines_json"] or "[]"),
-        )
+        """Найти преподавателя по имени."""
+        return self.teacher_repo.get_teacher_by_name(name)
 
     def get_teacher_schedule(
         self, teacher_name: str, day: str | None = None
     ) -> list[ScheduleEntry]:
-        teacher = self.get_teacher_by_name(teacher_name)
-        if not teacher:
-            return []
-
-        sql = "SELECT * FROM schedule"
-        params: list[Any] = []
-        if day:
-            sql += " WHERE day = ?"
-            params.append(day)
-
-        entries: list[ScheduleEntry] = []
-        for row in self.fetch_all(sql, params):
-            lessons_data = json.loads(row["lessons_json"] or "[]")
-            teacher_lessons = [
-                self._lesson_from_dict(lesson)
-                for lesson in lessons_data
-                if lesson.get("teacher_name") == teacher_name
-            ]
-
-            if teacher_lessons:
-                entries.append(
-                    ScheduleEntry(
-                        id=row["id"],
-                        group=self.get_group(row["group_id"]),
-                        day=row["day"],
-                        lessons=teacher_lessons,
-                    )
-                )
-        return entries
+        """Расписание преподавателя."""
+        return self.teacher_repo.get_teacher_schedule(teacher_name, day)
 
     def get_schedule(
         self, group_id: str, day: str | None = None
     ) -> list[ScheduleEntry]:
-        if day:
-            rows = self.fetch_all(
-                "SELECT * FROM schedule WHERE group_id = ? AND day = ?",
-                (group_id, day),
-            )
-        else:
-            rows = self.fetch_all(
-                "SELECT * FROM schedule WHERE group_id = ?",
-                (group_id,),
-            )
-        return [self._schedule_entry_from_row(row) for row in rows]
+        """Расписание группы."""
+        return self.student_repo.get_schedule(group_id, day)
 
     def get_disciplines(self, student_id: str) -> list[Discipline]:
-        row = self.fetch_one(
-            "SELECT group_id FROM students WHERE id = ?", (student_id,)
-        )
-        if not row:
-            return []
-
-        discipline_ids = self._discipline_ids_for_group(row["group_id"])
-        if not discipline_ids:
-            return []
-
-        placeholders = ", ".join("?" * len(discipline_ids))
-        rows = self.fetch_all(
-            f"SELECT * FROM disciplines WHERE id IN ({placeholders}) ORDER BY name ASC",
-            sorted(discipline_ids),
-        )
-        return [self._discipline_from_row(row) for row in rows]
+        """Список дисциплин студента."""
+        return self.discipline_repo.get_disciplines(student_id)
 
     def get_discipline(self, discipline_id: str) -> Discipline | None:
-        row = self.fetch_one("SELECT * FROM disciplines WHERE id = ?", (discipline_id,))
-        return self._discipline_from_row(row) if row else None
+        """Получить дисциплину по ID."""
+        return self.discipline_repo.get_discipline(discipline_id)
 
     def get_all_disciplines(self) -> list[Discipline]:
-        return [
-            self._discipline_from_row(row)
-            for row in self.fetch_all("SELECT * FROM disciplines ORDER BY name ASC")
-        ]
+        """Все дисциплины."""
+        return self.discipline_repo.get_all_disciplines()
 
     def get_student_grades(
         self, student_id: str, discipline_id: str | None = None
     ) -> list[Grade]:
-        sql = """
-            SELECT
-                grades.id,
-                grades.student_id,
-                grades.discipline_id,
-                disciplines.name AS discipline_name,
-                grades.grade,
-                grades.date
-            FROM grades
-            LEFT JOIN disciplines ON disciplines.id = grades.discipline_id
-            WHERE grades.student_id = ?
-        """
-        params: list[Any] = [student_id]
-        if discipline_id:
-            sql += " AND grades.discipline_id = ?"
-            params.append(discipline_id)
-        sql += " ORDER BY grades.date DESC, disciplines.name ASC"
-        return [self._grade_from_row(row) for row in self.fetch_all(sql, params)]
+        """Оценки студента."""
+        return self.grade_repo.get_student_grades(student_id, discipline_id)
+
+    # ── lifecycle ────────────────────────────────────────────────────
 
     def ping(self) -> None:
         self.execute("SELECT 1")
@@ -243,65 +185,3 @@ class Database:
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
         self.close()
         return False
-
-    # ── internal helpers ─────────────────────────────────────────────
-
-    def _student_from_row(self, row: Any) -> Student:
-        return Student(
-            id=row["id"],
-            name=row["name"],
-            group=self.get_group(row["group_id"]),
-            course=row["course"],
-        )
-
-    def _discipline_ids_for_group(self, group_id: str) -> set[str]:
-        rows = self.fetch_all(
-            "SELECT lessons_json FROM schedule WHERE group_id = ?", (group_id,)
-        )
-        discipline_ids: set[str] = set()
-        for row in rows:
-            for lesson in json.loads(row["lessons_json"] or "[]"):
-                d_id = lesson.get("discipline_id")
-                if d_id:
-                    discipline_ids.add(d_id)
-        return discipline_ids
-
-    def _schedule_entry_from_row(self, row: Any) -> ScheduleEntry:
-        lessons = [
-            self._lesson_from_dict(lesson)
-            for lesson in json.loads(row["lessons_json"] or "[]")
-        ]
-        return ScheduleEntry(
-            id=row["id"],
-            group=self.get_group(row["group_id"]),
-            day=row["day"],
-            lessons=lessons,
-        )
-
-    @staticmethod
-    def _lesson_from_dict(lesson: dict[str, Any]) -> Lesson:
-        return Lesson(
-            discipline_id=lesson["discipline_id"],
-            discipline_name=lesson.get("discipline_name", "Неизвестно"),
-            teacher_name=lesson["teacher_name"],
-            room=lesson["room"],
-        )
-
-    @staticmethod
-    def _discipline_from_row(row: Any) -> Discipline:
-        return Discipline(
-            id=row["id"],
-            name=row["name"],
-            description=row["description"],
-        )
-
-    @staticmethod
-    def _grade_from_row(row: Any) -> Grade:
-        return Grade(
-            id=row["id"],
-            student_id=row["student_id"],
-            discipline_id=row["discipline_id"],
-            discipline_name=row["discipline_name"] or "Неизвестная дисциплина",
-            grade=row["grade"],
-            date=row["date"],
-        )
