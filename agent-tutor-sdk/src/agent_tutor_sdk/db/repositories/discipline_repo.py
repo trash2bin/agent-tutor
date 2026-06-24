@@ -32,9 +32,7 @@ class DisciplineRepo(BaseRepository):
 
     def get_discipline(self, discipline_id: str) -> Discipline | None:
         """Получить дисциплину по ID."""
-        row = self.fetch_one(
-            "SELECT * FROM disciplines WHERE id = ?", (discipline_id,)
-        )
+        row = self.fetch_one("SELECT * FROM disciplines WHERE id = ?", (discipline_id,))
         return self._discipline_from_row(row) if row else None
 
     def get_all_disciplines(self) -> list[Discipline]:

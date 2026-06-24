@@ -7,10 +7,23 @@ from agent_tutor_sdk.db.database import get_db
 
 
 class DemoDataRepository:
-    """Repository for demo data access."""
+    """Repository for demo data access.
+
+    Инициализируется лениво — БД подключается только при первом вызове метода.
+    Это позволяет:
+      - не зависеть от доступности БД при импорте модуля
+      - подменять окружение до первого обращения
+      - использовать в тестах без поднятой БД
+    """
 
     def __init__(self) -> None:
-        self.db = get_db()
+        self._db = None
+
+    @property
+    def db(self):
+        if self._db is None:
+            self._db = get_db()
+        return self._db
 
     def overview(self) -> dict[str, Any]:
         """Get an overview of all demo data."""
@@ -132,5 +145,5 @@ class DemoDataRepository:
         return [dict(row) for row in rows]
 
 
-# Global data repository instance
+# Global data repository instance (lazy — init at first use)
 data_repository = DemoDataRepository()

@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,7 @@ from agent_tutor_sdk.db.connector import (
     PROJECT_ROOT,
     Connector,
     create_connector,
+    is_operational_error,
 )
 from agent_tutor_sdk.db.fixtures import load_fixtures
 from agent_tutor_sdk.db.schema import create_schema
@@ -35,20 +38,28 @@ from .repositories import (
     TeacherRepo,
 )
 
+logger = logging.getLogger(__name__)
+
 FIXTURES_PATH = PROJECT_ROOT / "fixtures.json"
 
 # Глобальный экземпляр (ленивый, thread-safe через RLock)
 _db_instance: Database | None = None
-_db_lock = __import__("threading").RLock()
+_db_lock = threading.RLock()
 
 
-def get_db() -> Database:
-    """Получить (или создать) глобальный экземпляр Database."""
+def get_db(load_seed_data: bool | None = None) -> Database:
+    """Получить (или создать) глобальный экземпляр Database.
+
+    Args:
+        load_seed_data: Явно указать, загружать ли фикстуры.
+            None (по умолчанию) — авто-определение: загружаются только
+            если БД пустая. True — принудительно. False — не загружать.
+    """
     global _db_instance
     if _db_instance is None:
         with _db_lock:
             if _db_instance is None:
-                _db_instance = Database()
+                _db_instance = Database(load_seed_data=load_seed_data)
     return _db_instance
 
 
@@ -73,9 +84,20 @@ class Database:
         db_path: str | Path | None = None,
         *,
         connector: Connector | None = None,
-        load_seed_data: bool = True,
+        load_seed_data: bool | None = None,
         database_url: str | None = None,
     ) -> None:
+        """Create Database instance.
+
+        Args:
+            db_path: путь к SQLite-файлу
+            connector: готовый коннектор (если уже есть)
+            load_seed_data: загружать ли seed-данные (fixtures.json).
+                None (по умолчанию) — авто: загружаем только если БД пустая.
+                True — принудительно.
+                False — не загружать.
+            database_url: PostgreSQL DSN (альтернатива db_path)
+        """
         self.connector = connector or create_connector(database_url, db_path)
         self.conn = self.connector.connection
         self._closed = False
@@ -88,8 +110,17 @@ class Database:
         self.grade_repo = GradeRepo(self.connector)
         self.discipline_repo = DisciplineRepo(self.connector)
 
+        # Schema всегда создаётся (CREATE TABLE IF NOT EXISTS — идемпотентно)
         create_schema(self.conn, adapter=self._adapt)
-        if load_seed_data:
+
+        # Авто-определение: загружаем фикстуры только если БД пустая
+        if load_seed_data is None:
+            if self._has_data():
+                logger.info("Database already has data — skipping seed fixtures")
+            else:
+                logger.info("Empty database — loading seed fixtures")
+                load_fixtures(self.conn, FIXTURES_PATH, adapter=self._adapt)
+        elif load_seed_data:
             load_fixtures(self.conn, FIXTURES_PATH, adapter=self._adapt)
 
     @property
@@ -103,9 +134,19 @@ class Database:
     def execute(self, sql: str, parameters: tuple[Any, ...] | list[Any] = ()) -> Any:
         """Запустить SQL и вернуть курсор."""
         adapted = self._adapt(sql)
-        cursor = self.conn.cursor()
-        cursor.execute(adapted, parameters)
-        return cursor
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(adapted, parameters)
+            return cursor
+        except Exception as exc:
+            if is_operational_error(exc) and hasattr(
+                self.connector, "reset_thread_connection"
+            ):
+                logger.warning(
+                    "DB connection lost in Database.execute, resetting: %s", exc
+                )
+                self.connector.reset_thread_connection()  # type: ignore[attr-defined]
+            raise
 
     def fetch_one(self, sql: str, parameters: tuple[Any, ...] | list[Any] = ()) -> Any:
         return self.execute(sql, parameters).fetchone()
@@ -163,16 +204,58 @@ class Database:
         """Оценки студента."""
         return self.grade_repo.get_student_grades(student_id, discipline_id)
 
+    # ── helpers ─────────────────────────────────────────────────────
+
+    def _has_data(self) -> bool:
+        """Проверить, есть ли данные в таблицах.
+
+        Работает с SQLite (sqlite3.Row) и PostgreSQL (RealDictCursor).
+        Возвращает True, если хотя бы одна из основных таблиц не пуста.
+        """
+        for table in ("groups", "students", "teachers", "disciplines"):
+            try:
+                cursor = self.execute(f"SELECT COUNT(*) AS cnt FROM {table}")
+                row = cursor.fetchone()
+                if row is not None:
+                    cnt = row["cnt"] if hasattr(row, "keys") else row[0]
+                    if cnt and int(cnt) > 0:
+                        return True
+            except Exception:
+                # Таблицы может не быть — это не ошибка
+                pass
+        return False
+
     # ── lifecycle ────────────────────────────────────────────────────
 
     def ping(self) -> None:
-        self.execute("SELECT 1")
+        try:
+            self.execute("SELECT 1")
+        except Exception as exc:
+            if is_operational_error(exc) and hasattr(
+                self.connector, "reset_thread_connection"
+            ):
+                self.connector.reset_thread_connection()  # type: ignore[attr-defined]
+            raise
 
     def commit(self) -> None:
-        self.conn.commit()
+        try:
+            self.conn.commit()
+        except Exception as exc:
+            if is_operational_error(exc) and hasattr(
+                self.connector, "reset_thread_connection"
+            ):
+                self.connector.reset_thread_connection()  # type: ignore[attr-defined]
+            raise
 
     def rollback(self) -> None:
-        self.conn.rollback()
+        try:
+            self.conn.rollback()
+        except Exception as exc:
+            if is_operational_error(exc) and hasattr(
+                self.connector, "reset_thread_connection"
+            ):
+                self.connector.reset_thread_connection()  # type: ignore[attr-defined]
+            raise
 
     def close(self) -> None:
         if not self._closed:

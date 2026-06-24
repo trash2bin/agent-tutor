@@ -3,14 +3,18 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any
+import threading
+from contextlib import asynccontextmanager
+from typing import Any, Callable, Awaitable
+from uuid import uuid4
 
 import uvicorn
+
 from fastapi import FastAPI, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from demo.api.agent import agent
+from demo.api.agent import agent  # module itself, not singleton
 from demo.api.agent.types import AgentEventData
 from demo.api.backlog import backlog
 from demo.api.data import data_repository
@@ -39,6 +43,30 @@ if os.environ.get("DEMO_DEBUG", "").lower() in ("1", "true", "yes"):
     print("[DEMO] Debug logging enabled for agent and MCP")
 
 
+# === Lazy agent singleton (init на первом запросе, а не при импорте) ===
+_agent_instance: agent.LLMAgent | None = None
+_agent_lock = threading.Lock()
+
+
+def get_agent() -> agent.LLMAgent:
+    """Получить (или создать) глобальный экземпляр агента.
+
+    Инициализируется лениво — при первом обращении, а не при импорте модуля.
+    Это позволяет:
+      - менять окружение до первого запроса (тесты, разные конфиги)
+      - не падать при импорте если MCP/БД недоступны
+      - пересоздавать агента между тестами
+    """
+    global _agent_instance
+    if _agent_instance is None:
+        with _agent_lock:
+            if _agent_instance is None:
+                logger.info("Initializing LLM agent...")
+                _agent_instance = agent.LLMAgent()
+                logger.info("LLM agent initialized")
+    return _agent_instance
+
+
 # === Business Logic Handlers ===
 
 
@@ -46,7 +74,7 @@ async def get_health() -> HealthResponse:
     """Health check endpoint."""
     payload: dict[str, Any] = {"api": "ok"}
     try:
-        payload["ollama"] = await agent.health()
+        payload["ollama"] = await get_agent().health()
     except Exception as exc:
         payload["ollama"] = {"status": "error", "error": str(exc)}
     return HealthResponse(**payload)
@@ -104,7 +132,9 @@ async def chat_handler(request: Request) -> StreamingResponse:
 
     async def events():
         try:
-            async for event in agent.stream_events(message, session_id=session_id):
+            async for event in get_agent().stream_events(
+                message, session_id=session_id
+            ):
                 payload = _event_payload(event.type, event.data)
                 if payload is not None:
                     yield _sse(payload)
@@ -152,11 +182,29 @@ def _format_error(exc: BaseException) -> str:
     return str(exc)
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan — инициализация и cleanup агента."""
+    # Startup: прогреваем агента
+    logger.info("Warming up LLM agent...")
+    try:
+        get_agent()  # lazy init при старте, а не при первом запросе
+        logger.info("LLM agent ready")
+    except Exception as exc:
+        logger.warning("Agent warmup failed (will retry on first request): %s", exc)
+
+    yield
+
+    # Shutdown
+    logger.info("API server shutting down")
+
+
 # Create the API application
 app = FastAPI(
     title="Agent-Tutor Core API",
     description="Backend API for the Agent-Tutor system. Handles orchestration, session history, and tool integration.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS middleware
@@ -166,6 +214,33 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+# --- Correlation ID middleware ---
+@app.middleware("http")
+async def add_correlation_id(
+    request: Request, call_next: Callable[[Request], Awaitable[Any]]
+) -> Any:
+    correlation_id = request.headers.get("x-correlation-id") or str(uuid4())
+    request.state.correlation_id = correlation_id
+    logger.info(
+        "Request started",
+        extra={
+            "correlation_id": correlation_id,
+            "method": request.method,
+            "path": request.url.path,
+        },
+    )
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = correlation_id
+    logger.info(
+        "Request completed",
+        extra={
+            "correlation_id": correlation_id,
+            "status_code": response.status_code,
+        },
+    )
+    return response
 
 
 # Register routes

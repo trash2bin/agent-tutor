@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Protocol
@@ -139,44 +140,162 @@ class SqliteConnector(Connector):
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────
+
+
+def is_operational_error(exc: BaseException) -> bool:
+    """Проверить, относится ли исключение к категории operational.
+
+    OperationalError — потеря соединения, таймаут и т.д.
+    Используется для автоматического переоткрытия thread-local соединения.
+    """
+    try:
+        import psycopg2
+
+        return isinstance(exc, psycopg2.OperationalError)
+    except ImportError:
+        return False
+
+
+# ──────────────────────────────────────────────────────────────────────
 # PostgreSQL
 # ──────────────────────────────────────────────────────────────────────
 
 
 class PostgresConnector(Connector):
-    """Connector для PostgreSQL (когда задана DATABASE_URL)."""
+    """Connector для PostgreSQL (когда задана DATABASE_URL).
+
+    Использует ThreadedConnectionPool для устойчивости:
+      - если соединение оборвалось, его можно переоткрыть
+      - несколько воркеров могут работать параллельно
+      - pool сам отслеживает min/max соединений
+    """
 
     param_style = "format"
 
-    def __init__(self, database_url: str | None = None) -> None:
+    def __init__(
+        self,
+        database_url: str | None = None,
+        *,
+        min_conn: int = 1,
+        max_conn: int = 10,
+    ) -> None:
         self.database_url = database_url or os.environ["DATABASE_URL"]
-        self._connection: Any = None  # psycopg2.connection
+        self.min_conn = max(1, min_conn)
+        self.max_conn = max(self.min_conn, max_conn)
+        self._pool: Any | None = None
+        self._local = threading.local()
+
+    def _init_pool(self) -> None:
+        """Ленивая инициализация пула (создаётся при первом обращении)."""
+        if self._pool is not None:
+            return
+        from psycopg2.pool import ThreadedConnectionPool
+
+        logger.info(
+            "Initializing PostgreSQL pool (min=%d, max=%d)",
+            self.min_conn,
+            self.max_conn,
+        )
+        # ThreadedConnectionPool поддерживает min/max соединений и блокируется,
+        # если свободных нет. Потокобезопасен.
+        self._pool = ThreadedConnectionPool(
+            self.min_conn, self.max_conn, self.database_url
+        )
+        # Настраиваем курсор по умолчанию на RealDictCursor
+        self._configure_pool_cursors()
+
+    def _configure_pool_cursors(self) -> None:
+        """Прокидывает RealDictCursor на все соединения в пуле."""
+        import psycopg2.extras
+
+        # Заимствуем и возвращаем каждое соединение, чтобы настроить
+        for _ in range(self.min_conn):
+            conn = self._pool.getconn()
+            conn.cursor_factory = psycopg2.extras.RealDictCursor
+            self._pool.putconn(conn)
+
+    @property
+    def pool(self) -> Any:
+        """Получить пул (ленивая инициализация)."""
+        if self._pool is None:
+            self._init_pool()
+        return self._pool
+
+    def _configure_connection(self, conn: Any) -> None:
+        """Настроить autocommit и cursor_factory для нового соединения."""
+        import psycopg2.extras
+
+        conn.autocommit = False
+        if conn.cursor_factory != psycopg2.extras.RealDictCursor:
+            conn.cursor_factory = psycopg2.extras.RealDictCursor
 
     @property
     def connection(self) -> Any:
-        if self._connection is None:
-            import psycopg2
-            import psycopg2.extras
+        """Соединение для текущего потока (из пула).
 
-            self._connection = psycopg2.connect(self.database_url)
-            self._connection.autocommit = False
-            # Используем RealDictCursor для row_factory как sqlite3.Row
-            self._connection.cursor_factory = psycopg2.extras.RealDictCursor
-        return self._connection
+        Каждый поток получает своё соединение (thread-local), что
+        исключает гонки курсоров и других ресурсов между потоками.
+        """
+        if not hasattr(self._local, "conn") or self._local.conn is None:
+            self._local.conn = self.pool.getconn()
+            try:
+                self._configure_connection(self._local.conn)
+            except Exception:
+                # Если настройка сломалась — отдаём соединение обратно
+                self.pool.putconn(self._local.conn)
+                self._local.conn = None
+                raise
+        return self._local.conn
 
     def connect(self) -> Any:
-        import psycopg2
-        import psycopg2.extras
-
-        conn = psycopg2.connect(self.database_url)
-        conn.autocommit = False
-        conn.cursor_factory = psycopg2.extras.RealDictCursor
+        """Новое соединение из пула (caller обязан вернуть через putconn)."""
+        conn = self.pool.getconn()
+        self._configure_connection(conn)
         return conn
 
+    def putconn(self, conn: Any) -> None:
+        """Вернуть соединение в пул."""
+        if self._pool is not None and conn is not None:
+            # Если соединение в плохом состоянии — закрываем вместо возврата
+            if conn.closed or conn.status != 0:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._pool.putconn(conn, close=True)
+            else:
+                self._pool.putconn(conn)
+
+    def reset_thread_connection(self) -> None:
+        """Сбросить thread-local соединение (например, при ошибке).
+
+        Использовать в коде, который перехватывает OperationalError:
+            try: ...
+            except psycopg2.OperationalError:
+                connector.reset_thread_connection()
+                raise
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                self.putconn(conn)
+            except Exception:
+                pass
+            self._local.conn = None
+
     def close(self) -> None:
-        if self._connection is not None:
-            self._connection.close()
-            self._connection = None
+        """Закрыть все соединения в пуле."""
+        if self._local.conn is not None:
+            try:
+                self.putconn(self._local.conn)
+            except Exception:
+                pass
+            self._local.conn = None
+        if self._pool is not None:
+            self._pool.closeall()
+            self._pool = None
 
 
 # ──────────────────────────────────────────────────────────────────────

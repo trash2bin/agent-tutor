@@ -570,6 +570,341 @@ members = [
 
 ---
 
+## Этап 2.7. Data-сервис на Go — изоляция схемы БД
+
+**Цель**: выделить доступ к БД в отдельный HTTP-сервис, написанный на Go.
+Единственное место, которое знает схему хранения (таблицы, колонки, JOIN'ы, типы ключей).
+При смене реальной БД вуза переписывается только этот сервис — потребители (MCP, API, CLI)
+не меняются, потому что видят только HTTP-контракт.
+
+**Почему Go**:
+- Self-contained бинарник — нет venv, нет зависимостей на хосте.
+- Быстрый старт и низкое потребление памяти.
+- Превосходен для I/O-bound REST + SQL работы.
+- Пилот для мультиязычной архитектуры: доказывает, что сервис на другом языке
+  бесшовно интегрируется с Python-окружением через HTTP + JSON Schema.
+- Go не может импортировать Python-код → контракт неизбежно чистый.
+
+### Инварианты этапа
+
+- **I8 (изоляция схемы)**: ни один другой сервис не содержит SQL-запросов, имён таблиц или
+  имён колонок БД. Все данные — через HTTP к data-service.
+- **I9 (контракт прежде кода)**: JSON Schema для каждой доменной модели — source of truth.
+  Модели в Python и Go генерируются из схем, а не пишутся вручную.
+- **I10 (совместимость)**: миграция на data-service не ломает существующие тесты.
+  Feature-флаг `USE_DATA_SERVICE` позволяет переключаться между старой SDK-реализацией
+  и новым HTTP-клиентом. Оба пути проходят один и тот же набор тестов.
+
+### Архитектура
+
+```
+                  HTTP (JSON Schema — контракт)
+mcp_server (Python) ────────────────────────────→ data-service (Go)
+                                                       │
+                                                       └── SQL → любая БД
+                                                             (SQLite / PG / Oracle / MSSQL)
+
+                  HTTP (OpenAPI — контракт)
+mcp_server (Python) ────────────────────────────→ rag (Python / …)
+```
+
+- **data-service** — единственный сервис, который ходит в БД.
+- **mcp_server** — превращается в тонкую HTTP-обёртку: инструменты вызывают data-service,
+  а не SDK-репозитории.
+- **Python SDK (`agent_tutor_sdk/db/`)** — со временем удаляется.
+  `agent_tutor_sdk/rag/` (клиент к RAG) остаётся — это другое.
+
+### 2.7.1. JSON Schema как source of truth для доменных моделей
+
+Создать `specs/schemas/` — каталог с JSON Schema (Draft 2020-12) для каждой доменной сущности,
+возвращаемой data-service:
+
+```
+specs/schemas/
+├── student.schema.json       # id, full_name, group {id, name, speciality}, course
+├── teacher.schema.json       # id, full_name, disciplines[]
+├── discipline.schema.json    # id, name, description
+├── grade.schema.json         # id, student_id, discipline_name, value, date
+├── schedule-entry.schema.json  # id, group, day, lessons[]
+└── lesson.schema.json        # discipline_id, discipline_name, teacher_name, room
+```
+
+**Требования к схемам**:
+- Каждая схема содержит `$id` (стабильный URI, например `https://agent-tutor/schemas/student`).
+- Каждое поле имеет `description` на русском — это документация для разработчика.
+- Поля называются **семантически** (`full_name`, а не `name`; `value`, а не `grade`).
+  Имена полей не зависят от названий колонок в какой-либо БД.
+- Схемы **не знают** про SQL, таблицы, JOIN'ы, типы ключей. Это чистый контракт.
+
+**Кодогенерация**:
+
+| Язык | Инструмент | Команда |
+|---|---|---|
+| Python (Pydantic) | `datamodel-codegen` | `datamodel-codegen --input specs/schemas/ --output agent_tutor_sdk/contracts/` |
+| Go | `oapi-codegen` или `a-h/generate` | `go generate ./...` (читает `data-service/internal/models/gen.go`) |
+| TypeScript | `json2ts` | `json2ts --input specs/schemas/ --output demo/web/static/types/` |
+
+**CI-проверка (будет на Этапе 3)**:
+
+```bash
+# Сгенерированные модели не расходятся с JSON Schema
+diff <(datamodel-codegen --input specs/schemas/) agent_tutor_sdk/contracts/
+```
+
+### 2.7.2. API-контракт data-service
+
+**Создать** `specs/data-service.openapi.yaml`.
+
+Эндпоинты (8 шт.):
+
+```
+GET  /health                                   → {"status":"ok","db":"ok"}
+
+GET  /students/:id                             → Student | 404
+GET  /students?name=Иван+Петров                → Student | 404
+GET  /students/:id/disciplines                 → [Discipline]
+GET  /students/:id/grades?discipline_id=       → [Grade]
+
+GET  /teachers?name=Оксана+Ниловна             → Teacher | 404
+GET  /teachers/:name/schedule?day=Пн           → [ScheduleEntry]
+
+GET  /groups/:id/schedule?day=Пн               → [ScheduleEntry]
+
+GET  /disciplines                              → [Discipline]
+```
+
+**Принципы**:
+- Все ответы — JSON, соответствующий схемам из `specs/schemas/`.
+- `404` когда сущность не найдена (а не `200 null`).
+- Только GET — data-service не пишет в БД. Запись данных — вне скоупа этого сервиса
+  (импорт документов — через RAG, генерация фикстур — через CLI).
+- Correlation-ID пробрасывается через заголовок `X-Correlation-ID`.
+
+### 2.7.3. Структура Go-проекта
+
+```
+data-service/
+├── go.mod
+├── go.sum
+├── Dockerfile                       # two-stage: golang:1.22-alpine → scratch
+├── .air.toml                        # hot-reload для dev (опционально)
+├── cmd/
+│   └── server/
+│       └── main.go                  # точка входа: флаги, DI, запуск HTTP
+├── internal/
+│   ├── server/
+│   │   ├── server.go                # HTTP-сервер, регистрация роутов
+│   │   ├── middleware.go            # correlation-id, request logging, recovery
+│   │   └── health.go                # GET /health → проверка ping БД
+│   ├── handlers/
+│   │   ├── students.go              # GET /students/:id и т.д.
+│   │   ├── teachers.go
+│   │   ├── grades.go
+│   │   ├── schedule.go
+│   │   └── disciplines.go
+│   ├── db/
+│   │   ├── connector.go             # интерфейс DB (QueryRow, Query, Ping)
+│   │   ├── sqlite.go                # реализация для SQLite (dev)
+│   │   └── postgres.go              # реализация для PostgreSQL (prod)
+│   ├── repository/                  # слой доступа к данным
+│   │   ├── students.go              # SQL-запросы → доменные модели
+│   │   ├── teachers.go
+│   │   ├── grades.go
+│   │   ├── schedule.go
+│   │   └── disciplines.go
+│   └── models/
+│       └── gen.go                   # go:generate — кодогенерация из JSON Schema
+└── testdata/
+    └── seed.sql                     # тестовые данные для integration-тестов
+```
+
+**Ключевые решения**:
+
+**Роутер**: `chi` (лёгкий, совместим с `net/http`, middleware-friendly).
+
+**Драйвер БД**: `database/sql` + драйвер (`modernc.org/sqlite` для dev, `pgx` для PG).
+Выбор драйвера через `DB_DRIVER` env (дефолт: `sqlite`).
+
+**Интерфейс БД** (`internal/db/connector.go`):
+
+```go
+type DB interface {
+    QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+    QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+    PingContext(ctx context.Context) error
+    Close() error
+}
+```
+
+Репозитории зависят от интерфейса `DB`, а не от конкретного драйвера. Это позволяет
+подменить SQLite на PostgreSQL (или любую другую БД) без изменения кода репозиториев —
+достаточно написать новую реализацию `DB` и адаптировать SQL-запросы.
+
+**Репозиторий** (`internal/repository/students.go`):
+
+```go
+type StudentRepo struct {
+    db db.DB
+}
+
+func (r *StudentRepo) GetByID(ctx context.Context, id string) (*models.Student, error) {
+    row := r.db.QueryRowContext(ctx,
+        `SELECT s.student_uuid, s.first_name || ' ' || s.last_name,
+                g.group_id, g.title, g.speciality, s.course
+         FROM university.students s
+         LEFT JOIN university.groups g ON g.group_id = s.group_ref
+         WHERE s.student_uuid = $1`, id)
+    // scan → models.Student
+}
+```
+
+**Важно**: SQL-запросы живут ТОЛЬКО в `internal/repository/`. Handlers не знают SQL.
+Handlers не знают имён колонок. Handlers вызывают методы репозитория и получают
+готовые доменные модели (`models.Student`).
+
+**Смена схемы БД** = переписать SQL в `internal/repository/`, не трогая handlers,
+не трогая модели, не трогая HTTP-контракт.
+
+### 2.7.4. Интеграция с Python-сервисами
+
+**Создать** `mcp_server/tools_via_http.py` — тонкие HTTP-обёртки, дублирующие сигнатуры
+текущих MCP-инструментов:
+
+```python
+import httpx
+import os
+from agent_tutor_sdk.contracts import Student, Teacher, Discipline, Grade, ScheduleEntry
+
+DATA_SERVICE_URL = os.environ.get("DATA_SERVICE_URL", "http://127.0.0.1:8084")
+
+@mcp.tool()
+async def get_student(student_id: str) -> Student | None:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{DATA_SERVICE_URL}/students/{student_id}")
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return Student(**resp.json())
+
+# ... аналогично для find_student_by_name, get_disciplines, get_student_grades,
+#     get_teacher_by_name, get_teacher_schedule, get_schedule
+```
+
+**Feature-флаг** в `mcp_server/server.py`:
+
+```python
+USE_DATA_SERVICE = os.environ.get("USE_DATA_SERVICE", "0") == "1"
+
+if USE_DATA_SERVICE:
+    from mcp_server.tools_via_http import *   # HTTP-вызовы к Go-сервису
+else:
+    from mcp_server.tools_via_sdk_local import *  # текущая SDK-реализация (старый путь)
+```
+
+**Проверка совместимости**: существующие unit-тесты MCP-инструментов (`mcp_server/tests/unit/`)
+прогоняются дважды — с `USE_DATA_SERVICE=0` (старый путь) и `USE_DATA_SERVICE=1`
+(HTTP к Go-сервису). Оба прогона должны дать идентичные результаты.
+
+Для тестов с `USE_DATA_SERVICE=1` поднимается легковесный Go-сервер с `testdata/seed.sql`.
+
+### 2.7.5. Docker
+
+`data-service/Dockerfile`:
+
+```dockerfile
+FROM golang:1.22-alpine AS builder
+WORKDIR /build
+COPY data-service/go.mod data-service/go.sum ./
+RUN go mod download
+COPY specs/schemas/ /specs/schemas/
+COPY data-service/ ./
+RUN go generate ./... && CGO_ENABLED=0 go build -o /data-service ./cmd/server/
+
+FROM scratch
+COPY --from=builder /data-service /data-service
+EXPOSE 8084
+ENTRYPOINT ["/data-service"]
+```
+
+**Добавить в `docker-compose.yml`**:
+
+```yaml
+data-service:
+  image: agent-tutor-data:latest
+  build:
+    context: .
+    dockerfile: data-service/Dockerfile
+  ports:
+    - "127.0.0.1:8084:8084"
+  environment:
+    - DB_DRIVER=${DB_DRIVER:-sqlite}
+    - DATABASE_URL=${DATABASE_URL:-}
+    - DB_PATH=/data/app/university.db
+  volumes:
+    - app_data:/data/app:ro
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://127.0.0.1:8084/health"]
+    <<: *hc-curl
+  depends_on:
+    db:
+      condition: service_healthy
+  networks:
+    - agent-tutor-net
+  <<: *restart
+
+mcp:
+  environment:
+    - DATA_SERVICE_URL=http://data-service:8084
+    - USE_DATA_SERVICE=${USE_DATA_SERVICE:-0}
+```
+
+### 2.7.6. План перехода
+
+| Шаг | Что делаем | Проверка | Часы |
+|---|---|---|---|
+| 2.7.6.1 | Создать `specs/schemas/` (6 JSON Schema) | Валидация через `ajv` | 2–3 |
+| 2.7.6.2 | Сгенерировать Python Pydantic в `agent_tutor_sdk/contracts/` | `uv run pytest` — все тесты проходят с новыми моделями | 1–2 |
+| 2.7.6.3 | Создать `specs/data-service.openapi.yaml` | Ручная валидация в Swagger Editor | 1–2 |
+| 2.7.6.4 | Go-проект: структура, `go.mod`, роутер, `/health` | `curl :8084/health` → 200 | 2–3 |
+| 2.7.6.5 | Go: `internal/db/` (SQLite) + `internal/repository/` (все 5) | unit-тесты репозиториев с SQLite in-memory | 4–6 |
+| 2.7.6.6 | Go: `internal/handlers/` (все 8 эндпоинтов) | `curl` каждого эндпоинта на тестовых данных | 3–4 |
+| 2.7.6.7 | Go: Dockerfile + docker-compose интеграция | `docker compose up data-service` → healthy | 1–2 |
+| 2.7.6.8 | Python: `mcp_server/tools_via_http.py` + feature-флаг | Тесты MCP с `USE_DATA_SERVICE=1` | 2–3 |
+| 2.7.6.9 | Python: `demo/api/data.py` перевести на HTTP к data-service | `/api/data` возвращает те же данные | 1–2 |
+| 2.7.6.10 | Прогон обоих путей в CI, сравнение результатов | Идентичный JSON на обоих путях | 1–2 |
+| 2.7.6.11 | Переключить дефолт `USE_DATA_SERVICE=1`, удалить старый SDK-путь | Все тесты зелёные | 2–3 |
+| 2.7.6.12 | Удалить `agent_tutor_sdk/db/` (репозитории, schema, fixtures, connector) | Проект собирается без ошибок | 1–2 |
+
+### Критерии готовности этапа 2.7
+
+- [ ] `specs/schemas/` — 6 JSON Schema, каждая с `$id` и `description` на всех полях
+- [ ] `specs/data-service.openapi.yaml` — 8 эндпоинтов, все ссылаются на `specs/schemas/`
+- [ ] Python Pydantic-модели генерируются из JSON Schema одной командой
+- [ ] `data-service/` — Go-проект, собирается `go build`, бинарник ~15 МБ
+- [ ] `docker compose up data-service` → healthy за <5 секунд
+- [ ] Все 8 эндпоинтов отвечают корректным JSON на тестовых данных
+- [ ] MCP-инструменты работают через HTTP к data-service (флаг `USE_DATA_SERVICE=1`)
+- [ ] Тесты MCP проходят идентично на обоих путях (SDK и HTTP)
+- [ ] `demo/api/data.py` ходит в data-service через HTTP, не импортирует `agent_tutor_sdk/db/`
+- [ ] `uv run pytest` — все тесты зелёные (оба пути)
+- [ ] При смене `DB_DRIVER=postgres` и `DATABASE_URL=postgresql://...`
+  data-service работает с PostgreSQL без изменений кода (только SQL-запросы адаптированы)
+
+### Что изменится после этапа
+
+| Компонент | Было | Стало |
+|---|---|---|
+| Доступ к БД | Python-импорт `agent_tutor_sdk/db/` из всех сервисов | HTTP к data-service:8084 |
+| Знание схемы БД | Размазано по mcp_server, api, fixtures, SDK | Только в `data-service/internal/repository/` |
+| Модели данных | Pydantic вручную, привязаны к колонкам | JSON Schema → генерация в Python и Go |
+| `agent_tutor_sdk/db/` | Репозитории, schema, fixtures, connector | **Удалён** |
+| `mcp_server` | Содержит SQL-запросы (через SDK) | Тонкая HTTP-обёртка, SQL не содержит |
+| `demo/api/data.py` | Прямые SQL-запросы к БД | HTTP-вызовы к data-service |
+| Новый сервис | — | `data-service` (Go) — 1 бинарник, 1 Dockerfile |
+| Мультиязычность | 100% Python | Python + Go, контракт через JSON Schema |
+
+---
+
 ## Этап 2.5. Минимальный мониторинг и smoke-проверки
 
 **Цель**: до CI и до прод-обвязки добавить минимальную наблюдаемость, чтобы быстро локализовать поломку по сервисам, не заводя полноценный стек мониторинга.
@@ -742,6 +1077,8 @@ docker compose --profile prod up -d
 | 0 | `python -m rag.service` + `python -m mcp_server.server` + `python -m demo.api.server` + `python -m demo.web.server` - все 4 сервиса поднимаются, UI чат работает end-to-end через HTTP MCP |
 | 1 | `uv run pytest` - unit + integration зелёные, coverage ≥ 40%, ruff без ошибок |
 | 2 | ✅ Файлы созданы: Dockerfile, compose (7 сервисов), Caddyfile, .env.example, .dockerignore. **Требуется проверка на Docker Engine.** |
+| 2.6 | ✅ SDK выделен, перекрёстные импорты убраны, `specs/` с OpenAPI для rag и api |
+| 2.7 | `data-service` на Go поднят, 8 эндпоинтов отвечают JSON, MCP-тесты проходят на обоих путях, `agent_tutor_sdk/db/` удалён |
 | 2.5 | `docker compose ps` и smoke-проход локализуют падение по сервисам без чтения кода |
 | 3 | push в `main` → CI зелёный (lint + test + build). E2E - отдельный workflow |
 | 4 | Bearer enforced через web-прокси, `/health` агрегирует зависимости, таймауты разумные |

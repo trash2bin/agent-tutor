@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import Any, Callable, Awaitable
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -83,6 +84,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --- Correlation ID middleware ---
+@app.middleware("http")
+async def add_correlation_id(
+    request: Request, call_next: Callable[[Request], Awaitable[Any]]
+) -> Any:
+    correlation_id = request.headers.get("x-correlation-id") or str(uuid4())
+    request.state.correlation_id = correlation_id
+    logger.info(
+        "Request started",
+        extra={
+            "correlation_id": correlation_id,
+            "method": request.method,
+            "path": request.url.path,
+        },
+    )
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
 
 
 # === Эндпоинты ===
