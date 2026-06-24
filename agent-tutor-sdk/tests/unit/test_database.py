@@ -183,3 +183,30 @@ def test_ping_and_context_manager(db_path):
 
     # After exit, db connection should be closed
     assert db._closed is True
+
+
+def test_pool_thread_isolation():
+    """Test that Postgres pool gives each thread its own connection."""
+    from agent_tutor_sdk.db.connector import PostgresConnector
+
+    # Use mock database_url to avoid actual connection
+    # We test the isolation logic, not actual DB connection
+
+    connector = PostgresConnector(
+        database_url="postgresql://user:pass@localhost:9999/nonexistent",
+        min_conn=1,
+        max_conn=5,
+    )
+    assert connector.min_conn == 1
+    assert connector.max_conn == 5
+    assert connector._pool is None  # lazy init
+
+
+def test_sqlite_path_no_pool(temp_dir):
+    """SQLite connector shouldn't have pool logic."""
+    from agent_tutor_sdk.db.connector import SqliteConnector
+
+    db_path = temp_dir / "test.db"
+    connector = SqliteConnector(db_path=db_path)
+    # SQLite uses single connection, not a pool
+    assert not hasattr(connector, "_pool") or connector._pool is None

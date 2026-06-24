@@ -1,11 +1,18 @@
-"""Базовый репозиторий — execute/fetch/lesson_from_dict."""
+"""Базовый репозиторий — execute/fetch/lesson_from_dict.
+
+Содержит общую логику переоткрытия соединения при OperationalError
+(потеря связи с PostgreSQL / таймаут).
+"""
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
-from agent_tutor_sdk.db.connector import Connector
+from agent_tutor_sdk.db.connector import Connector, is_operational_error
 from agent_tutor_sdk.db.models import Lesson
+
+logger = logging.getLogger(__name__)
 
 
 class BaseRepository:
@@ -20,9 +27,18 @@ class BaseRepository:
 
     def execute(self, sql: str, parameters: tuple[Any, ...] | list[Any] = ()) -> Any:
         adapted = self.connector.adapt_sql(sql)
-        cursor = self.conn.cursor()
-        cursor.execute(adapted, parameters)
-        return cursor
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(adapted, parameters)
+            return cursor
+        except Exception as exc:
+            # OperationalError — соединение могло умереть. Сбрасываем и пробрасываем.
+            if is_operational_error(exc) and hasattr(
+                self.connector, "reset_thread_connection"
+            ):
+                logger.warning("DB connection lost, resetting: %s", exc)
+                self.connector.reset_thread_connection()  # type: ignore[attr-defined]
+            raise
 
     def fetch_one(self, sql: str, parameters: tuple[Any, ...] | list[Any] = ()) -> Any:
         return self.execute(sql, parameters).fetchone()

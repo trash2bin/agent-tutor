@@ -1,8 +1,10 @@
 import os
+import asyncio
+import logging
 from mcp.server.fastmcp import FastMCP
-from typing import Annotated, Optional, List
+from typing import Annotated, Any, Optional, List
 from pydantic import Field
-from agent_tutor_sdk.db.database import get_db
+from agent_tutor_sdk.db.database import Database, get_db
 from agent_tutor_sdk.db.models import (
     Grade,
     ScheduleEntry,
@@ -13,16 +15,17 @@ from agent_tutor_sdk.db.models import (
 from agent_tutor_sdk.rag.client import RagClient, RAG_SERVICE_URL
 from agent_tutor_sdk.rag.models import Document, RagContext, RagSearchResult
 
+logger = logging.getLogger(__name__)
 
-# Инициализация БД и репозиториев
-db = get_db()
-student_repo = db.student_repo
-teacher_repo = db.teacher_repo
-grade_repo = db.grade_repo
-discipline_repo = db.discipline_repo
 
-# HTTP-клиент к RAG-сервису
-rag_client = RagClient(RAG_SERVICE_URL)
+# Lazy-инициализация БД и репозиториев (заполняется в main())
+# Используется @mcp.tool() декоратором — переменные разрешаются в момент вызова
+_db: Database | None = None
+student_repo: Any = None
+teacher_repo: Any = None
+grade_repo: Any = None
+discipline_repo: Any = None
+rag_client: RagClient | None = None
 
 mcp = FastMCP("University Server")
 
@@ -167,7 +170,7 @@ def get_teacher_schedule(
 
 
 @mcp.tool()
-def list_documents(
+async def list_documents(
     discipline_id: Annotated[
         Optional[str],
         Field(
@@ -182,11 +185,14 @@ def list_documents(
 
     Возвращает List[Document]: id, title, source_path, mime_type, discipline_id, created_at.
     """
-    return rag_client.list_documents_sync(discipline_id, limit) or []
+    return (
+        await asyncio.to_thread(rag_client.list_documents_sync, discipline_id, limit)
+        or []
+    )
 
 
 @mcp.tool()
-def search_documents(
+async def search_documents(
     query: Annotated[str, Field(description="Поисковый запрос по документам.")],
     discipline_id: Annotated[
         Optional[str],
@@ -201,11 +207,16 @@ def search_documents(
     Возвращает List[RagSearchResult]: document_id, document_title, chunk_id, page, score, content.
     Используй context_search_in_documents если нужен готовый контекст для ответа.
     """
-    return rag_client.search_documents_sync(query, discipline_id, limit) or []
+    return (
+        await asyncio.to_thread(
+            rag_client.search_documents_sync, query, discipline_id, limit
+        )
+        or []
+    )
 
 
 @mcp.tool()
-def context_search_in_documents(
+async def context_search_in_documents(
     query: Annotated[
         str, Field(description="Вопрос пользователя для поиска по документам.")
     ],
@@ -223,14 +234,16 @@ def context_search_in_documents(
     Возвращает RagContext: query, answer_instruction, chunks[].
     Отвечай только на основе chunks, явно укажи если данных недостаточно.
     """
-    return rag_client.build_rag_context_sync(query, discipline_id, limit)
+    return await asyncio.to_thread(
+        rag_client.build_rag_context_sync, query, discipline_id, limit
+    )
 
 
 # СЛУЖЕБНОЕ
 
 
 @mcp.tool()
-def get_health_status() -> dict:
+async def get_health_status() -> dict:
     """Проверить работоспособность системы (БД и RAG-сервис).
 
     Возвращает {"database": {"status": "ok"|"error", "error": null|str},
@@ -238,13 +251,17 @@ def get_health_status() -> dict:
     """
     db_status = {"status": "ok", "error": None}
     try:
-        db.ping()
+        if _db is None:
+            raise RuntimeError("Database not initialized")
+        _db.ping()
     except Exception as e:
         db_status = {"status": "error", "error": str(e)}
 
     rag_status = {"status": "ok", "error": None}
     try:
-        health = rag_client.health_sync()
+        if rag_client is None:
+            raise RuntimeError("RAG client not initialized")
+        health = await asyncio.to_thread(rag_client.health_sync)
         if health.get("status") != "ok":
             rag_status = {"status": "error", "error": "RAG service degraded"}
     except Exception as e:
@@ -253,12 +270,38 @@ def get_health_status() -> dict:
     return {"database": db_status, "rag": rag_status}
 
 
+def _init_db() -> None:
+    """Lazy-инициализация БД и репозиториев.
+
+    Вызывается при старте сервера (main()), а не при импорте модуля.
+    Это позволяет:
+      - подменять окружение до старта (тесты, разные БД)
+      - не падать при импорте если БД недоступна
+      - не загружать фикстуры если БД уже заполнена
+    """
+    global _db, student_repo, teacher_repo, grade_repo, discipline_repo, rag_client
+    if _db is not None:
+        return  # уже проинициализировано
+
+    logger.info("Initializing database connection...")
+    _db = get_db()
+    student_repo = _db.student_repo
+    teacher_repo = _db.teacher_repo
+    grade_repo = _db.grade_repo
+    discipline_repo = _db.discipline_repo
+    rag_client = RagClient(RAG_SERVICE_URL)
+    logger.info("Database initialized successfully")
+
+
 def main():
     """Запустить MCP-сервер с HTTP-транспортом и health endpoint'ом.
 
     FastMCP streamable-HTTP уже содержит маршрут /mcp.
     Добавляем /health для docker healthcheck.
     """
+    # Инициализируем БД ПЕРЕД запуском сервера
+    _init_db()
+
     from starlette.responses import JSONResponse
     from starlette.routing import Route
 

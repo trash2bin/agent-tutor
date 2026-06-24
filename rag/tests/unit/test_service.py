@@ -97,7 +97,6 @@ async def test_list_documents_success(mock_state):
         assert data["documents"][0]["id"] == "doc1"
 
 
-
 @pytest.mark.asyncio
 async def test_import_document_success(mock_state):
     """Проверка успешного импорта документа."""

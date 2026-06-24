@@ -6,7 +6,8 @@ Stage 0.4: Translated from Starlette to FastAPI + /api/* reverse proxy + SSE-pro
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable, Awaitable
+from uuid import uuid4
 
 from contextlib import asynccontextmanager
 
@@ -38,13 +39,18 @@ def _build_api_url(path: str) -> str:
 
 
 async def _get_proxy_headers(request: Request) -> dict[str, str]:
-    """Build headers for proxying to API, including auth token."""
+    """Build headers for proxying to API, including auth token and correlation ID."""
     headers = {
         "user-agent": request.headers.get("user-agent", "demo-web-proxy"),
         "accept": request.headers.get("accept", "*/*"),
         "accept-language": request.headers.get("accept-language", ""),
         "accept-encoding": request.headers.get("accept-encoding", ""),
     }
+
+    # Пробрасываем correlation ID для трассировки запроса через все сервисы
+    correlation_id = request.headers.get("x-correlation-id")
+    if correlation_id:
+        headers["x-correlation-id"] = correlation_id
 
     # Forward content-type for requests with body
     if request.method in ("POST", "PUT", "PATCH"):
@@ -178,6 +184,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --- Correlation ID middleware ---
+@app.middleware("http")
+async def add_correlation_id(
+    request: Request, call_next: Callable[[Request], Awaitable[Any]]
+) -> Any:
+    correlation_id = request.headers.get("x-correlation-id") or str(uuid4())
+    request.state.correlation_id = correlation_id
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
 
 
 # --- Routes ---
