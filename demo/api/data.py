@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from db.database import Database
+from agent_tutor_sdk.db.database import Database
 
 
 class DemoDataRepository:

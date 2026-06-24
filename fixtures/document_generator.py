@@ -17,8 +17,10 @@ from docx.oxml.ns import qn
 from docx.shared import Pt
 from faker import Faker
 
-from db.database import Database, PROJECT_ROOT
-from db.models import Discipline, Material
+from agent_tutor_sdk.db.database import Database
+from agent_tutor_sdk.db.connector import PROJECT_ROOT
+from agent_tutor_sdk.db.models import Discipline
+from agent_tutor_sdk.rag.models import Material
 from fixtures.catalog import (
     CURRICULUM,
     DISCIPLINE_TOPICS,

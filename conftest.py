@@ -1,10 +1,15 @@
+"""Shared pytest fixtures for all service tests.
+
+Located at project root so pytest discovers them from any service's test directory.
+"""
+
 import shutil
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from db.database import Database
+from agent_tutor_sdk.db.database import Database
 from rag.config import RagConfig
 from rag.interfaces import EmbeddingProtocol
 
@@ -26,7 +31,6 @@ def db_path(temp_dir):
 @pytest.fixture
 def test_db(db_path):
     """Provides an initialized Database instance with seed data in a temporary file."""
-    # We load fixtures from the project root fixtures.json
     db = Database(db_path=db_path, load_seed_data=True)
     yield db
     db.close()
@@ -38,7 +42,6 @@ def mock_embedding():
 
     class MockEmbedding(EmbeddingProtocol):
         def encode_batched(self, texts: list[str]) -> list[list[float]]:
-            # Return mock 384-dimensional vectors (typical for paraphrase-multilingual-MiniLM-L12-v2)
             return [[0.1] * 384 for _ in texts]
 
     return MockEmbedding()

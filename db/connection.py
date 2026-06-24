@@ -1,8 +1,11 @@
-"""Backward-compat: всё переехало в db.connector."""
+"""Backward compat re-export from SDK connector.
+
+All code should import from `agent_tutor_sdk.db.connector` directly.
+"""
 
 from __future__ import annotations
 
-from db.connector import (
+from agent_tutor_sdk.db.connector import (  # noqa: F401
     PROJECT_ROOT,
     DEFAULT_DB_PATH,
     Connector,
@@ -12,14 +15,3 @@ from db.connector import (
     DBAPIConnection,
     DBAPICursor,
 )
-
-__all__ = [
-    "PROJECT_ROOT",
-    "DEFAULT_DB_PATH",
-    "Connector",
-    "SqliteConnector",
-    "PostgresConnector",
-    "create_connector",
-    "DBAPIConnection",
-    "DBAPICursor",
-]

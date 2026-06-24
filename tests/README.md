@@ -1,31 +1,28 @@
 # Тестирование системы Agent-Tutor
 
-В данном проекте используется `pytest`. Для запуска тестов используйте команду:
-`uv run pytest`
+Тесты расположены в директориях каждого сервиса:
 
-## Текущее состояние тестирования
+| Сервис | Тесты |
+|---|---|
+| `rag/` | `rag/tests/` |
+| `mcp_server/` | `mcp_server/tests/` |
+| `demo/api/` | `demo/api/tests/` |
+| `db/` | `db/tests/` |
 
-| Модуль | Статус | Комментарий |
-| :--- | :--- | :--- |
-| `unit/demo/agent/` | ✅ Готово | Покрыты LLM-клиент, MCP-клиент, оркестратор и парсер инструментов. |
-| `unit/db/` | ✅ Готово | Базовые тесты для работы с базой данных. |
-| `unit/rag/` | 🚧 В процессе | Покрыт пайплайн RAG. |
-| `integration/` | ❌ Предстоит | Отсутствуют интеграционные тесты для связки сервисов. |
-| `unit/tools/` | ✅ Готово | Покрыты StudentTools, TeacherTools, DisciplineTools, GradeTools. |
+## Запуск
 
-## Предстоящие задачи по написанию тестов
+```bash
+# Все тесты (из корня проекта)
+uv run pytest
 
-1. **Интеграционные тесты (`tests/integration/`):**
-   - Написание сценариев прохождения запроса от API через MCP к RAG.
-   - Тестирование SSE-стриминга в `demo/api/server.py`.
-2. **Тестирование инструментов (`tests/unit/tools/`):**
-   - ✅ Проверка корректности возвращаемых данных для каждого инструмента (`get_student`, `get_schedule` и т.д.).
-3. **HTTP-контракты:**
-   - Тестирование `rag/service.py` и `demo/api/server.py` с использованием `httpx.AsyncClient`.
-4. **CLI-утилиты:**
-   - E2E-тесты для `agent-ingest` и `agent-generate`.
+# Тесты конкретного сервиса
+uv run pytest rag/tests/
+uv run pytest mcp_server/tests/
+uv run pytest demo/api/tests/
+uv run pytest db/tests/
 
-## Настройка
-- Используется `pytest-asyncio` для асинхронного тестирования.
-- `respx` используется для мока HTTP-запросов.
-- `coverage` настроен для контроля покрытия (целевой показатель ≥ 40%).
+# С покрытием
+uv run pytest --cov --cov-fail-under=40
+```
+
+Shared fixtures (`temp_dir`, `test_db`, `mock_embedding`, `rag_config`) — в корневом `conftest.py`.

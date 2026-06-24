@@ -1,0 +1,2 @@
+[console_scripts]
+agent-tutor = mcp_server.server:main

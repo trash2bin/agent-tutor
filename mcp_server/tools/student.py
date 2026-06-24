@@ -1,6 +1,6 @@
 from typing import Optional
-from db.database import Database
-from db.models import Student, ScheduleEntry
+from agent_tutor_sdk.db.database import Database
+from agent_tutor_sdk.db.models import Student, ScheduleEntry
 
 
 class StudentTools:

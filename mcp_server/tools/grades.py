@@ -1,5 +1,5 @@
-from db.database import Database
-from db.models import Grade
+from agent_tutor_sdk.db.database import Database
+from agent_tutor_sdk.db.models import Grade
 
 
 class GradeTools:

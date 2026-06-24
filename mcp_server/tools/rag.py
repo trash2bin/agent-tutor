@@ -1,7 +1,7 @@
 """Фасад RagTools для обратной совместимости.
 
 Этот модуль оставлен для совместимости с fixtures/document_generator.py.
-Новый код должен использовать rag.client.RagClient напрямую.
+Новый код должен использовать agent_tutor_sdk.rag.client.RagClient напрямую.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from rag.client import RagClient, RAG_SERVICE_URL
+from agent_tutor_sdk.rag.client import RagClient, RAG_SERVICE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ class _FakeRepository:
 
     def get_materials(self, discipline_id: str | None = None):
         """Возвращает материалы как Discipline материалы."""
-        from db.models import Material
+        from agent_tutor_sdk.rag.models import Material
 
         docs = self.client.list_documents_sync(discipline_id=discipline_id)
         return [
@@ -106,7 +106,6 @@ class _FakeRepository:
         """Сохраняет документ с чанками - через HTTP клиент."""
         # Импортируем документ
         try:
-
             # Chunker для текстовых файлов
             text_chunks = []
             for chunk in chunks:

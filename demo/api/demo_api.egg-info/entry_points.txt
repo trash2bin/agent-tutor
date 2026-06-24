@@ -1,0 +1,2 @@
+[console_scripts]
+agent-chat-api = demo.api:main

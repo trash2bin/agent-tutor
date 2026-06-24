@@ -1,6 +1,7 @@
 # ============================================================
 # WEB server: static files + reverse-proxy to API
 # Core deps only — the lightest image (<100MB)
+# No SDK dependency — pure proxy layer
 # ============================================================
 FROM python:3.12-slim AS builder
 
@@ -8,9 +9,12 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project --no-dev
-COPY . .
-RUN uv sync --frozen --no-dev
+COPY demo/web/pyproject.toml demo/web/
+RUN uv sync --frozen --no-install-project --package demo-web --no-dev
+COPY demo/web/ demo/web/
+COPY demo/__init__.py demo/
+COPY demo/settings.py demo/
+RUN uv sync --frozen --package demo-web --no-dev
 
 FROM python:3.12-slim
 
@@ -21,7 +25,10 @@ RUN apt-get update && \
     apt-get install --no-install-recommends -y curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder --chown=app:app /app /app
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=builder --chown=app:app /app/demo/web /app/demo/web
+COPY --from=builder --chown=app:app /app/demo/settings.py /app/demo/settings.py
+COPY --from=builder --chown=app:app /app/demo/__init__.py /app/demo/__init__.py
 
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \

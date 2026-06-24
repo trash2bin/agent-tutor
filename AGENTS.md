@@ -9,6 +9,10 @@
 - Все сервисы запускаются независимо и общаются друг с другом по HTTP.
 - CLI для документов и генерации: `agent-ingest` (RAG-документы), `agent-generate` (генерация материалов). Детали в `fixtures/README.md`
 - База данных: **SQLite** (по умолчанию) или **PostgreSQL** (через `DATABASE_URL`). Абстракция в `db/connector.py`.
+- **Архитектурная гибкость**: каждый сервис — self-contained единица с собственным HTTP-контрактом.
+  Сервис можно переписать на другом языке, не трогая соседей — достаточно реализовать тот же
+  HTTP-контракт (OpenAPI-спецификация). База данных переключается через `DATABASE_URL` без
+  изменения логики сервисов. CLI-утилиты (`fixtures/`) — это dev-инструментарий, не production-сервисы.
 
 ## Базовые команды
 
@@ -137,15 +141,21 @@ DEMO_API_HOST=127.0.0.1 DEMO_API_PORT=8081 DEMO_WEB_PORT=8080 uv run python -m d
 agent-tutor/
 ├── mcp_server/              # MCP-сервер (FastMCP, HTTP :8083)
 │   ├── server.py
+│   ├── tests/               # unit-тесты MCP-инструментов
+│   │   └── unit/
+│   │       ├── test_student_tools.py
+│   │       ├── test_discipline_tools.py
+│   │       ├── test_grade_tools.py
+│   │       └── test_teacher_tools.py
 │   └── tools/
 │       ├── student.py
 │       ├── disciplines.py
 │       ├── grades.py
 │       ├── teacher.py
-│       └── rag.py           # Фасад → RagClient
+│       └── rag.py           # Фасад → RagClient (будет удалён в Этапе 2.6)
 ├── rag/                     # RAG HTTP-сервис (FastAPI, :8082)
 │   ├── service.py           # /health /search /context /documents/*
-│   ├── client.py            # HTTP-клиент для MCP и других сервисов
+│   ├── client.py            # HTTP-клиент для MCP и других сервисов (переедет в SDK на Этапе 2.6)
 │   ├── pipeline.py          # парсинг → чанкинг → embedding → ChromaDB
 │   ├── embeddings.py        # SentenceTransformerEmbedding
 │   ├── vector_store.py      # ChromaDBVectorStore
@@ -155,14 +165,27 @@ agent-tutor/
 │   ├── models.py            # Pydantic-модели домена
 │   ├── interfaces.py        # EmbeddingProtocol, VectorStoreProtocol
 │   ├── config.py            # RagConfig из env
-│   └── http_models.py       # Pydantic DTO для HTTP-контракта
+│   ├── http_models.py       # Pydantic DTO для HTTP-контракта
+│   └── tests/               # unit + integration тесты RAG
+│       ├── unit/
+│       │   ├── test_client.py
+│       │   ├── test_embeddings.py
+│       │   ├── test_rag_pipeline.py
+│       │   ├── test_repository.py
+│       │   ├── test_service.py
+│       │   └── test_vector_store.py
+│       └── integration/
+│           └── test_e2e_pipeline.py
 ├── db/                      # Абстракция БД (SQLite / PostgreSQL)
 │   ├── connector.py         # Connector, SqliteConnector, PostgresConnector
 │   ├── connection.py        # Реэкспорт для обратной совместимости
 │   ├── database.py          # Фасад Database с CRUD
 │   ├── schema.py            # DDL для обеих БД (идемпотентный)
 │   ├── fixtures.py          # Загрузчик test-data / fixtures.json
-│   └── models.py            # Pydantic-модели (реэкспорт из rag.models)
+│   ├── models.py            # Pydantic-модели (реэкспорт из rag.models)
+│   └── tests/               # unit-тесты Database
+│       └── unit/
+│           └── test_database.py
 ├── demo/
 │   ├── settings.py          # Все env-переменные demo-части
 │   ├── api/
@@ -171,6 +194,15 @@ agent-tutor/
 │   │   ├── backlog.py       # JSONL-бэклог взаимодействий с моделью
 │   │   ├── data.py          # Репозиторий данных для демо
 │   │   ├── sessions.py      # Хранилище сессий (SQLite)
+│   │   ├── tests/           # unit-тесты API
+│   │   │   └── unit/
+│   │   │       ├── test_backlog.py
+│   │   │       ├── test_sessions.py
+│   │   │       └── agent/
+│   │   │           ├── test_llm_client.py
+│   │   │           ├── test_mcp_client.py
+│   │   │           ├── test_orchestrator.py
+│   │   │           └── test_tool_parser.py
 │   │   └── agent/
 │   │       ├── orchestrator.py  # Оркестратор агента
 │   │       ├── llm_client.py    # Клиент LiteLLM
@@ -181,25 +213,29 @@ agent-tutor/
 │   └── web/
 │       ├── server.py        # FastAPI reverse-proxy + SSE-прокси + статика
 │       └── static/          # HTML/CSS/JS
-├── fixtures/
+├── fixtures/                 # CLI-утилиты (dev-only, не production-сервис)
+│   ├── README.md            # Документация CLI-команд
+│   ├── ingest.py            # CLI agent-ingest (импорт/поиск/удаление документов)
+│   ├── agent_generate.py    # CLI agent-generate (генерация материалов)
+│   ├── document_generator.py # Логика генерации документов через Ollama
 │   ├── generate.py          # Генератор fixtures.json (Faker)
-│   ├── ingest.py            # CLI agent-ingest
-│   └── document_generator.py  # Генерация материалов через Ollama
+│   └── catalog.py           # Каталоги и справочники
 ├── scripts/
 │   ├── dev.sh               # Нативный запуск всех сервисов
 │   ├── backup.py            # Бэкап SQLite
 │   └── init-db.sql          # Инициализация PostgreSQL
-├── tests/
-│   ├── conftest.py
-│   ├── unit/                # rag/, db/, tools/, demo/
-│   └── integration/         # rag/ (e2e-тесты)
+├── conftest.py              # Корневые shared fixture для всех тестов
 ├── doc/                     # ROADMAP.md, TASK.md
 ├── docker-compose.yml
-├── Dockerfile               # Корневой Dockerfile (не используется — каждый сервис свой)
 ├── Caddyfile                # HTTPS-прокси для prod-профиля
 ├── .env.example             # Все переменные окружения
 └── fixtures.json            # Тестовые данные
 ```
+
+> Тесты разнесены по сервисам: каждый сервис содержит собственную `tests/` директорию.
+> Корневой `conftest.py` предоставляет общие фикстуры (temp_dir, test_db, mock_embedding).
+> `uv run pytest` из корня запускает все тесты сразу.
+> `uv run pytest rag/tests/` — только RAG-тесты.
 
 ## Инструменты MCP-сервера
 
@@ -221,6 +257,55 @@ agent-tutor/
 | `get_rag_context(query, discipline_id?, limit?)` | Готовый контекст для ответа по документам |
 
 > `import_document` доступен только через CLI `agent-ingest`, не через MCP.
+
+## CLI-утилиты (fixtures/) — назначение и философия
+
+`fixtures/` — это **dev-инструментарий**, не production-сервис. Он существует для:
+
+1. **Создания тестовых данных** (`agent-ingest`): импорт PDF/DOCX/TXT в RAG-индекс,
+   поиск по документам, удаление. Нужен для наполнения базы тестовыми лекциями
+   и методичками, чтобы проверять качество RAG-поиска и ответов агента.
+
+2. **Генерации учебных материалов** (`agent-generate`): создание лекций, методичек
+   и лабораторных работ через Ollama. Нужен для user-тестирования — чтобы у агента
+   были реальные документы для поиска, а не только голые записи из `fixtures.json`.
+
+3. **Наполнения базы фикстурами** (`fixtures/generate.py`): генерация `fixtures.json`
+   с фейковыми студентами, группами, расписанием, оценками.
+
+**Важно**: `fixtures/` — не микросервис и не часть production-архитектуры.
+Это утилиты для разработки и тестирования, которые работают с сервисами через HTTP
+(как и любой внешний клиент). Если завтра RAG-сервис переписан на Go — `agent-ingest`
+продолжает работать, потому что ходит по HTTP, а не через Python-импорты.
+
+Полная документация по командам — в `fixtures/README.md`.
+
+## Архитектурная гибкость
+
+Приложение спроектировано так, чтобы адаптироваться к разным бэкендам и сценариям
+без переписывания ядра:
+
+### Смена базы данных
+- `DATABASE_URL` не задан → SQLite (`university.db`), zero setup
+- `DATABASE_URL=postgresql://...` → PostgreSQL. `db/connector.py` выбирает драйвер
+  автоматически (sqlite3 vs psycopg2), `db/schema.py` генерирует DDL под нужный диалект
+- Сессии чата (`demo_sessions.sqlite`) пока на SQLite — это кэш, не основные данные
+
+### Смена LLM-провайдера
+- LiteLLM — единый клиент под Ollama, OpenAI, Mistral, Anthropic, Groq и др.
+- Меняется только `OLLAMA_URL` / `MISTRAL_API_KEY` / `OPENAI_API_KEY`
+
+### Замена любого сервиса
+- Каждый long-running сервис имеет HTTP-контракт (OpenAPI/Swagger на `/docs`)
+- Если переписать `rag` на Go — `mcp_server` продолжает ходить к `http://rag:8082`
+- Если переписать `mcp_server` на Rust — `api` продолжает слать MCP-over-HTTP
+- Единственная точка связности — shared Python-модели (будут вынесены в SDK на Этапе 2.6)
+- CLI-утилиты (`fixtures/`) не привязаны к Python-коду сервисов — работают по HTTP
+
+### Почему это важно
+- База вуза может быть PostgreSQL, MySQL, Oracle — адаптер пишется в `db/connector.py`
+- LLM-провайдер может меняться каждый семестр — LiteLLM проксирует любой API
+- Если вуз хочет свой кастомный RAG на Go — не надо переписывать агента
 
 ## Демо-часть
 
@@ -339,6 +424,12 @@ uv run agent-ingest clear-generated                  # Удалить сгене
 - **Этап 0** (0.0–0.5): Разделение на 4 независимых HTTP-сервиса, FastAPI, CLI-утилиты, HTTP-транспорт MCP
 - **Этап 1**: Тестовая инфраструктура (84% покрытие, 109 тестов, ruff, OpenAPI/Swagger)
 - **Этап 2**: Контейнеризация (5 Dockerfile'ов, docker-compose с 7 сервисами, Caddy, healthchecks, backup)
+- **Этап 2.x**: Тесты разнесены по сервисам (rag/tests/, mcp_server/tests/, demo/api/tests/, db/tests/),
+  Dockerfile'ы копируют только нужные исходники, а не весь проект целиком
+
+**В работе**: Этап 2.6 (Инкапсуляция сервисов: SDK и контракты) — выделение общей Python-абстракции
+в `agent-tutor-sdk/`, перенос контрактов в `specs/`, uv workspace для каждого сервиса.
+Полный план — в `doc/ROADMAP.md`.
 
 Работает:
 - MCP-сервер (FastMCP, HTTP-транспорт, `/health` endpoint)
@@ -351,6 +442,8 @@ uv run agent-ingest clear-generated                  # Удалить сгене
 - Docker: 5 образов, docker-compose, Caddy, backup-сервис, healthchecks
 - 109 тестов, 84% покрытие, ruff чисто
 - OpenAPI/Swagger у всех HTTP-сервисов
+- Тесты разнесены по пакетам сервисов: `uv run pytest rag/tests/`, `uv run pytest mcp_server/tests/`
+- Dockerfile'ы копируют в runtime только нужные исходники (минимальный размер образа)
 
 ## Осторожность
 

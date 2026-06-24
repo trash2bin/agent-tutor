@@ -2,7 +2,7 @@ import os
 import argparse
 import sys
 
-from db.database import Database
+from agent_tutor_sdk.db.database import Database
 from fixtures.document_generator import MaterialDocumentGenerator
 from mcp_server.tools.rag import RagTools
 
