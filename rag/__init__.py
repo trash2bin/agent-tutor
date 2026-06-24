@@ -24,6 +24,12 @@ if TYPE_CHECKING:
 __all__ = [
     "RagConfig",
     "create_rag_pipeline",
+    "TextChunker",
+    "SentenceTransformerEmbedding",
+    "DocumentParser",
+    "RAGPipeline",
+    "DocumentRepository",
+    "ChromaDBVectorStore",
 ]
 
 

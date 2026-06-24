@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from rag.config import RagConfig
-from rag.models import ChunkDict, Document, DocumentImportResult, Material
+from rag.models import ChunkDict
+from agent_tutor_sdk.rag.models import Document, DocumentImportResult, Material
 
 logger = logging.getLogger(__name__)
 

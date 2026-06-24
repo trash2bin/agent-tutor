@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 
-from db.database import Database
+from agent_tutor_sdk.db.database import Database
 from rag import create_rag_pipeline
 from rag.http_models import (
     ContextRequest,

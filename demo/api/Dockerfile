@@ -1,6 +1,6 @@
 # ============================================================
 # API server: LiteLLM agent, session history, backlog
-# Core deps + litellm — no torch, no chromadb
+# Core deps + litellm + SDK — no torch, no chromadb
 # ============================================================
 FROM python:3.12-slim AS builder
 
@@ -8,9 +8,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project --no-dev --extra api
+COPY agent-tutor-sdk agent-tutor-sdk/
+COPY demo/api/pyproject.toml demo/api/
+RUN uv sync --frozen --no-install-project --package demo-api --no-dev
 COPY . .
-RUN uv sync --frozen --no-dev --extra api
+RUN uv sync --frozen --package demo-api --no-dev
 
 FROM python:3.12-slim
 
@@ -21,7 +23,10 @@ RUN apt-get update && \
     apt-get install --no-install-recommends -y curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder --chown=app:app /app /app
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=builder --chown=app:app /app/demo /app/demo
+COPY --from=builder --chown=app:app /app/agent-tutor-sdk /app/agent-tutor-sdk
+
 
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \

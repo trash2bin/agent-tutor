@@ -2,8 +2,8 @@ import os
 from mcp.server.fastmcp import FastMCP
 from typing import Annotated, Optional, List
 from pydantic import Field
-from db.database import Database
-from db.models import (
+from agent_tutor_sdk.db.database import Database
+from agent_tutor_sdk.db.models import (
     Grade,
     ScheduleEntry,
     Discipline,
@@ -14,8 +14,8 @@ from mcp_server.tools.student import StudentTools
 from mcp_server.tools.disciplines import DisciplineTools
 from mcp_server.tools.grades import GradeTools
 from mcp_server.tools.teacher import TeacherTools
-from rag.client import RagClient, RAG_SERVICE_URL
-from rag.models import Document, RagContext, RagSearchResult
+from agent_tutor_sdk.rag.client import RagClient, RAG_SERVICE_URL
+from agent_tutor_sdk.rag.models import Document, RagContext, RagSearchResult
 
 
 # Инициализация инструментов БД

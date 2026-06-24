@@ -4,8 +4,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from db.database import Database
-from rag.client import RagClient, RAG_SERVICE_URL
+from agent_tutor_sdk.db.database import Database
+from agent_tutor_sdk.rag.client import RagClient, RAG_SERVICE_URL
 
 # Settings
 os.environ["RAG_LOCAL_FILES_ONLY"] = "1"

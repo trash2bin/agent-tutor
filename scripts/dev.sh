@@ -21,10 +21,10 @@ PID_DIR="$PROJECT_ROOT/.data/pids"
 
 SERVICES=("rag" "mcp" "api" "web")
 declare -A SERVICE_CMD=(
-  [rag]="uv run agent-rag "
-  [mcp]="uv run agent-tutor"
-  [api]="uv run agent-chat-api"
-  [web]="uv run agent-demo-web"
+  [rag]="uv run --package rag python -m rag.service"
+  [mcp]="uv run --package mcp_server python -m mcp_server.server"
+  [api]="uv run --package demo-api python -m demo.api.server"
+  [web]="uv run --package demo-web python -m demo.web.server"
 )
 
 # Дефолтные порты (перебиваются из .env)
@@ -108,7 +108,7 @@ cmd_start() {
   # Проверка что .venv синхронизирован
   if [ ! -d "$PROJECT_ROOT/.venv" ]; then
     echo "⚠️  .venv not found, running uv sync..."
-    (cd "$PROJECT_ROOT" && uv sync --all-extras)
+    (cd "$PROJECT_ROOT" && uv sync --group dev && uv pip install -e agent-tutor-sdk -e mcp_server -e rag -e demo/api -e demo/web -e tools)
   fi
 
   # Напоминание про PostgreSQL, если задан DATABASE_URL

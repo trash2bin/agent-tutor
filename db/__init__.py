@@ -1,6 +1,12 @@
-"""DB layer — абстракция над SQLite / PostgreSQL."""
+"""DB layer — backward compat re-export from SDK.
 
-from db.connector import (
+All code should import from `agent_tutor_sdk.db` directly.
+This module will be removed after full migration.
+"""
+
+from __future__ import annotations
+
+from agent_tutor_sdk.db.connector import (  # noqa: F401
     PROJECT_ROOT,
     DEFAULT_DB_PATH,
     Connector,
@@ -10,8 +16,8 @@ from db.connector import (
     DBAPIConnection,
     DBAPICursor,
 )
-from db.database import Database, get_db, reset_db
-from db.models import (
+from agent_tutor_sdk.db.database import Database, get_db, reset_db  # noqa: F401
+from agent_tutor_sdk.db.models import (  # noqa: F401
     Student,
     Teacher,
     Group,
@@ -26,30 +32,3 @@ from db.models import (
     RagContext,
     RagSearchResult,
 )
-
-__all__ = [
-    "PROJECT_ROOT",
-    "DEFAULT_DB_PATH",
-    "Connector",
-    "SqliteConnector",
-    "PostgresConnector",
-    "create_connector",
-    "DBAPIConnection",
-    "DBAPICursor",
-    "Database",
-    "get_db",
-    "reset_db",
-    "Student",
-    "Teacher",
-    "Group",
-    "Discipline",
-    "Grade",
-    "Lesson",
-    "ScheduleEntry",
-    "Document",
-    "DocumentChunk",
-    "DocumentImportResult",
-    "Material",
-    "RagContext",
-    "RagSearchResult",
-]

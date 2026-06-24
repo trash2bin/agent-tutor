@@ -8,7 +8,7 @@ from typing import Callable
 
 from rag.config import RagConfig
 from rag.interfaces import EmbeddingProtocol, VectorStoreProtocol
-from rag.models import DocumentImportResult, RagContext, RagSearchResult
+from agent_tutor_sdk.rag.models import DocumentImportResult, RagContext, RagSearchResult
 from rag.parser import DocumentParser
 from rag.chunker import TextChunker
 from rag.repository import DocumentRepository

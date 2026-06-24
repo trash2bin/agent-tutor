@@ -22,7 +22,8 @@ htmlcov/
 .coverage
 .coverage.*
 coverage.xml
-tests/
+**/tests/
+conftest.py
 
 # === IDE ===
 .idea/
