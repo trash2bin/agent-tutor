@@ -232,6 +232,13 @@ async def session_history_endpoint(session_id: str = Query("default")):
 
 def main() -> None:
     """Run the API server."""
+    # Cleanup old backlog files on each startup
+    try:
+        backlog.cleanup_old()
+        logger.info("Backlog cleanup completed")
+    except Exception as exc:
+        logger.warning("Backlog cleanup failed: %s", exc)
+
     uvicorn.run(
         "demo.api.server:app",
         host=settings.api_host,
