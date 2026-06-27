@@ -17,18 +17,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
-  /api/data:
-    get:
-      summary: Обзор данных
-      description: Возвращает сводную информацию о доступных данных университета.
-      operationId: data_endpoint_api_data_get
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DataOverviewResponse'
   /api/chat:
     post:
       summary: Стриминг чата
@@ -157,18 +145,6 @@ components:
       - sessions
       title: BacklogListResponse
       description: Список всех сессий в бэклоге.
-    DataOverviewResponse:
-      properties:
-        data:
-          additionalProperties: true
-          type: object
-          title: Data
-          description: Сводная информация по базе данных вуза
-      type: object
-      required:
-      - data
-      title: DataOverviewResponse
-      description: Обзор доступных демонстрационных данных.
     HTTPValidationError:
       properties:
         detail:

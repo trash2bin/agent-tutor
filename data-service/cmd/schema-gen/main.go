@@ -22,12 +22,13 @@ import (
 
 // schemaMap — какие Go-типы в какие файлы писать.
 var schemaMap = map[string]any{
-	"student.schema.json":        &models.Student{},
-	"teacher.schema.json":        &models.Teacher{},
-	"discipline.schema.json":     &models.Discipline{},
-	"grade.schema.json":          &models.Grade{},
+	"group.schema.json":         &models.Group{},
+	"student.schema.json":       &models.Student{},
+	"teacher.schema.json":       &models.Teacher{},
+	"discipline.schema.json":    &models.Discipline{},
+	"grade.schema.json":         &models.Grade{},
 	"schedule-entry.schema.json": &models.ScheduleEntry{},
-	"lesson.schema.json":         &models.Lesson{},
+	"lesson.schema.json":        &models.Lesson{},
 }
 
 func main() {

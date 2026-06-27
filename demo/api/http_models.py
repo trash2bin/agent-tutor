@@ -1,6 +1,8 @@
 """HTTP DTO для Core API сервиса.
 
 Определяет контракты взаимодействия между Web-фронтендом и API-сервером.
+
+Доменные модели (Student, Teacher, Grade, ...) живут в agent_tutor_sdk.contracts.
 """
 
 from __future__ import annotations
@@ -32,12 +34,6 @@ class HealthResponse(BaseModel):
 
     api: str = "ok"
     ollama: dict = Field(..., description="Статус подключения к LLM провайдеру")
-
-
-class DataOverviewResponse(BaseModel):
-    """Обзор доступных демонстрационных данных."""
-
-    data: dict = Field(..., description="Сводная информация по базе данных вуза")
 
 
 class BacklogListResponse(BaseModel):

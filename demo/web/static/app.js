@@ -1,4 +1,8 @@
-const apiBase = window.DEMO_API_BASE || "http://127.0.0.1:8081";
+// Браузер ходит на demo/web (:8080), который проксирует:
+//   /api/data/*       -> data-service:8084
+//   /api/rag/documents -> rag:8082
+//   /api/{chat,backlog,session/history} -> demo/api:8081 (агент)
+const apiBase = window.DEMO_API_BASE || `${window.location.protocol}//${window.location.host}`;
 
 const chatHistoryKey = "agentTutorMessages";
 const storage = window.localStorage;
@@ -23,20 +27,23 @@ const configs = {
   students: {
     title: "Студенты",
     columns: [
-      ["name", "ФИО"],
-      ["group_name", "Группа"],
-      ["speciality", "Специальность"],
+      ["full_name", "ФИО"],
+      ["group", "Группа"],
       ["course", "Курс"],
     ],
+    format: {
+      group: (g) => (g ? g.name : ""),
+    },
   },
   schedule: {
     title: "Расписание",
     columns: [
-      ["group_name", "Группа"],
+      ["group", "Группа"],
       ["day", "День"],
       ["lessons", "Пары"],
     ],
     format: {
+      group: (g) => (g ? g.name : ""),
       lessons: (lessons) =>
         lessons
           .map(
@@ -56,7 +63,7 @@ const configs = {
   teachers: {
     title: "Преподаватели",
     columns: [
-      ["name", "ФИО"],
+      ["full_name", "ФИО"],
       ["disciplines", "Дисциплины"],
     ],
     format: {
@@ -194,9 +201,27 @@ async function restoreServerHistory() {
 }
 
 async function loadData() {
-  const response = await fetch(`${apiBase}/api/data`);
-  const responseData = await response.json();
-  state.data = responseData.data || responseData;
+  // 5 параллельных fetch'ей к data-service (через прокси в demo/web).
+  // documents берём из RAG — это единственная коллекция, которой нет в data-service.
+  const [stats, students, teachers, disciplines, schedule, documents, grades] =
+    await Promise.all([
+      fetch(`${apiBase}/api/data/stats`).then((r) => r.json()),
+      fetch(`${apiBase}/api/data/students`).then((r) => r.json()),
+      fetch(`${apiBase}/api/data/teachers`).then((r) => r.json()),
+      fetch(`${apiBase}/api/data/disciplines`).then((r) => r.json()),
+      fetch(`${apiBase}/api/data/schedule`).then((r) => r.json()),
+      fetch(`${apiBase}/api/rag/documents`).then((r) => r.json()),
+      fetch(`${apiBase}/api/data/grades`).then((r) => r.json()),
+    ]);
+  state.data = {
+    stats,
+    students,
+    teachers,
+    disciplines,
+    schedule,
+    documents: documents.documents || documents,
+    grades,
+  };
   renderMetrics();
   renderTable();
 }

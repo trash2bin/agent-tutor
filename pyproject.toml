@@ -40,6 +40,7 @@ testpaths = [
     "rag/tests",
     "mcp_server/tests",
     "demo/api/tests",
+    "demo/web/tests",
 ]
 python_files = "test_*.py"
 markers = [
