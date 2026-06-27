@@ -18,14 +18,12 @@ from fastapi.responses import StreamingResponse
 from demo.api.agent.orchestrator import LLMAgent
 from demo.api.agent.types import AgentEventData
 from demo.api.backlog import backlog
-from demo.api.data import data_repository
 from demo.api.sessions import session_store
 from demo.settings import settings
 from demo.api.http_models import (
     BacklogDetailResponse,
     BacklogListResponse,
     ChatRequest,
-    DataOverviewResponse,
     HealthResponse,
     SessionHistoryResponse,
 )
@@ -79,11 +77,6 @@ async def get_health() -> HealthResponse:
     except Exception as exc:
         payload["ollama"] = {"status": "error", "error": str(exc)}
     return HealthResponse(**payload)
-
-
-async def get_data() -> DataOverviewResponse:
-    """Get demo data overview."""
-    return DataOverviewResponse(data=await data_repository.overview())
 
 
 async def get_backlog_list() -> BacklogListResponse:
@@ -259,16 +252,6 @@ async def add_correlation_id(
 )
 async def health_endpoint():
     return await get_health()
-
-
-@app.get(
-    "/api/data",
-    response_model=DataOverviewResponse,
-    summary="Обзор данных",
-    description="Возвращает сводную информацию о доступных данных университета.",
-)
-async def data_endpoint():
-    return await get_data()
 
 
 @app.post(

@@ -24,7 +24,7 @@
     },
     "grade": {
       "type": "string",
-      "description": "Значение оценки: 5"
+      "description": "Значение оценки: 5, 4, 3, 2, зачёт, незачёт"
     },
     "date": {
       "type": "string",

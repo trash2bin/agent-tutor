@@ -224,14 +224,116 @@ async def health() -> dict[str, Any]:
 # --- API Reverse Proxy Routes ---
 
 
+# --- Data-service reverse proxy (read-only обзор для web UI) ---
+
+DATA_SERVICE_URL = f"http://{settings.api_host.replace('api', 'data-service')}:8084"
+# Параметр api_host='api' в docker-compose — web ходит к api через DEMO_API_HOST.
+# Для data-service: тот же hostname с заменой api→data-service.
+# В docker-compose оба сервиса в одной сети, поэтому web видит data-service напрямую.
+
+
+async def _proxy_to_data_service(
+    request: Request,
+    data_path: str,
+) -> Response:
+    """Proxy GET request to data-service напрямую (минуя demo/api).
+
+    data-service — единственный владелец БД. Web не должен идти к data-service
+    через demo/api, потому что это лишний hop и demo/api не должен заниматься
+    трансляцией данных (его ответственность — агент).
+    """
+    http_client = request.app.state.http_client
+    url = f"{DATA_SERVICE_URL}{data_path}"
+    correlation_id = getattr(request.state, "correlation_id", "")
+    headers = {
+        "accept": "application/json",
+        "x-correlation-id": correlation_id,
+    }
+    if settings.api_bearer_token:
+        headers["authorization"] = f"Bearer {settings.api_bearer_token}"
+    logger.debug("data-service proxy: %s -> %s", request.method, url)
+    response = await http_client.get(url, headers=headers)
+    return Response(
+        content=response.content,
+        status_code=response.status_code,
+        headers={"Content-Type": response.headers.get("Content-Type", "application/json")},
+    )
+
+
+@app.get("/api/data/stats")
+async def proxy_data_stats(request: Request) -> Response:
+    return await _proxy_to_data_service(request, "/stats")
+
+
+@app.get("/api/data/students")
+async def proxy_data_students(request: Request) -> Response:
+    return await _proxy_to_data_service(request, "/students")
+
+
+@app.get("/api/data/teachers")
+async def proxy_data_teachers(request: Request) -> Response:
+    return await _proxy_to_data_service(request, "/teachers")
+
+
+@app.get("/api/data/disciplines")
+async def proxy_data_disciplines(request: Request) -> Response:
+    return await _proxy_to_data_service(request, "/disciplines")
+
+
+@app.get("/api/data/schedule")
+async def proxy_data_schedule(request: Request) -> Response:
+    return await _proxy_to_data_service(request, "/schedule")
+
+
+@app.get("/api/data/grades")
+async def proxy_data_grades(request: Request) -> Response:
+    return await _proxy_to_data_service(request, "/grades")
+
+
+# --- RAG reverse proxy (документы для web UI) ---
+
+RAG_SERVICE_URL = f"http://{settings.api_host.replace('api', 'rag')}:8082"
+
+
+async def _proxy_to_rag(
+    request: Request,
+    rag_path: str,
+    method: str = "GET",
+    json_body: dict | None = None,
+) -> Response:
+    """Proxy к RAG-сервису напрямую."""
+    http_client = request.app.state.http_client
+    url = f"{RAG_SERVICE_URL}{rag_path}"
+    correlation_id = getattr(request.state, "correlation_id", "")
+    headers = {
+        "accept": "application/json",
+        "x-correlation-id": correlation_id,
+    }
+    if settings.api_bearer_token:
+        headers["authorization"] = f"Bearer {settings.api_bearer_token}"
+    if json_body is not None:
+        response = await getattr(http_client, method.lower())(url, json=json_body, headers=headers)
+    else:
+        response = await getattr(http_client, method.lower())(url, headers=headers)
+    return Response(
+        content=response.content,
+        status_code=response.status_code,
+        headers={"Content-Type": response.headers.get("Content-Type", "application/json")},
+    )
+
+
+@app.get("/api/rag/documents")
+async def proxy_rag_documents(request: Request) -> Response:
+    """GET-обёртка над POST /documents/list в RAG-сервисе."""
+    return await _proxy_to_rag(request, "/documents/list", method="POST", json_body={})
+
+
+# --- API Reverse Proxy Routes (только агент: chat, sessions, backlog) ---
+
+
 @app.get("/api/health")
 async def proxy_health(request: Request) -> Response:
     return await _proxy_to_api(request, "/health")
-
-
-@app.get("/api/data")
-async def proxy_data(request: Request) -> Response:
-    return await _proxy_to_api(request, "/api/data")
 
 
 @app.get("/api/backlog")

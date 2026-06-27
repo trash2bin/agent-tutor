@@ -203,58 +203,118 @@ MCP_SERVICE_URL=http://127.0.0.1:8083/mcp DEMO_API_PORT=8081 uv run python -m de
 DEMO_API_HOST=127.0.0.1 DEMO_API_PORT=8081 DEMO_WEB_PORT=8080 uv run python -m demo.web.server
 ```
 
-## Структура проекта
+## Подробная структура проекта
 
 ```
 agent-tutor/
 ├── data-service/              # Go-сервис доступа к БД (:8084)
 │   ├── cmd/
-│   │   ├── server/main.go     # точка входа
-│   │   └── schema-gen/main.go # генератор JSON Schema из Go-моделей
+│   │   ├── server/main.go     # точка входа: --seed/--seed-path флаги, graceful shutdown
+│   │   └── schema-gen/main.go # утилита генерации JSON Schema из Go-моделей (invopop/jsonschema)
 │   ├── internal/
 │   │   ├── db/                # интерфейс DB + драйверы (SQLite)
+│   │   │   ├── connector.go   # интерфейс DB + фабрика New() по DB_DRIVER
+│   │   │   ├── schema.go      # //go:embed schema.sql → SchemaSQL string
+│   │   │   └── sqlite.go      # SQLiteDB (modernc.org/sqlite, WAL, FK on)
 │   │   ├── handlers/          # HTTP-обработчики (не знают SQL)
+│   │   │   ├── handlers.go    # WriteJSON, writeError, urlParam, queryParam
+│   │   │   ├── disciplines.go # GET /disciplines
+│   │   │   ├── grades.go      # GET /students/{id}/grades, /grades (с JOIN disciplines)
+│   │   │   ├── schedule.go    # GET /groups/{id}/schedule?day=, /schedule
+│   │   │   ├── stats.go       # GET /stats (COUNT по таблицам)
+│   │   │   ├── students.go    # GET /students/{id}, /students?name=, /{id}/disciplines
+│   │   │   └── teachers.go    # GET /teachers?name=, /{name}/schedule?day=
 │   │   ├── models/            # доменные модели (source of truth → JSON Schema)
+│   │   │   ├── models.go      # Group, Student, Teacher, Discipline, Grade, Lesson, ScheduleEntry
+│   │   │   ├── gen.go         # //go:generate триггер для schema-gen
+│   │   │   └── models_test.go # TestJSONSchemaUpToDate drift-тест
 │   │   ├── repository/        # ← единственное место с SQL университета
-│   │   └── server/            # chi-роутер, middleware, Swagger UI
+│   │   │   ├── helpers.go     # parseLessonsJSON, extractDisciplineIDs, ListAllSchedule
+│   │   │   ├── disciplines.go # DisciplineRepo.GetAll, queryDisciplinesByIDs, queryGroup
+│   │   │   ├── grades.go      # GradeRepo с JOIN disciplines
+│   │   │   ├── stats.go       # StatsRepo (5×COUNT(*))
+│   │   │   ├── students.go    # StudentRepo с JOIN groups, GetSchedule через group_id
+│   │   │   └── teachers.go    # TeacherRepo с JOIN groups + post-фильтр lessons_json
+│   │   ├── server/            # chi-роутер, middleware, Swagger UI
+│   │   │   ├── server.go      # NewRouter, healthHandler (DB ping)
+│   │   │   ├── middleware.go  # RequestID/StructuredLogging/Recovery + InitLogger
+│   │   │   ├── swagger.go     # //go:embed openapi.json + swagger-ui.html
+│   │   │   └── server_test.go # e2e Go-тесты на in-memory SQLite + seedgen.TestSeed
 │   │   └── seedgen/           # Go-сидер: применяет seed.json к БД (--seed)
+│   │       ├── seedgen.go     # Load/Apply, FK-порядок, ErrDatabaseNotEmpty
+│   │       └── testdata.go    # TestSeed для in-memory тестов
 │   ├── Dockerfile
 │   └── README.md              # как переписать под новую БД
 ├── mcp_server/                # MCP-сервер (FastMCP, HTTP :8083)
-│   ├── server.py              # роутер инструментов
-│   ├── tools_via_http.py      # инструменты → HTTP к data-service (нет SQL)
-│   ├── tools_rag.py           # RAG-инструменты → HTTP к rag
-│   └── tests/unit/            # тесты через DataServiceClient (HTTP-моки)
+│   ├── server.py              # FastMCP-роутер + /health + uvicorn (:8083)
+│   ├── tools_via_http.py      # тонкие async-обёртки над AsyncDataServiceClient
+│   ├── tools_rag.py           # обёртки над RagClient (list_documents, search_documents, ...)
+│   └── tests/unit/            # 4 файла: discipline/grade/student/teacher_tools через respx-моки
 ├── rag/                       # RAG HTTP-сервис (FastAPI, :8082)
-│   ├── service.py             # /health /search /context /documents/*
-│   ├── db.py                  # свой SQLite-менеджер (rag_documents.db)
-│   ├── documents_schema.py    # DDL только для documents + document_chunks
-│   ├── repository.py          # CRUD документов (свой SQL, не зависит от SDK)
-│   ├── pipeline.py            # парсинг → чанкинг → embedding → ChromaDB
-│   ├── ... (parser, chunker, embeddings, vector_store, config)
+│   ├── service.py             # FastAPI app: /health /search /context /documents/*, ServiceState singleton
+│   ├── db.py                  # RagDB singleton над sqlite3 (WAL, check_same_thread=False)
+│   ├── documents_schema.py    # DDL для documents + document_chunks (изолирован от доменной БД)
+│   ├── repository.py          # DocumentRepository CRUD + транзакции с откатом
+│   ├── pipeline.py            # RAGPipeline: import_document / search_documents / build_rag_context
+│   ├── parser.py              # DocumentParser: txt/md напрямую, PDF/DOCX через docling
+│   ├── chunker.py             # TextChunker + Semantic/Recursive/Sentence стратегии
+│   ├── embeddings.py          # SentenceTransformerEmbedding (ленивая загрузка, batch)
+│   ├── vector_store.py        # ChromaDBVectorStore (cosine, PersistentClient)
+│   ├── config.py              # RagConfig + from_env() (RAG_*, CHROMA_*)
+│   ├── interfaces.py          # Protocol'ы EmbeddingProtocol, VectorStoreProtocol
+│   ├── _types.py              # внутренние TypedDict (PageDict, ChunkDict, ...)
+│   ├── http_models.py         # Pydantic-DTO HTTP-контракта (SearchRequest, ListDocumentsResponse, ...)
+│   ├── pyproject.toml         # манифест + entrypoints (agent-rag, agent-rag-docgen, agent-rag-ingest, agent-seedgen)
 │   └── tests/
+│       ├── unit/              # pipeline / embeddings / repository / vector_store / service / openapi_spec
+│       └── integration/       # test_e2e_pipeline (real SQLite + ChromaDB)
 ├── agent-tutor-sdk/           # Shared SDK
+│   ├── pyproject.toml         # манифест (hatchling, pydantic>=2, httpx>=0.28)
 │   ├── src/agent_tutor_sdk/
-│   │   ├── contracts/         # Pydantic-модели (контракт, семантические поля)
-│   │   ├── data_client.py     # HTTP-клиент к data-service
-│   │   └── rag/               # HTTP-клиент к RAG + RAG-модели
-│   └── tests/
+│   │   ├── contracts/         # Pydantic-модели API-форма (full_name, group-object) — extra="forbid"
+│   │   ├── data_client.py     # AsyncDataServiceClient + DataServiceClientSync к data-service:8084
+│   │   ├── rag/               # RagClient (async) + RagClientSync + 5 Pydantic-моделей HTTP-контракта RAG
+│   │   └── seed_models.py     # Storage-форма Pydantic (name, group_id) для seed.json — extra="forbid"
+│   └── tests/unit/            # test_client.py + test_contracts_drift.py + test_seedgen_validation.py
 ├── demo/
 │   ├── api/                   # API-сервер + агент (FastAPI, :8081)
-│   │   ├── agent/             # orchestrator, llm_client, mcp_client, tool_parser
-│   │   ├── data.py            # обзор данных через HTTP к data-service
-│   │   └── tests/
+│   │   ├── server.py          # FastAPI app: /health, /api/chat (SSE), /api/backlog*, /api/session/history
+│   │   ├── http_models.py     # ChatRequest, HealthResponse, Backlog*, SessionHistory*
+│   │   ├── backlog.py         # ModelBacklog: трассировка всех взаимодействий с LLM (jsonl per session)
+│   │   ├── sessions.py        # SessionStore: история чатов в SQLite + миграция из agent_memory.json
+│   │   ├── agent/             # подмодуль агента
+│   │   │   ├── orchestrator.py # LLMAgent + SYSTEM_PROMPT: главный цикл итераций
+│   │   │   ├── llm_client.py  # LLMClient поверх LiteLLM (Mistral/Ollama), stream_completion
+│   │   │   ├── mcp_client.py  # MCPClient: долгоживущая сессия к MCP через streamable_http_client
+│   │   │   ├── tool_parser.py # ToolCallParser: нативные + JSON-блоки tool-вызовы
+│   │   │   ├── conversation.py # ConversationManager (sync/async) с per-session asyncio.Lock
+│   │   │   └── types.py       # TypedDict: Message, ToolCall, *EventData, SessionId/TurnId
+│   │   └── tests/unit/        # agent/* + backlog + sessions + openapi_api drift
 │   └── web/                   # Веб-интерфейс (FastAPI, :8080)
+│       ├── server.py          # reverse-proxy к api / data-service / rag + статика
+│       ├── pyproject.toml     # манифест demo-web (entrypoint agent-demo-web)
+│       ├── Dockerfile         # multi-stage python:3.12-slim, non-root app user
+│       ├── static/app.js      # vanilla JS фронт: таблицы вкладок + чат с SSE + localStorage
+│       └── tests/unit/        # test_proxy.py: 18 тестов reverse-proxy через respx
 ├── specs/                     # Контракты (source of truth для API)
-│   ├── schemas/               # JSON Schema (генерируются из Go-моделей)
+│   ├── schemas/               # JSON Schema (генерируются из Go-моделей через schema-gen)
 │   ├── data-service.openapi.yaml
 │   ├── rag.openapi.yaml
 │   ├── api.openapi.yaml
-│   └── README.md
+│   └── fixtures/              # pipeline сидинга: agent-seedgen → seed.json → data-service --seed
+│       ├── README.md          # инструкция по сидингу БД
+│       └── seed.json          # детерминированный seed (--seed 42), gitignored
 ├── rag/fixtures/              # CLI-утилиты (agent-rag-ingest, agent-rag-docgen, agent-seedgen)
-├── scripts/                   # dev.sh, init-db.sql
+│   ├── cli_ingest.py          # CLI обёртка над RagClientSync к RAG-сервису
+│   ├── cli_docgen.py          # CLI генерации материалов через Ollama
+│   ├── document_generator.py  # MaterialDocumentGenerator: Ollama → DOCX/MD → RAG индекс
+│   ├── rag_tools.py           # HTTP-фасад RagClientSync (shim для обратной совместимости)
+│   ├── seedgen.py             # генератор seed.json с валидацией через StorageSeed
+│   ├── catalog.py             # статический каталог фиктивных данных (TEXTS, SPECIALITIES, CURRICULUM, ...)
+│   └── _material.py           # dev-only Pydantic-модель Material
+├── scripts/                   # dev.sh (нативный запуск всех 5 сервисов), init-db.sql
 ├── doc/                       # ROADMAP.md
-├── docker-compose.yml         # 5 long-running сервисов + db + caddy
+├── docker-compose.yml         # 5 long-running сервисов + db + caddy (prod-профиль)
 └── .env.example               # Все переменные окружения
 ```
 
@@ -466,11 +526,13 @@ uv run agent-rag-ingest clear-generated                  # Удалить сге
 - **Этап 0** (0.0–0.5): Разделение на 4 независимых HTTP-сервиса, FastAPI, CLI-утилиты, HTTP-транспорт MCP
 - **Этап 1**: Тестовая инфраструктура (84% покрытие, 109 тестов, ruff, OpenAPI/Swagger)
 - **Этап 2**: Контейнеризация (5 Dockerfile'ов, docker-compose с 7 сервисами, Caddy, healthchecks)
-- **Этап 2.x**: Тесты разнесены по сервисам (rag/tests/, mcp_server/tests/, demo/api/tests/, agent-tutor-sdk/tests/),
+- **Этап 2.x**: Тесты разнесены по сервисам (rag/tests/, mcp_server/tests/, demo/api/tests/, demo/web/tests/, agent-tutor-sdk/tests/),
   Dockerfile'ы копируют только нужные исходники, а не весь проект целиком
 - **Этап 2.7 (выполнен)**: Data-service на Go — изоляция схемы БД. `mcp_server` и `demo/api` не содержат SQL университетских данных. `specs/schemas/` с JSON Schema, авто-генерация из Go-моделей.
 - **Этап 2.7.x (выполнен)**: RAG отделён в `rag_documents.db`. Репозитории SDK удалены. `agent_tutor_sdk/db/` — только connector + schema + fixtures для тестов и CLI.
 - **Сидинг через единый pipeline (выполнен)**: `agent-seedgen` (Python+faker) → `specs/fixtures/seed.json` → `data-service --seed` (Go) → SQLite/PostgreSQL. CLI `agent-rag-ingest` и `agent-rag-docgen` живут в `rag/fixtures/` и ходят к сервисам по HTTP-контракту. Старый Python-пакет `fixtures/` удалён.
+- **Contract sync: Go → JSON Schema → Pydantic (выполнен)**: drift-тесты в `agent-tutor-sdk/tests/unit/test_contracts_drift.py` ловят расхождения между Go-моделями, JSON Schema и Pydantic. seedgen валидирует выход через `StorageSeed` из SDK (`agent_tutor_sdk/seed_models.py`).
+- **Web-frontend сам ходит к data-service (выполнен)**: `demo/api` освобождён от data passthrough. `demo/web` делает reverse-proxy напрямую к `data-service:8084` (`/api/data/*`) и `rag:8082` (`/api/rag/documents`). Агент-эндпойнты (`/api/chat`, `/api/backlog`, `/api/session/history`) идут через `demo/api`.
 
 Полный план — в `doc/ROADMAP.md`.
 

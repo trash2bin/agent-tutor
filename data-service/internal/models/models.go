@@ -13,8 +13,8 @@ type Group struct {
 type Student struct {
 	ID       string `json:"id" jsonschema:"description=Уникальный идентификатор студента"`
 	FullName string `json:"full_name" jsonschema:"description=Полное ФИО студента"`
-	Group    *Group `json:"group" jsonschema:"description=Группа студента. null если не назначена"`
-	Course   *int   `json:"course" jsonschema:"description=Курс обучения (1–6). null если неизвестен"`
+	Group    *Group `json:"group" jsonschema_description:"Группа студента. null если не назначена"`
+	Course   *int   `json:"course" jsonschema_description:"Курс обучения (1–6). null если неизвестен"`
 }
 
 // Teacher — преподаватель.
@@ -38,7 +38,7 @@ type Grade struct {
 	StudentName    string `json:"student_name" jsonschema:"description=Имя студента"`
 	DisciplineID   string `json:"discipline_id" jsonschema:"description=ID дисциплины"`
 	DisciplineName string `json:"discipline_name" jsonschema:"description=Название дисциплины"`
-	Value          string `json:"grade" jsonschema:"description=Значение оценки: 5, 4, 3, 2, зачёт, незачёт"`
+	Value          string `json:"grade" jsonschema_description:"Значение оценки: 5, 4, 3, 2, зачёт, незачёт"`
 	Date           string `json:"date" jsonschema:"description=Дата в формате YYYY-MM-DD"`
 }
 
@@ -54,6 +54,6 @@ type Lesson struct {
 type ScheduleEntry struct {
 	ID      string   `json:"id" jsonschema:"description=Уникальный идентификатор записи"`
 	Group   *Group   `json:"group" jsonschema:"description=Группа"`
-	Day     string   `json:"day" jsonschema:"description=День недели: Понедельник, Вторник, ..."`
+	Day     string   `json:"day" jsonschema_description:"День недели: Понедельник, Вторник, Среда, Четверг, Пятница, Суббота"`
 	Lessons []Lesson `json:"lessons" jsonschema:"description=Список занятий"`
 }

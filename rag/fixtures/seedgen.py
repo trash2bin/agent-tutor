@@ -24,6 +24,7 @@ from pathlib import Path
 
 from faker import Faker
 
+from agent_tutor_sdk.seed_models import StorageSeed
 from rag.fixtures.catalog import (
     CURRICULUM,
     DISCIPLINE_NAMES,
@@ -217,6 +218,15 @@ def generate(
     }
 
 
+def validate_seed(data: dict) -> None:
+    """Валидировать сгенерированный seed против StorageSeed (Pydantic).
+
+    Бросает pydantic.ValidationError если структура расходится с моделью.
+    Если расходится — это drift между Go seedgen и Python Pydantic seed_models.
+    """
+    StorageSeed.model_validate(data)
+
+
 # Инициализация глобального fake (перезаписывается в generate())
 fake = Faker("ru_RU")
 
@@ -245,6 +255,9 @@ def main() -> int:
         num_grades=args.grades,
         seed_value=args.seed_value,
     )
+
+    # Валидация через Pydantic перед записью — ловит drift структуры
+    validate_seed(data)
 
     args.out.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
