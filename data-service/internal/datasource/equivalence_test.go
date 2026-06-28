@@ -42,7 +42,7 @@ CREATE TABLE items (
     id INTEGER PRIMARY KEY,
     sku TEXT NOT NULL,
     price REAL NOT NULL,
-    metadata BLOB
+    metadata TEXT
 );
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY,
@@ -314,6 +314,11 @@ func execDDL(ctx context.Context, conn datasource.Conn, ddl string) error {
 //     сохраняется порядок из БД)
 //   - ForeignKeys сортируются по (ReferencedTable, Columns[0])
 //   - PrimaryKey уже отсортирован по ordinal_position из БД
+//   - Schema prefix из имён таблиц и FK-ссылок удаляется
+//     (Postgres возвращает "test_equivalence.customers", SQLite — "customers")
+//   - Имена FK-констрейнтов обнуляются
+//     (Postgres генерирует "table_col_fkey", SQLite — "fk_N",
+//      эти имена СУБД-зависимы и не должны влиять на equivalence)
 //
 // Возвращает canonical JSON (deterministic order, no whitespace).
 func normalize(t *testing.T, s *datasource.Schema) []byte {
@@ -324,6 +329,33 @@ func normalize(t *testing.T, s *datasource.Schema) []byte {
 		Tables: make([]datasource.Table, len(s.Tables)),
 	}
 	copy(clone.Tables, s.Tables)
+
+	// Strip schema prefix и обнуляем FK-имена.
+	// Также инициализируем пустые слайсы (nil → []), чтобы JSON encoding
+	// давал одинаковый результат в SQLite (nil slice) и Postgres (пустой slice).
+	for i := range clone.Tables {
+		clone.Tables[i].Name = stripSchemaPrefix(clone.Tables[i].Name)
+		if clone.Tables[i].Columns == nil {
+			clone.Tables[i].Columns = []datasource.Column{}
+		}
+		if clone.Tables[i].PrimaryKey == nil {
+			clone.Tables[i].PrimaryKey = []string{}
+		}
+		if clone.Tables[i].ForeignKeys == nil {
+			clone.Tables[i].ForeignKeys = []datasource.ForeignKey{}
+		}
+		for j := range clone.Tables[i].ForeignKeys {
+			fk := &clone.Tables[i].ForeignKeys[j]
+			fk.Name = ""
+			fk.ReferencedTable = stripSchemaPrefix(fk.ReferencedTable)
+			if fk.Columns == nil {
+				fk.Columns = []string{}
+			}
+			if fk.ReferencedColumns == nil {
+				fk.ReferencedColumns = []string{}
+			}
+		}
+	}
 
 	// Sort tables by Name.
 	for i := 0; i < len(clone.Tables); i++ {
@@ -353,6 +385,17 @@ func normalize(t *testing.T, s *datasource.Schema) []byte {
 		t.Fatalf("normalize: marshal: %v", err)
 	}
 	return out
+}
+
+// stripSchemaPrefix удаляет префикс схемы из FQN: "test_equivalence.customers"
+// → "customers". Если точка не найдена, возвращает строку as-is.
+func stripSchemaPrefix(name string) string {
+	for i := 0; i < len(name); i++ {
+		if name[i] == '.' {
+			return name[i+1:]
+		}
+	}
+	return name
 }
 
 // fkSortKey возвращает детерминированный ключ для сортировки FK.
