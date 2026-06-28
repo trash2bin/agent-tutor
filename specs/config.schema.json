@@ -1,0 +1,444 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-tutor.local/specs/config.schema.json",
+  "title": "data-service config",
+  "description": "Конфиг data-service для generic B2B SaaS режима. Определяет: какой driver, какие сущности извлекаем из БД клиента, какие endpoint'ы публикуем, какие MCP-инструменты генерируем.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "data_source"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Версия схемы конфига. На данный момент — только 1."
+    },
+    "data_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["driver", "dsn"],
+      "description": "Подключение к клиентской БД. data-service работает в read-only режиме: не модифицирует DDL.",
+      "properties": {
+        "driver": {
+          "type": "string",
+          "enum": ["sqlite", "postgres"],
+          "description": "Драйвер СУБД. Адаптеры под другие СУБД — следующие фазы."
+        },
+        "dsn": {
+          "type": "string",
+          "minLength": 1,
+          "description": "DSN (строка подключения). Поддерживает шаблоны ${ENV_VAR}, которые подставляются из окружения при загрузке.",
+          "examples": [
+            "university.db",
+            "file:./data/university.db",
+            "postgres://tutor:tutor@127.0.0.1:5432/agent_tutor"
+          ]
+        },
+        "pool_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 10,
+          "description": "Максимум одновременных соединений к БД."
+        },
+        "read_only": {
+          "type": "boolean",
+          "default": true,
+          "description": "Если true — data-service запрещает любые мутирующие операции (INSERT/UPDATE/DELETE/DDL)."
+        }
+      }
+    },
+    "introspection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Настройки auto-discovery схемы БД при старте (фаза 3.2+).",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Включить интроспекцию схемы БД при старте."
+        },
+        "include_schemas": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Schemas/базы для интроспекции (Postgres only). По умолчанию — ['public']."
+        },
+        "exclude_tables": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Регулярные выражения для имён таблиц, которые нужно исключить. Например ['^pg_', '^_'] — системные таблицы Postgres."
+        }
+      }
+    },
+    "entities": {
+      "type": "array",
+      "description": "Описание доменных сущностей клиента. Каждая сущность = таблица (или представление) + маппинг полей.",
+      "items": { "$ref": "#/$defs/entity" }
+    },
+    "endpoints": {
+      "type": "array",
+      "description": "REST endpoints, которые data-service публикует. Каждый endpoint ссылается на entity, операцию или custom query.",
+      "items": { "$ref": "#/$defs/endpoint" }
+    },
+    "custom_queries": {
+      "type": "object",
+      "description": "Whitelist SQL-запросов для endpoint'ов с op=custom_query. Только SELECT, обязателен max_rows.",
+      "additionalProperties": { "$ref": "#/$defs/custom_query" }
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Конфигурация endpoint'а /stats.",
+      "properties": {
+        "counters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "entity"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*$",
+                "description": "Имя счётчика в ответе /stats."
+              },
+              "entity": {
+                "type": "string",
+                "description": "Имя entity из entities[]."
+              },
+              "filter": {
+                "type": "string",
+                "description": "Опциональный WHERE для подсчёта (например: \"status = 'active'\")."
+              }
+            }
+          }
+        }
+      }
+    },
+    "mcp_tools": {
+      "type": "array",
+      "description": "Описание MCP-инструментов для генерации mcp-gateway (Go, фаза 3.4). Каждый tool ссылается на endpoint.",
+      "items": { "$ref": "#/$defs/mcp_tool" }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Multi-tenancy и row-level isolation (фаза 3.7).",
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["none", "header"],
+          "default": "none",
+          "description": "Стратегия изоляции тенантов. 'none' — один тенант, 'header' — X-Tenant-ID."
+        },
+        "tenant_header": {
+          "type": "string",
+          "default": "X-Tenant-ID",
+          "description": "Имя заголовка для передачи tenant_id."
+        },
+        "row_filters": {
+          "type": "array",
+          "description": "Дополнительные WHERE-условия, применяемые к запросам (multi-tenant isolation).",
+          "items": { "$ref": "#/$defs/row_filter" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "table", "id_column", "fields"],
+      "description": "Доменная сущность = одна таблица в клиентской БД.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Публичное имя сущности в API (lowercase snake_case)."
+        },
+        "table": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Имя таблицы в БД. Может совпадать с name, но не обязательно."
+        },
+        "id_column": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Имя колонки с первичным ключом."
+        },
+        "description": {
+          "type": "string",
+          "description": "Человекочитаемое описание сущности (для OpenAPI и UI)."
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Маппинг публичных полей на колонки БД.",
+          "items": { "$ref": "#/$defs/entity_field" }
+        },
+        "relations": {
+          "type": "array",
+          "description": "Связи с другими сущностями (для документации и валидации; JOIN автоматически НЕ строится).",
+          "items": { "$ref": "#/$defs/relation" }
+        }
+      }
+    },
+    "entity_field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "column", "type"],
+      "description": "Поле сущности. name — публичное имя (API), column — имя колонки в БД.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Публичное имя поля в API."
+        },
+        "column": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Имя колонки в таблице БД."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["string", "int", "float", "bool", "json", "datetime", "date"],
+          "description": "Generic-тип поля. Адаптер приводит нативный тип БД к этому."
+        },
+        "nullable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Может ли поле быть NULL."
+        },
+        "primary_key": {
+          "type": "boolean",
+          "default": false,
+          "description": "Является ли колонка первичным ключом (обычно определяется через id_column)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Описание поля для OpenAPI/UI."
+        }
+      }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "kind", "table", "local_fk"],
+      "description": "Связь между сущностями. JOIN не строится автоматически — для JOIN используйте custom_queries.",
+      "properties": {
+        "field": {
+          "type": "string",
+          "description": "Имя поля в публичной схеме (например, 'group')."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["many_to_one", "one_to_many", "many_to_many"],
+          "description": "Тип связи."
+        },
+        "table": {
+          "type": "string",
+          "description": "Имя связанной таблицы в БД."
+        },
+        "local_fk": {
+          "type": "string",
+          "description": "Имя FK-колонки в текущей таблице."
+        },
+        "target_fk": {
+          "type": "string",
+          "description": "Имя FK-колонки в связанной таблице (для many_to_many)."
+        }
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "path", "op"],
+      "description": "REST endpoint. method+path — публичный контракт, op — реализация.",
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+          "description": "HTTP метод. На данный момент поддерживается только GET (read-only)."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/[a-zA-Z0-9_{}/-]*$",
+          "description": "URL-путь. Поддерживает {param} для path-параметров.",
+          "examples": ["/students/{id}", "/students"]
+        },
+        "op": {
+          "type": "string",
+          "enum": [
+            "builtin_health",
+            "builtin_stats",
+            "get_by_id",
+            "find",
+            "list",
+            "custom_query"
+          ],
+          "description": "Реализация: builtin (без entity) или ссылка на entity/query."
+        },
+        "entity": {
+          "type": "string",
+          "description": "Имя entity из entities[]. Обязательно для op=get_by_id, find, list."
+        },
+        "search_field": {
+          "type": "string",
+          "description": "Имя поля (из entity.fields[].name) для поиска. Используется op=find."
+        },
+        "query_param": {
+          "type": "string",
+          "description": "Имя query-параметра для передачи значения поиска. По умолчанию совпадает с search_field."
+        },
+        "query_id": {
+          "type": "string",
+          "description": "Ключ из custom_queries. Обязательно для op=custom_query."
+        },
+        "params": {
+          "type": "array",
+          "description": "Описание параметров endpoint'а (path/query/body). Для GET — query.",
+          "items": { "$ref": "#/$defs/endpoint_param" }
+        },
+        "description": {
+          "type": "string",
+          "description": "Описание endpoint'а для OpenAPI."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "op": { "const": "get_by_id" } } },
+          "then": { "required": ["entity"] }
+        },
+        {
+          "if": { "properties": { "op": { "const": "find" } } },
+          "then": { "required": ["entity", "search_field"] }
+        },
+        {
+          "if": { "properties": { "op": { "const": "list" } } },
+          "then": { "required": ["entity"] }
+        },
+        {
+          "if": { "properties": { "op": { "const": "custom_query" } } },
+          "then": { "required": ["query_id"] }
+        }
+      ]
+    },
+    "endpoint_param": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "in"],
+      "description": "Параметр endpoint'а.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "description": "Имя параметра."
+        },
+        "in": {
+          "type": "string",
+          "enum": ["path", "query", "body"],
+          "description": "Расположение параметра."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["string", "int", "float", "bool"],
+          "default": "string",
+          "description": "Тип параметра."
+        },
+        "required": {
+          "type": "boolean",
+          "default": false,
+          "description": "Обязательный ли параметр."
+        },
+        "description": {
+          "type": "string",
+          "description": "Описание для OpenAPI."
+        }
+      }
+    },
+    "custom_query": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sql", "result_mapping", "max_rows"],
+      "description": "Whitelist SQL-запрос. Только SELECT, обязателен max_rows, все user-input через '?' placeholder'ы.",
+      "properties": {
+        "sql": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\s*SELECT\\b",
+          "description": "SQL-запрос. Должен начинаться с SELECT. Запрещены ';', DDL, мульти-statement."
+        },
+        "params": {
+          "type": "array",
+          "description": "Имена параметров в порядке placeholder'ов '?' в SQL.",
+          "items": { "type": "string" }
+        },
+        "result_mapping": {
+          "type": "object",
+          "description": "Маппинг колонок результата на типы для JSON Schema.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": { "$ref": "#/$defs/entity_field/properties/type" },
+              "nullable": { "type": "boolean", "default": false }
+            }
+          }
+        },
+        "max_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Максимум строк в результате. Hard limit, защита от over-fetch."
+        },
+        "description": {
+          "type": "string",
+          "description": "Описание запроса для OpenAPI."
+        }
+      }
+    },
+    "mcp_tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "endpoint", "description"],
+      "description": "MCP-инструмент, генерируемый mcp-gateway. Делегирует вызов к endpoint'у data-service.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Имя инструмента (вызывается агентом)."
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "Путь endpoint'а из endpoints[] (например, '/students/{id}'). Path-параметры в {id}."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Описание для агента (model-facing). На русском или английском — на усмотрение клиента."
+        },
+        "params": {
+          "type": "array",
+          "description": "Описание параметров инструмента (model-facing).",
+          "items": { "$ref": "#/$defs/endpoint_param" }
+        }
+      }
+    },
+    "row_filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity", "where"],
+      "description": "Дополнительный WHERE для multi-tenant isolation.",
+      "properties": {
+        "entity": {
+          "type": "string",
+          "description": "Имя entity."
+        },
+        "where": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_\\s=<>!\\.\\:\\(\\)\\'\\,]*$",
+          "description": "WHERE-выражение. Поддерживает placeholder :tenant_id (подставляется из заголовка)."
+        }
+      }
+    }
+  }
+}
