@@ -217,19 +217,6 @@ func findFK(fks []datasource.ForeignKey, col, refTable string) *datasource.Forei
 	return nil
 }
 
-// equalStringSlices — поэлементное сравнение, nil-эквивалентно [].
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 // applyDDL применяет DDL (SQLite совместимый) через ExecContext, разделяя
 // DDL по ';' — простая эвристика, достаточная для schema.sql без сложных
 // вложенных конструкций и хранимых процедур.
