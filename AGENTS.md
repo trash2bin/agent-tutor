@@ -538,6 +538,67 @@ uv run agent-rag-ingest clear-generated                  # Удалить сге
 
 Полный план — в `doc/NEW_ROADMAP.md`.
 
+## Известные проблемы и особенности
+
+### 1. Custom_query endpoints без `params` в конфиге
+
+**Симптом**: `arg count mismatch: query expects 1 params, got 0` при вызове
+`/students/{id}/grades`, `/students/{id}/disciplines`, `/groups/{id}/schedule`.
+
+**Причина**: в конфигах `config.example.json` / `config.postgres.json` у этих
+эндпоинтов отсутствовало поле `params`. `CustomQueryHandler` обходит
+`ep.Params` чтобы вытащить значение `{id}` из URL-пути — без `params`
+аргументы не биндятся.
+
+**Исправлено** (2024-06-29): добавлены `params: [{name: "id", in: "path", type: "string", required: true}]`
+ко всем трём эндпоинтам. teacher_schedule не требует params — его SQL без плейсхолдеров.
+
+### 2. Недетерминированный seed между SQLite и PostgreSQL
+
+Каждый вызов `agent-seedgen` (и `seed-cli`) генерирует уникальный набор данных.
+Чтобы получить одинаковых студентов на SQLite и PostgreSQL, фиксируй `--seed`:
+
+```bash
+uv run agent-seedgen --seed 42 --students 40 --grades 60
+```
+
+Переменной окружения для seed нет — передаётся только как аргумент CLI.
+
+### 3. Модель не всегда заполняет аргументы tool calls
+
+Некоторые модели (особенно маленькие, типа `minimax-m3:cloud` или `qwen2.5:0.5b`)
+иногда вызывают инструменты с пустыми аргументами: `find_student_by_name({})`.
+Наш код не может это контролировать — это зависит от модели и формулировки
+system prompt. Рекомендуется использовать модели, которые были протестированы
+на function calling (Mistral Large, GPT-4, Claude, Llama 3.1 70B+).
+
+### 4. MAX_TURN_TOKENS — защита от выхода за context window
+
+Каждый turn агента ограничен `AGENT_MAX_TURN_TOKENS` (по умолчанию 8000).
+Оценка токенов — эвристика `chars/3.5`. При превышении:
+- Накопленный ответ обрезается до `system prompt + последние 2 обмена`
+- Агент делает финальную попытку ответить без истории
+
+Изменить лимит: `AGENT_MAX_TURN_TOKENS=16000` в `.env`.
+
+### 5. data-service использует старый процесс при перезапуске
+
+При `./scripts/dev.sh restart` data-service может не перестартовать если порт занят
+старым процессом. Форсированный перезапуск:
+```bash
+lsof -ti :8084 | xargs kill -9
+DS_CONFIG=specs/config.postgres.json \
+  nohup data-service/bin/data-service --config specs/config.postgres.json \
+  > .data/logs/data.log 2>&1 &
+echo $! > .data/pids/data-service.pid
+```
+
+### 6. SQLite JSON-функции не работают в PostgreSQL
+
+SQL `json_extract(...)`, `json_each(...)` — только SQLite.
+Для PostgreSQL нужно переписывать на `jsonb_array_elements(...::jsonb)` и `->>`.
+Проверяй оба конфига при изменении `custom_queries`.
+
 Работает:
 - Data-service (Go, chi, modernc/sqlite) — единственный сервис со знанием схемы БД
 - MCP-сервер (FastMCP, HTTP-транспорт, `/health` endpoint) — инструменты через HTTP к data-service
@@ -605,9 +666,76 @@ specs/
 └── fixtures/                   # pipeline сидинга
 ```
 
+## Knowledge Graph (Graphify)
+
+Проект использует **graphify** — инструмент построения knowledge graph из исходного кода.
+Граф уже построен и лежит в `graphify-out/`: **2430 узлов, 4234 связи, 170 сообществ**.
+Он покрывает Go (`data-service`, `mcp-gateway`) и Python (`rag`, `mcp_server`, `demo/api`, `demo/web`, `agent-tutor-sdk`) одновременно.
+
+### Основные инструменты и когда их применять
+
+| Инструмент | Когда использовать | Пример |
+|---|---|---|
+| **`graphify_query`** (bfs) | Вопрос «что с чем связано в архитектуре?» | `graphify_query({ question: "Как LLMAgent вызывает MCP-инструменты?", mode: "bfs" })` |
+| **`graphify_query`** (dfs) | «Как данные текут от A к B?» | `graphify_query({ question: "Как запрос пользователя доходит до ChromaDB?", mode: "dfs" })` |
+| **`graphify_path`** | Кратчайший путь между двумя концептами | `graphify_path({ from: "LLMAgent", to: "ChromaDBVectorStore" })` |
+| **`graphify_explain`** | Всё, что связано с конкретным узлом/концептом | `graphify_explain({ concept: "orchestrator.py" })` |
+| **`graphify_update`** | После правок в коде — обновить граф (без LLM-затрат) | `graphify_update({ path: "." })` |
+| **`graphify_add`** | Добавить внешний документ/статью в корпус | `graphify_add({ url: "https://arxiv.org/abs/..." })` |
+| **`graphify export callflow-html`** | Визуализировать архитектуру в Mermaid | `graphify_export_callflow({})` → `graphify-out/callflow.html` |
+| **`graphify save-result`** | Сохранить Q&A результат в память графа (обучение) | После удачного/неудачного ответа — сохранить для `reflect` |
+| **`graphify reflect`** | Агрегировать saved results в LESSONS.md | Накопить best-practices после нескольких сессий |
+
+### Стратегия использования
+
+1. **Перед любым вопросом об архитектуре** — сначала `graphify_query`, потом читать файлы. Граф уже знает
+   связи между 144 файлами, тратить токены на их чтение вручную — waste.
+2. **После любых правок в коде** — `graphify update .` (дёшево, без API-затрат).
+3. **При добавлении новых зависимостей/сервисов** — `graphify_update` с флагом `--force` после крупных
+   рефакторингов.
+4. **Для поиска ripple-effect** — `graphify_path` или `graphify_explain` вокруг изменяемого узла,
+   чтобы увидеть что сломается.
+5. **Feedback loop**: если агент дал правильный архитектурный ответ — `save-result` с `useful`.
+   Если ошибся — `save-result` с `corrected` + `correction`. После накопления — `graphify reflect`.
+
+### Чего НЕ делать
+
+- **Не читай `graphify-out/graph.json` напрямую** — он 2.3 МБ, используй `graphify_query` / `graphify_path` / `graphify_explain`.
+- **Не читай `graphify-out/GRAPH_REPORT.md` напрямую без нужды** — он 51 КБ, лучше `ctx_search` или
+  `graphify_query` по конкретному вопросу.
+- Не удаляй `graphify-out/` — перестройка стоит API-токенов.
+- Не полагайся на граф для answers про переменные окружения, .env или содержимое `scripts/dev.sh` —
+  граф покрывает их слабо.
+
+### Сообщества (community hubs) — быстрая навигация
+
+Наиболее полезные сообщества для архитектурных вопросов:
+
+| Сообщество | Что покрывает |
+|---|---|
+| `University MCP Server` (25 узлов) | `mcp_server/` — Python MCP-сервер, инструменты, health |
+| `Data Service Tools` (19 узлов) | HTTP-обёртки MCP-инструментов над data-service |
+| `Data Service HTTP Client` (23 узла) | `AsyncDataServiceClient` + `RagClient` в SDK |
+| `RAG Pipeline Orchestrator` | `rag/pipeline.py` — import → chunk → embed → search |
+| `ChromaDB Vector Store` (29 узлов) | `rag/vector_store.py` + тесты + интерфейсы |
+| `LLM Agent Streaming` (34 узла) | `demo/api/agent/orchestrator.py` — цикл агента, SSE |
+| `Agent Type Definitions` (33 узла) | `types.py` — Message, ToolCall, EventData, SessionId |
+| `Conversation History Manager` (24 узла) | `conversation.py` — память диалога, блокировки |
+| `Tool Call Parser` (23 узла) | `tool_parser.py` — native + JSON tool call parsing |
+| `MCP HTTP Client` | `mcp_client.py` — долгоживущая MCP-сессия |
+
+### Актуальность графа
+
+Текущий граф построен от коммита `932288d0`. Проверить актуальность:
+```bash
+git rev-parse HEAD  # сравнить с built_at_commit в graph.json
+```
+Если коммиты разошлись — `graphify update .`
+
 ## Осторожность
 
 - Не удаляй `university.db`, `chroma_db/`, `generated_materials/` без явной необходимости.
 - **Не удаляй `./backlog/`** — там истории чатов и трассировки взаимодействий с моделью.
+- Не удаляй `graphify-out/` — перестройка графа стоит API-токенов.
 - В рабочем дереве могут быть пользовательские изменения. Не откатывай без просьбы.
 - Не коммить изменения без прямой просьбы пользователя.

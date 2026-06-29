@@ -21,7 +21,7 @@ PID_DIR="$PROJECT_ROOT/.data/pids"
 
 SERVICES=("data" "rag" "mcp" "api" "web")
 declare -A SERVICE_CMD=(
-  [data]="DB_PATH=$PROJECT_ROOT/university.db LOG_LEVEL=info $PROJECT_ROOT/data-service/bin/data-service"
+  [data]="LOG_LEVEL=info $PROJECT_ROOT/data-service/bin/data-service ${DS_CONFIG:+--config $DS_CONFIG}"
   [rag]="uv run --package rag python -m rag.service"
   [mcp]="$PROJECT_ROOT/mcp-gateway/mcp-gateway"
   # Legacy (Python): раскомментировать для отладки

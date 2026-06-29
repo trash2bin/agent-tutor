@@ -55,6 +55,9 @@ class DemoSettings:
         os.environ.get("AGENT_MAX_TOKENS_THINKING", "4096")
     )
     agent_max_empty_rounds: int = int(os.environ.get("AGENT_MAX_EMPTY_ROUNDS", "3"))
+    agent_max_turn_tokens: int = int(
+        os.environ.get("AGENT_MAX_TURN_TOKENS", "8000")
+    )
 
 
 settings = DemoSettings()

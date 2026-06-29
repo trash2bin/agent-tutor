@@ -14,7 +14,7 @@ from demo.settings import settings
 
 from .conversation import ConversationManager
 from .llm_client import LLMClient, create_client
-from .mcp_client import MCPClient
+from .mcp_client import MCPClient, ToolResult
 from .tool_parser import ToolCallParser
 from .types import (
     AgentEventData,
@@ -43,6 +43,11 @@ SYSTEM_PROMPT = """
 2. При любом вопросе о данных университета сначала используй MCP-инструмент.
 3. Не выдумывай ответ из памяти.
 4. Если вопрос общий — отвечай кратко и по делу.
+
+ПРАВИЛА РАБОТЫ С TOOL RESULTS:
+5. Когда tool вернул данные — ОБЯЗАТЕЛЬНО используй их в ответе. Если tool вернул запись студента/оценку/расписание — выведи эти данные пользователю, не говори «не найдено».
+6. Если tool вернул `{"ok": true, "data": null}` — только тогда записи нет. Если `data` — объект/массив — запись есть, извлеки данные.
+7. Не повторяй вызов того же tool с теми же аргументами если уже получил ответ.
 
 ПРАВИЛА ОТВЕТА:
 - Отвечай на языке пользователя, по умолчанию используй русский.
@@ -85,6 +90,7 @@ class LLMAgent:
         # Configuration from settings
         self.max_iterations = settings.agent_max_iterations
         self.max_empty_rounds = settings.agent_max_empty_rounds
+        self.max_turn_tokens = settings.agent_max_turn_tokens
 
     async def stream_answer(
         self, user_message: str, session_id: SessionId = "default"
@@ -196,6 +202,16 @@ class LLMAgent:
                     if is_finished or empty_rounds >= self.max_empty_rounds:
                         break
 
+                    # Token budget check: прервать turn если messages уже близки
+                    # к context window модели. Модель всё равно не сможет обработать.
+                    if self._estimate_tokens(messages) >= self.max_turn_tokens:
+                        logger.warning(
+                            "[AGENT] Turn token budget exceeded (%d ≥ %d) — stopping turn",
+                            self._estimate_tokens(messages),
+                            self.max_turn_tokens,
+                        )
+                        break
+
                 # Fallback only when no final answer was produced.
                 if not is_finished:
                     async for event in self._run_fallback(
@@ -262,13 +278,15 @@ class LLMAgent:
             return
 
         # Log model response
+        usage = final_message.get("_usage")
+        _ = final_message.pop("_usage", None)  # убираем перед append в messages
         backlog.model_response(
             session_id,
             turn_id,
             iteration,
             final_message,
             duration_ms=0,
-            token_usage=final_message.pop("_usage", None),
+            token_usage=usage,
         )
 
         # Extract components from final message
@@ -365,10 +383,28 @@ class LLMAgent:
                 ),
             )
 
-            # Call the tool
-            tool_result: str = await self.mcp_client.call_tool(session, name, arguments)
+            # Call the tool with per-tool error recovery — один сбой не убивает turn.
+            # Модель получит ToolResult с ошибкой и сможет переформулировать запрос.
+            try:
+                tool_result: ToolResult = await self.mcp_client.call_tool(
+                    session, name, arguments
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[AGENT] Tool call '%s' failed: %s", name, exc
+                )
+                tool_result = ToolResult(
+                    tool_content=json.dumps({"error": True, "message": str(exc)}),
+                    reminder=(
+                        f"Инструмент '{name}' завершился ошибкой: {exc}. "
+                        "Попробуй другой инструмент или ответь пользователю, что сервис временно недоступен."
+                    ),
+                    ok=False,
+                    error=str(exc),
+                )
             backlog.tool_result(
-                session_id, turn_id, iteration, name, tool_result, duration_ms=0
+                session_id, turn_id, iteration, name, tool_result.tool_content,
+                duration_ms=0,
             )
 
             yield AgentEvent(
@@ -376,14 +412,20 @@ class LLMAgent:
                 ToolResultEventData(
                     id=tool_call_id,
                     name=name,
-                    result=tool_result,
+                    result=tool_result.tool_content,
                 ),
             )
 
-            # Add tool response to messages
+            # Post-tool reminder + tool content: MCPClient уже подготовил и то и другое.
+            # ToolResult.reminder — system-сообщение с подсказкой для LLM.
+            # ToolResult.tool_content — чистый JSON для role="tool" message.
+            if tool_result.reminder:
+                messages.append(
+                    {"role": "system", "content": tool_result.reminder}
+                )
             tool_message: dict[str, Any] = {
                 "role": "tool",
-                "content": tool_result,
+                "content": tool_result.tool_content,
                 "tool_call_id": tool_call_id,
                 "name": name,
             }
@@ -456,10 +498,15 @@ class LLMAgent:
         session_id: SessionId,
         is_finished: bool = False,
     ) -> AsyncIterator[AgentEvent]:
-        """Run fallback stream when no final answer was produced."""
-        final_parts: list[str] = []
+        """Run fallback stream when no final answer was produced.
 
-        async for token in self.llm_client.get_final_message(messages):
+        Обрезает messages до system prompt + 2 последних обмена,
+        чтобы дать модели шанс на свежем контексте вместо повторения ошибки.
+        """
+        final_parts: list[str] = []
+        fallback_messages = self._trim_for_fallback(messages)
+
+        async for token in self.llm_client.get_final_message(fallback_messages):
             final_parts.append(token)
             yield AgentEvent("token", TokenEventData(data=token))
 
@@ -488,6 +535,36 @@ class LLMAgent:
             *history,
             {"role": "user", "content": user_message},
         ]
+
+    @staticmethod
+    def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
+        """Fast heuristic token estimate: chars / 3.5 (≈ рус/eng average).
+
+        Это не точный подсчёт (нет tokenizer'а), но достаточен для guard
+        против выхода за context window. Защита от двойного счёта system
+        prompt (он встроен в messages): 8000 токенов ≈ 28000 chars.
+        """
+        total_chars = sum(
+            len(json.dumps(m, ensure_ascii=False, default=str))
+            for m in messages
+        )
+        return int(total_chars / 3.5)
+
+    @staticmethod
+    def _trim_for_fallback(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Обрезать messages для fallback: system prompt + последние 2 обмена.
+
+        Обмен = user/assistant/tool/system группа. В fallback-сценарии
+        модель исчерпала контекст — переотправка всех messages повторяет ошибку.
+        Свежий срез даёт модели шанс ответить.
+        """
+        if len(messages) <= 3:
+            return list(messages)
+        # Первый элемент — system prompt, сохраняем.
+        sys_msg = messages[0]
+        # Последние 4 сообщения (~2 обмена с reminders).
+        tail = messages[-4:]
+        return [sys_msg] + list(tail)
 
     @staticmethod
     def _format_sse_event(event: AgentEvent) -> str:

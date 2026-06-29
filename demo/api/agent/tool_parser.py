@@ -60,7 +60,7 @@ class ToolCallParser:
 
         # Try markdown JSON blocks
         md_matches = re.findall(
-            r"```(?:json)?\s*(\{.*?\})\s*```", text_content, re.DOTALL
+            r"```(?:json)?\s*(\{.*\})\s*```", text_content, re.DOTALL
         )
         potential_jsons.extend(md_matches)
 

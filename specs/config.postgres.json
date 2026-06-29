@@ -1,8 +1,8 @@
 {
   "version": 1,
   "data_source": {
-    "driver": "sqlite",
-    "dsn": "${DB_PATH:-university.db}",
+    "driver": "postgres",
+    "dsn": "postgresql://tutor:tutor@127.0.0.1:5432/agent_tutor",
     "pool_size": 10,
     "read_only": true
   },
@@ -351,7 +351,7 @@
   ],
   "custom_queries": {
     "student_disciplines": {
-      "sql": "SELECT d.id, d.name, d.description FROM disciplines d WHERE d.id IN (SELECT DISTINCT json_extract(value, '$.discipline_id') FROM schedule s, json_each(s.lessons_json) WHERE s.group_id = (SELECT group_id FROM students WHERE id = ?) AND json_extract(value, '$.discipline_id') IS NOT NULL)",
+      "sql": "SELECT d.id, d.name, d.description FROM disciplines d WHERE d.id IN (SELECT DISTINCT elem->>'discipline_id' FROM schedule s, jsonb_array_elements(s.lessons_json::jsonb) elem WHERE s.group_id = (SELECT group_id FROM students WHERE id = ?) AND elem->>'discipline_id' IS NOT NULL)",
       "params": [
         "id"
       ],

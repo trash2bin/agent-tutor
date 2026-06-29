@@ -113,8 +113,6 @@ class LLMClient:
                 f"Expected CustomStreamWrapper, got {type(response).__name__}"
             )
 
-        self._validate_response(response)
-
         chunks: list[Any] = []
         async for chunk in response:
             chunks.append(chunk)
@@ -165,8 +163,6 @@ class LLMClient:
             **extra_params,
         )
 
-        self._validate_response(response)
-
         # Проверка на корректный тип данных от LiteLLM
         if not isinstance(response, CustomStreamWrapper):
             logger.error(
@@ -181,13 +177,6 @@ class LLMClient:
             token = chunk.choices[0].delta.content
             if isinstance(token, str) and token:
                 yield token
-
-    def _validate_response(self, response: Any) -> None:
-        """Validate response type."""
-        if not isinstance(response, CustomStreamWrapper):
-            error_msg = f"Expected CustomStreamWrapper, got {type(response).__name__}"
-            logger.error(error_msg)
-            raise TypeError(error_msg)
 
     def _validate_final_response(self, final: Any) -> None:
         """Validate final response type."""
