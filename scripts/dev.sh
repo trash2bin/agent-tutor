@@ -3,11 +3,19 @@
 # dev.sh — нативный запуск всех сервисов (Mac / без Docker)
 # =============================================================================
 # Usage:
-#   ./scripts/dev.sh start         — поднять все сервисы
+#   ./scripts/dev.sh start         — поднять все сервисы (data + rag + mcp + api + web)
 #   ./scripts/dev.sh stop          — погасить все
 #   ./scripts/dev.sh status        — healthcheck каждого
-#   ./scripts/dev.sh logs [svc]    — tail -f лога (svc: rag|mcp|api|web|all)
+#   ./scripts/dev.sh logs [svc]    — tail -f лога (svc: rag|mcp|api|web|data|all)
 #   ./scripts/dev.sh restart       — stop + start
+#
+# Сценарии data-service (фабрика тестовых БД):
+#   ./scripts/dev.sh db list                       — список сценариев + метаданные
+#   ./scripts/dev.sh db materialize <name> [--force] — создать БД из config.json+seed.json
+#   ./scripts/dev.sh db serve <name>               — запустить data-service на сценарии (fg)
+#   ./scripts/dev.sh db test [all|<name>]          — Go-тесты на сценариях
+#   ./scripts/dev.sh db drop <name>                — удалить материализованную БД
+#   ./scripts/dev.sh db help                       — подробная справка
 #
 # Дефолты из .env (если есть), иначе встроенные.
 # =============================================================================
@@ -71,6 +79,11 @@ load_env() {
     API_PORT=${API_PORT:-8081}
     WEB_PORT=${WEB_PORT:-8080}
     SERVICE_PORT=([data]=$DATA_PORT [rag]=$RAG_PORT [mcp]=$MCP_PORT [api]=$API_PORT [web]=$WEB_PORT)
+
+    # Если DATABASE_URL задана, а DS_CONFIG нет — авто-выбор PostgreSQL конфига
+    if [ -n "${DATABASE_URL:-}" ] && [ -z "${DS_CONFIG:-}" ]; then
+      DS_CONFIG="$PROJECT_ROOT/specs/config.postgres.json"
+    fi
   fi
 }
 
@@ -109,6 +122,11 @@ cmd_start() {
 
   load_env
   ensure_dirs
+
+  # Если DATABASE_URL задана — переопределяем data-service на PG-конфиг
+  if [ -n "${DATABASE_URL:-}" ]; then
+    SERVICE_CMD[data]="LOG_LEVEL=info $PROJECT_ROOT/data-service/bin/data-service --config $PROJECT_ROOT/specs/config.postgres.json"
+  fi
 
   # Проверка uv
   if ! command -v uv &>/dev/null; then
@@ -361,6 +379,328 @@ cmd_logs() {
 }
 
 # =============================================================================
+# db — управление сценариями data-service (config.json + seed.json)
+# =============================================================================
+# Создание / пересоздание / сброс тестовых БД и запуск data-service
+# на конкретном сценарии. Не трогает остальные сервисы (rag/mcp/api/web).
+#
+# Архитектура: data-service/README.md § "Сценарии — фабрика тестовых БД"
+# =============================================================================
+
+SCENARIOS_DIR="$PROJECT_ROOT/data-service/testdata/scenarios"
+CONFIG_SCHEMA="${CONFIG_SCHEMA:-$PROJECT_ROOT/specs/config.schema.json}"
+
+# db subcommand: ./scripts/dev.sh db <list|materialize|serve|test|drop>
+cmd_db() {
+  load_env
+  local op="${1:-help}"
+  shift || true
+
+  case "$op" in
+    list)        cmd_db_list "$@" ;;
+    materialize) cmd_db_materialize "$@" ;;
+    serve)       cmd_db_serve "$@" ;;
+    test)        cmd_db_test "$@" ;;
+    drop)        cmd_db_drop "$@" ;;
+    help|--help|-h) cmd_db_help ;;
+    *)
+      echo "❌ Unknown db subcommand: $op"
+      cmd_db_help
+      exit 1
+      ;;
+  esac
+}
+
+# Резолвит имя сценария → абсолютный путь директории.
+# Допускает:
+#   - встроенное имя (sqlite-testseed, postgres-testseed, shop)
+#   - относительный путь (./my-scenario, testdata/scenarios/...)
+#   - абсолютный путь
+_resolve_scenario() {
+  local name="$1"
+  if [ -z "$name" ]; then
+    echo "❌ Scenario name required" >&2
+    return 1
+  fi
+  if [[ "$name" == /* ]]; then
+    [ -d "$name" ] || { echo "❌ Scenario dir not found: $name" >&2; return 1; }
+    echo "$name"; return 0
+  fi
+  if [ -d "$SCENARIOS_DIR/$name" ]; then
+    echo "$SCENARIOS_DIR/$name"; return 0
+  fi
+  if [ -d "$name" ]; then
+    (cd "$name" && pwd); return 0
+  fi
+  echo "❌ Scenario not found: $name (looked in $SCENARIOS_DIR and as-is)" >&2
+  return 1
+}
+
+# Печатает info о сценарии: driver, dsn, размер БД, размер seed.json.
+_scenario_info() {
+  local dir="$1" cfg="$dir/config.json"
+  dir="${dir%/}"
+  cfg="$dir/config.json"
+  if [ ! -f "$cfg" ]; then
+    echo "  ⚠️  no config.json"
+    return
+  fi
+  local driver dsn
+  driver=$(jq -r '.data_source.driver // "n/a"' "$cfg")
+  dsn=$(jq -r '.data_source.dsn  // "n/a"' "$cfg")
+  local entities endpoints cq
+  entities=$(jq  -r '.entities | length'                "$cfg")
+  endpoints=$(jq -r '.endpoints | length'               "$cfg")
+  cq=$(jq       -r '.custom_queries | keys | length'     "$cfg" 2>/dev/null || echo "0")
+  printf "  driver=%-9s entities=%-2s endpoints=%-2s cq=%-2s\n" "$driver" "$entities" "$endpoints" "$cq"
+  printf "  dsn=%s\n" "$dsn"
+
+  local db_path=""
+  if [ "$driver" = "sqlite" ] && [[ "$dsn" != *"/"* ]]; then
+    db_path="$dir/$dsn"
+  fi
+  if [ -n "$db_path" ] && [ -f "$db_path" ]; then
+    local size; size=$(du -h "$db_path" | cut -f1)
+    printf "  db=%s (%s)\n" "$db_path" "$size"
+  elif [ "$driver" = "postgres" ]; then
+    printf "  db=<PostgreSQL via DATABASE_URL>\n"
+  fi
+
+  local seed="$dir/seed.json"
+  seed="${seed%/}"
+  if [ -f "$seed" ]; then
+    local rows_total
+    rows_total=$(jq -r '
+      [ .groups, .students, .teachers, .disciplines, .grades, .schedule ]
+      | map(if type=="array" then length else 0 end)
+      | add // 0
+    ' "$seed" 2>/dev/null || echo "?")
+    printf "  seed=%s (%s entities)\n" "$seed" "$rows_total"
+  fi
+}
+
+cmd_db_list() {
+  echo "📂 Available scenarios in $SCENARIOS_DIR:"
+  echo ""
+  if [ ! -d "$SCENARIOS_DIR" ]; then
+    echo "  (directory not found)"; return
+  fi
+  local found=0
+  for dir in "$SCENARIOS_DIR"/*/; do
+    [ -d "$dir" ] || continue
+    found=1
+    local name; name=$(basename "$dir")
+    echo "• $name"
+    _scenario_info "$dir"
+    echo ""
+  done
+  if [ "$found" -eq 0 ]; then
+    echo "  (no scenarios found)"
+  fi
+  return 0
+}
+
+# Создать/пересоздать БД из сценария.
+#   ./scripts/dev.sh db materialize <name>          — создать
+#   ./scripts/dev.sh db materialize <name> --force — удалить и пересоздать
+cmd_db_materialize() {
+  local name="${1:-}"
+  local force=""
+  [ "${2:-}" = "--force" ] && force="--force"
+
+  local dir; dir=$(_resolve_scenario "$name") || exit 1
+  if [ ! -f "$dir/config.json" ]; then
+    echo "❌ config.json not found in $dir"; exit 1
+  fi
+
+  # ---- Bootstrap (для сценариев без seed.json) ----
+  # Если seed.json нет и в директории сценария лежит bootstrap.sh —
+  # запускаем его для генерации data.db (или другой исходной БД).
+  # Идея: bootstrap.sh — это "как получить БД когда готовой нет".
+  # Только для сценариев где конфиг знает endpoint'ы но seed для них не описан
+  # (например, demo-сценарий 'shop' с любой сторонней БД).
+  local bootstrap_ran=0
+  if [ ! -f "$dir/seed.json" ] && [ -f "$dir/bootstrap.sh" ]; then
+    local need_bootstrap=0
+    if [ -n "$force" ]; then
+      need_bootstrap=1
+    elif [ ! -f "$dir/data.db" ]; then
+      need_bootstrap=1
+    fi
+    if [ "$need_bootstrap" = "1" ]; then
+      echo "🏗️  Bootstrap: сценарий '$name' без seed.json, запускаю $dir/bootstrap.sh"
+      bash "$dir/bootstrap.sh" || {
+        echo "❌ Bootstrap-скрипт завершился с ошибкой"; exit 1
+      }
+      echo "✅ Bootstrap done"
+      bootstrap_ran=1
+    fi
+  elif [ ! -f "$dir/seed.json" ]; then
+    echo "⚠️  seed.json not found — schema will be created but no data loaded."
+  fi
+
+  echo "🔨 Materializing scenario: $name"
+  echo "   dir: $dir"
+  echo "   config-schema: $CONFIG_SCHEMA"
+  # Если bootstrap только что создал свежий data.db — НЕ передаём --force
+  # в data-service, иначе он удалит результат bootstrap'а (PostgreSQL
+  # data.db — а для SQLite materialize всё равно применит CREATE TABLE
+  # IF NOT EXISTS, что безопасно поверх наполненной таблицы).
+  if [ "$bootstrap_ran" = "1" ]; then
+    if [ -n "$force" ]; then
+      echo "   (--force передан, но bootstrap уже подготовил data.db; --force не передаём data-service)"
+    fi
+    force=""
+  fi
+  [ -n "$force" ] && echo "   force: enabled (SQLite file will be removed first)"
+
+  (cd "$PROJECT_ROOT/data-service" && \
+    CONFIG_SCHEMA="$CONFIG_SCHEMA" \
+    go run ./cmd/server/ --materialize "$dir" $force)
+}
+
+# Запустить data-service с указанным сценарием (только data, без rag/mcp/api/web).
+# Удобно для ad-hoc проверок одного сценария.
+# Если все сервисы уже подняты и порт занят — переопредели DATA_PORT.
+cmd_db_serve() {
+  local name="${1:-}"
+  local dir; dir=$(_resolve_scenario "$name") || exit 1
+  load_env; ensure_dirs
+
+  echo "🔨 Building data-service..."
+  (cd "$PROJECT_ROOT/data-service" && \
+    go build -o bin/data-service ./cmd/server/) || {
+      echo "❌ Failed to build data-service"; exit 1
+  }
+
+  echo "🚀 Serving scenario '$name' on :$DATA_PORT"
+  echo "   (logs: $(logfile data) if started via start; foreground here)"
+  echo ""
+
+  cd "$PROJECT_ROOT/data-service"
+  exec env CONFIG_SCHEMA="$CONFIG_SCHEMA" PORT="$DATA_PORT" \
+    "$PROJECT_ROOT/data-service/bin/data-service" \
+    --config "$dir/config.json"
+}
+
+# Прогоняет scenario-driven Go-тесты.
+#   ./scripts/dev.sh db test            — все сценарии (default)
+#   ./scripts/dev.sh db test <name>     — один сценарий
+cmd_db_test() {
+  local name="${1:-all}"
+  if [ "$name" = "all" ]; then
+    echo "🧪 Running scenario tests for ALL scenarios..."
+    (cd "$PROJECT_ROOT/data-service" && \
+      CONFIG_SCHEMA="$CONFIG_SCHEMA" \
+      go test ./internal/server/... -run TestScenario -v)
+    return
+  fi
+
+  local dir; dir=$(_resolve_scenario "$name") || exit 1
+  local scenario_name; scenario_name=$(basename "$dir")
+
+  # Сопоставление имя директории → имя Go-функции.
+  local func
+  case "$scenario_name" in
+    sqlite-testseed)   func="TestScenario_SqliteTestseed" ;;
+    shop)              func="TestScenario_Shop" ;;
+    big-testseed)
+      # big-testseed покрывают несколько тестов: TestScenario_Big, TestEdgeCases_*,
+      # TestCustomQueries_*, TestConcurrency_*, TestCrossDriver_*. Запускаем все.
+      func="TestScenario_BigTestseed|TestEdgeCases|TestCustomQueries|TestConcurrency|TestCrossDriver"
+      ;;
+    postgres-testseed)
+      echo "ℹ️  PostgreSQL-сценарий покрывается только интеграционным тестом:"
+      echo "    uv run python data-service/tests/integration/test_with_faker.py"
+      echo "   (нужен docker compose up -d db)"
+      exit 0
+      ;;
+    *)
+      echo "⚠️  No dedicated test for '$scenario_name'; running all TestScenario_*"
+      func="TestScenario"
+      ;;
+  esac
+
+  echo "🧪 Running scenario tests for: $scenario_name ($func)"
+  (cd "$PROJECT_ROOT/data-service" && \
+    CONFIG_SCHEMA="$CONFIG_SCHEMA" \
+    go test ./internal/server/... -run "$func" -v)
+}
+
+# Удалить материализованную БД.
+#   ./scripts/dev.sh db drop <name>
+cmd_db_drop() {
+  local name="${1:-}"
+  local dir; dir=$(_resolve_scenario "$name") || exit 1
+  if [ ! -f "$dir/config.json" ]; then
+    echo "❌ config.json not found in $dir"; exit 1
+  fi
+
+  local driver dsn
+  driver=$(jq -r '.data_source.driver' "$dir/config.json")
+  dsn=$(jq    -r '.data_source.dsn'    "$dir/config.json")
+
+  case "$driver" in
+    sqlite)
+      local db_path
+      if [[ "$dsn" == *"/"* ]]; then db_path="$dsn"
+      else                            db_path="$dir/$dsn"
+      fi
+      if [ ! -f "$db_path" ]; then
+        echo "ℹ️  No database file at $db_path — nothing to drop"; return
+      fi
+      echo "🗑️  Removing: $db_path"
+      rm -f "$db_path" "$db_path-wal" "$db_path-shm"
+      echo "✅ SQLite database dropped"
+      echo "   Recreate with: ./scripts/dev.sh db materialize $name"
+      ;;
+    postgres)
+      echo "⚠️  PostgreSQL: drop должен делаться вручную (защита от clobber)."
+      echo ""
+      echo "   Сбросить только схему public:"
+      echo "     docker exec agent-tutor-db-1 psql -U tutor -d agent_tutor \\"
+      echo "       -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public'"
+      exit 1
+      ;;
+    *) echo "❌ Unknown driver: $driver"; exit 1 ;;
+  esac
+}
+
+cmd_db_help() {
+  cat <<'EOF'
+db — управление сценариями data-service (фабрика тестовых БД)
+
+Использование:
+  ./scripts/dev.sh db list                          — список сценариев с метаданными
+  ./scripts/dev.sh db materialize <name> [--force]  — создать/пересоздать БД из сценария
+  ./scripts/dev.sh db serve <name>                  — запустить data-service на сценарии (fg)
+  ./scripts/dev.sh db test [all|<name>]             — прогнать Go-тесты на сценариях
+  ./scripts/dev.sh db drop <name>                   — удалить материализованную БД
+
+Где <name> — это:
+  - встроенное имя:        sqlite-testseed, postgres-testseed, shop, big-testseed
+  - относительный путь:    ./my-scenario или testdata/scenarios/my-scenario
+  - абсолютный путь
+
+Примеры:
+  ./scripts/dev.sh db list
+  ./scripts/dev.sh db materialize sqlite-testseed --force
+  ./scripts/dev.sh db serve shop                    # только data-service на data.db
+  ./scripts/dev.sh db test sqlite-testseed
+  DATA_PORT=18084 ./scripts/dev.sh db serve postgres-testseed
+
+Env:
+  CONFIG_SCHEMA   JSON Schema конфига (default: $PROJECT_ROOT/specs/config.schema.json)
+  DATA_PORT       порт для data-service (default: 8084)
+  DATABASE_URL    PG-сценарий работает против этого URL
+
+Готовые сценарии — data-service/testdata/scenarios/
+EOF
+}
+
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -383,23 +723,38 @@ case "${1:-help}" in
   logs)
     cmd_logs "${2:-all}"
     ;;
+  db)
+    shift
+    cmd_db "$@"
+    ;;
   help|--help|-h)
     echo "Usage: $0 <command> [args]"
     echo ""
     echo "Commands:"
-    echo "  start              — поднять все сервисы"
+    echo "  start              — поднять все сервисы (data + rag + mcp + api + web)"
     echo "  stop               — погасить все"
     echo "  restart            — перезапустить"
     echo "  status             — healthcheck"
-    echo "  logs [svc]         — tail -f логов (rag|mcp|api|web|all)"
+    echo "  logs [svc]         — tail -f логов (rag|mcp|api|web|data|all)"
+    echo ""
+    echo "Сценарии БД data-service (фабрика тестовых БД):"
+    echo "  db list                — список сценариев с метаданными"
+    echo "  db materialize <n>     — создать/пересоздать БД из сценария  (--force для SQLite)"
+    echo "  db serve <n>           — запустить только data-service на сценарии (foreground)"
+    echo "  db test [all|<n>]      — прогнать Go-тесты на сценариях"
+    echo "  db drop <n>            — удалить материализованную БД сценария"
+    echo "  db help                — подробная справка по db-subcommand"
+    echo ""
+    echo "Подробнее по db-подкомандам: $0 db help"
     echo ""
     echo "Env:"
     echo "  .env в корне проекта — автоматически подгружается"
+    echo "  CONFIG_SCHEMA        — путь к JSON Schema конфига (по умолчанию specs/config.schema.json)"
     exit 0
     ;;
   *)
     echo "❌ Unknown command: $1"
-    echo "Usage: $0 start|stop|restart|status|logs"
+    echo "Run '$0 help' for usage"
     exit 1
     ;;
 esac

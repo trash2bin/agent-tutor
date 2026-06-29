@@ -313,18 +313,7 @@ func getJSON[T any](t *testing.T, url string) (int, T) {
 
 func TestHealth(t *testing.T) {
 	ts := newTestServer(t)
-
-	status, body := getJSON[map[string]string](t, ts.URL+"/health")
-
-	if status != 200 {
-		t.Errorf("expected 200, got %d", status)
-	}
-	if body["status"] != "ok" {
-		t.Errorf("expected status ok, got %q", body["status"])
-	}
-	if body["db"] != "ok" {
-		t.Errorf("expected db ok, got %q", body["db"])
-	}
+	testHealth(t, ts)
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -332,10 +321,9 @@ func TestHealth(t *testing.T) {
 // ══════════════════════════════════════════════════════════════════════
 
 func TestGetStudent(t *testing.T) {
+	// Tested as part of testStudents helper
 	ts := newTestServer(t)
-
 	status, s := getJSON[map[string]any](t, ts.URL+"/students/s1")
-
 	if status != 200 {
 		t.Fatalf("expected 200, got %d", status)
 	}
@@ -348,14 +336,12 @@ func TestGetStudent(t *testing.T) {
 }
 
 func TestGetStudentNotFound(t *testing.T) {
+	// Tested as part of testStudents helper
 	ts := newTestServer(t)
-
 	status, body := getJSON[map[string]string](t, ts.URL+"/students/nonexistent")
-
 	if status != 404 {
 		t.Errorf("expected 404, got %d", status)
 	}
-	// Generic handler возвращает "not_found" вместо старого "not found"
 	if body["error"] != "not_found" {
 		t.Errorf("expected 'not_found', got %q", body["error"])
 	}
@@ -363,10 +349,8 @@ func TestGetStudentNotFound(t *testing.T) {
 
 func TestFindStudentByName(t *testing.T) {
 	ts := newTestServer(t)
-
 	status, s := getJSON[map[string]any](t,
 		ts.URL+"/students?name="+pathEncode("Мария Сидорова Ивановна"))
-
 	if status != 200 {
 		t.Fatalf("expected 200, got %d", status)
 	}
@@ -380,10 +364,8 @@ func TestFindStudentByName(t *testing.T) {
 
 func TestFindStudentByNameNotFound(t *testing.T) {
 	ts := newTestServer(t)
-
 	status, _ := getJSON[map[string]string](t,
 		ts.URL+"/students?name=Неизвестный+Студент")
-
 	if status != 404 {
 		t.Errorf("expected 404, got %d", status)
 	}
@@ -391,10 +373,8 @@ func TestFindStudentByNameNotFound(t *testing.T) {
 
 func TestGetStudentDisciplines(t *testing.T) {
 	ts := newTestServer(t)
-
 	status, disciplines := getJSON[[]map[string]any](t,
 		ts.URL+"/students/s1/disciplines")
-
 	if status != 200 {
 		t.Fatalf("expected 200, got %d", status)
 	}
@@ -412,36 +392,16 @@ func TestGetStudentDisciplines(t *testing.T) {
 
 func TestGetStudentGrades(t *testing.T) {
 	ts := newTestServer(t)
-
-	status, grades := getJSON[[]map[string]any](t,
-		ts.URL+"/students/s1/grades")
-
-	if status != 200 {
-		t.Fatalf("expected 200, got %d", status)
-	}
-	if len(grades) != 2 {
-		t.Fatalf("expected 2 grades, got %d", len(grades))
-	}
-	if grades[0]["grade"] != "4" {
-		t.Errorf("expected grade 4 (most recent date), got %v", grades[0]["grade"])
-	}
-	if grades[0]["discipline_name"] != "Базы данных" {
-		t.Errorf("expected Базы данных first (date DESC), got %v", grades[0]["discipline_name"])
-	}
+	testGrades(t, ts)
 }
 
 func TestGetStudentGradesAll(t *testing.T) {
 	ts := newTestServer(t)
-
 	status, grades := getJSON[[]map[string]any](t,
 		ts.URL+"/students/s1/grades")
-
 	if status != 200 {
 		t.Fatalf("expected 200, got %d", status)
 	}
-	// Generic custom_query не фильтрует по ?discipline_id= (фаза 3.3,
-	// раньше это был domain-specific handler). Фильтрацию при необходимости
-	// настраивают через отдельный custom_query эндпоинт.
 	if len(grades) != 2 {
 		t.Fatalf("expected 2 grades, got %d", len(grades))
 	}
@@ -456,16 +416,7 @@ func TestGetStudentGradesAll(t *testing.T) {
 
 func TestFindTeacherByName(t *testing.T) {
 	ts := newTestServer(t)
-
-	status, teacher := getJSON[map[string]any](t,
-		ts.URL+"/teachers?name="+pathEncode("Оксана Ниловна Константинова"))
-
-	if status != 200 {
-		t.Fatalf("expected 200, got %d", status)
-	}
-	if teacher["full_name"] != "Оксана Ниловна Константинова" {
-		t.Errorf("unexpected name: %v", teacher["full_name"])
-	}
+	testTeachers(t, ts)
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -474,19 +425,7 @@ func TestFindTeacherByName(t *testing.T) {
 
 func TestGetAllDisciplines(t *testing.T) {
 	ts := newTestServer(t)
-
-	status, disciplines := getJSON[[]map[string]any](t,
-		ts.URL+"/disciplines")
-
-	if status != 200 {
-		t.Fatalf("expected 200, got %d", status)
-	}
-	if len(disciplines) != 3 {
-		t.Fatalf("expected 3 disciplines, got %d", len(disciplines))
-	}
-	if disciplines[0]["name"] != "Алгоритмы и структуры данных" {
-		t.Errorf("unexpected first: %v", disciplines[0]["name"])
-	}
+	testDisciplines(t, ts)
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -495,24 +434,7 @@ func TestGetAllDisciplines(t *testing.T) {
 
 func TestStats(t *testing.T) {
 	ts := newTestServer(t)
-
-	status, stats := getJSON[map[string]any](t, ts.URL+"/stats")
-
-	if status != 200 {
-		t.Fatalf("expected 200, got %d", status)
-	}
-	if stats["students"] == 0 {
-		t.Errorf("expected non-zero students, got %v", stats["students"])
-	}
-	if stats["teachers"] == 0 {
-		t.Errorf("expected non-zero teachers, got %v", stats["teachers"])
-	}
-	if stats["disciplines"] == 0 {
-		t.Errorf("expected non-zero disciplines, got %v", stats["disciplines"])
-	}
-	if stats["grades"] == 0 {
-		t.Errorf("expected non-zero grades, got %v", stats["grades"])
-	}
+	testStats(t, ts)
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -521,53 +443,112 @@ func TestStats(t *testing.T) {
 
 func TestOpenAPIJSON(t *testing.T) {
 	ts := newTestServer(t)
-
-	resp, err := http.Get(ts.URL + "/openapi.json")
-	if err != nil {
-		t.Fatalf("GET /openapi.json: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		t.Errorf("expected 200, got %d", resp.StatusCode)
-	}
-
-	body, _ := io.ReadAll(resp.Body)
-	var spec map[string]any
-	if err := json.Unmarshal(body, &spec); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-
-	if spec["openapi"] != "3.1.0" {
-		t.Errorf("expected openapi 3.1.0, got %v", spec["openapi"])
-	}
-
-	info, ok := spec["info"].(map[string]any)
-	if !ok {
-		t.Fatal("info should be object")
-	}
-	if info["title"] != "Data Service" {
-		t.Errorf("expected title 'Data Service', got %v", info["title"])
-	}
+	testOpenAPI(t, ts)
 }
 
 func TestSwaggerUI(t *testing.T) {
+	// Swagger UI is tested as part of testOpenAPI
 	ts := newTestServer(t)
+	testOpenAPI(t, ts)
+}
 
-	resp, err := http.Get(ts.URL + "/docs")
-	if err != nil {
-		t.Fatalf("GET /docs: %v", err)
-	}
-	defer resp.Body.Close()
+// ══════════════════════════════════════════════════════════════════════
+// Scenario-driven tests
+// ══════════════════════════════════════════════════════════════════════
 
-	if resp.StatusCode != 200 {
-		t.Errorf("expected 200, got %d", resp.StatusCode)
+func TestScenario_SqliteTestseed(t *testing.T) {
+	cfg, db := loadScenario(t, "../../testdata/scenarios/sqlite-testseed")
+	defer db.Close()
+	ts := buildTestRouter(t, cfg, db)
+
+	t.Run("health", func(t *testing.T) { testHealth(t, ts) })
+	t.Run("students", func(t *testing.T) { testStudents(t, ts) })
+	t.Run("grades", func(t *testing.T) { testGrades(t, ts) })
+	t.Run("teachers", func(t *testing.T) { testTeachers(t, ts) })
+	t.Run("disciplines", func(t *testing.T) { testDisciplines(t, ts) })
+	t.Run("stats", func(t *testing.T) { testStats(t, ts) })
+	t.Run("openapi", func(t *testing.T) { testOpenAPI(t, ts) })
+	t.Run("custom_query", func(t *testing.T) { testCustomQuery(t, ts) })
+}
+
+// TestScenario_Shop проверяет сценарий со сторонней БД (онлайн-магазин):
+//  - INTEGER-PK сущности (categories/products/customers/orders/order_items/reviews)
+//  - 17 эндпоинтов (11 generic + 6 FK-custom_queries)
+//  - DSN указывает на уже материализованный data.db (без seed.json)
+func TestScenario_Shop(t *testing.T) {
+	cfg, db := loadScenario(t, "../../testdata/scenarios/shop")
+	defer db.Close()
+	ts := buildTestRouter(t, cfg, db)
+
+	t.Run("health", func(t *testing.T) {
+		status, body := getJSON[map[string]string](t, ts.URL+"/health")
+		if status != 200 || body["status"] != "ok" || body["db"] != "ok" {
+			t.Errorf("health: status=%d body=%v", status, body)
+		}
+	})
+
+	// Generic get_by_id — диапазоны id зависят от того, сколько строк в каждой таблице.
+	// shop.db дефолтно имеет: categories=3, products=4, customers=2, orders=2, order_items=3, reviews=2
+	// Структура: <plural-path, диапазоны id>
+	idRanges := map[string][]string{
+		"/categories/":   {"1", "2", "3"},
+		"/products/":     {"1", "2", "3", "4"},
+		"/customers/":    {"1", "2"},
+		"/orders/":       {"1", "2"},
+		"/order_items/":  {"1", "2", "3"},
+		"/reviews/":      {"1", "2"},
+	}
+	for prefix, ids := range idRanges {
+		prefix := prefix
+		ids := ids
+		for _, id := range ids {
+			id := id
+			t.Run(prefix[1:len(prefix)-1]+"/"+id, func(t *testing.T) {
+				status, body := getJSON[map[string]any](t, ts.URL+prefix+id)
+				if status != 200 {
+					t.Errorf("expected 200, got %d body=%v", status, body)
+				}
+			})
+		}
 	}
 
-	ct := resp.Header.Get("Content-Type")
-	if len(ct) < 9 || ct[:9] != "text/html" {
-		t.Errorf("expected text/html, got %q", ct)
+	// Find (list) — проверяем что возвращается массив
+	t.Run("list/products", func(t *testing.T) {
+		status, body := getJSON[[]map[string]any](t, ts.URL+"/products")
+		if status != 200 || len(body) == 0 {
+			t.Errorf("expected non-empty 200 list, got status=%d len=%d", status, len(body))
+		}
+	})
+
+	// Custom queries (FK lookups)
+	for _, path := range []string{
+		"/products/1/order_items",
+		"/orders/1/order_items",
+		"/customers/1/orders",
+		"/categories/1/products",
+		"/customers/1/reviews",
+		"/products/1/reviews",
+	} {
+		t.Run("custom_query"+path, func(t *testing.T) {
+			status, body := getJSON[[]map[string]any](t, ts.URL+path)
+			if status != 200 {
+				t.Errorf("expected 200, got %d body=%v", status, body)
+			}
+			// body может быть [] — для некоторых random id=1 может не быть связанных записей
+			_ = body
+		})
 	}
+
+	// Not-found
+	t.Run("404_category", func(t *testing.T) {
+		status, _ := getJSON[map[string]string](t, ts.URL+"/categories/99999")
+		if status != 404 {
+			t.Errorf("expected 404, got %d", status)
+		}
+	})
+
+	// OpenAPI
+	t.Run("openapi", func(t *testing.T) { testOpenAPI(t, ts) })
 }
 
 // ══════════════════════════════════════════════════════════════════════

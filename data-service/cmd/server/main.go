@@ -7,6 +7,8 @@
 //
 //	go run ./cmd/server/                                    # config-driven, дефолтный конфиг
 //	go run ./cmd/server/ --config path/to/config.json       # кастомный конфиг
+//	go run ./cmd/server/ --materialize testdata/scenarios/sqlite-testseed  # создать БД из сценария
+//	go run ./cmd/server/ --materialize testdata/scenarios/sqlite-testseed --force  # пересоздать БД
 //
 // Переменные окружения:
 //
@@ -28,12 +30,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/agent-tutor/agent-tutor-go/config"
 	"github.com/agent-tutor/data-service/internal/configgen"
 	"github.com/agent-tutor/data-service/internal/datasource"
+	"github.com/agent-tutor/data-service/internal/seedgen"
 	"github.com/agent-tutor/data-service/internal/server"
 )
 
@@ -43,9 +47,20 @@ func main() {
 	// ── CLI флаги ──
 	discoverFlag := flag.Bool("discover", false, "прочитать схему БД и вывести сгенерированный конфиг в stdout")
 	cfgPath := flag.String("config", "", "путь к JSON-конфигу (по умолчанию $DS_CONFIG или specs/config.example.json)")
+	materializeDir := flag.String("materialize", "", "директория сценария (config.json + seed.json) — создать БД")
+	forceFlag := flag.Bool("force", false, "для --materialize: пересоздать БД, даже если уже существует")
 	flag.Parse()
 
 	server.InitLogger()
+
+	// ── Materialize-режим: создать БД из сценария и выйти ──
+	if *materializeDir != "" {
+		if err := runMaterialize(*materializeDir, *forceFlag); err != nil {
+			slog.Error("materialize failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// ── Discover-режим: прочитать схему, сгенерировать конфиг и выйти ──
 	if *discoverFlag || os.Getenv("DS_DISCOVER") != "" {
@@ -76,6 +91,12 @@ func main() {
 		slog.Error("load config", "error", err)
 		os.Exit(1)
 	}
+
+	// Для относительного DSN (SQLite) резолвим относительно директории конфига
+	if cfg.DataSource.Driver == config.DriverSQLite && !filepath.IsAbs(cfg.DataSource.DSN) && cfg.DataSource.DSN != ":memory:" && !strings.HasPrefix(cfg.DataSource.DSN, ":memory:?") {
+		cfg.DataSource.DSN = filepath.Join(filepath.Dir(absCfgPath), cfg.DataSource.DSN)
+	}
+
 
 	// ── Открываем БД через datasource registry ──
 	registry := datasource.NewDefaultRegistry()
@@ -160,6 +181,50 @@ func (c *connAdapter) QueryContext(ctx context.Context, query string, args ...an
 func (c *connAdapter) PingContext(ctx context.Context) error          { return c.conn.PingContext(ctx) }
 func (c *connAdapter) QuoteIdentifier(name string) string            { return c.adp.QuoteIdentifier(name) }
 func (c *connAdapter) TranslatePlaceholder(index int) string         { return c.adp.TranslatePlaceholder(index) }
+
+// runMaterialize читает config.json (+ опциональный seed.json) из директории
+// сценария и создаёт БД.
+//
+// Если seed.json отсутствует — БД создаётся со схемой, но без данных.
+// Это нужно для сценариев с bootstrap.sh (например, 'shop'), где начальные
+// данные генерируются отдельным скриптом, а в config описаны только сущности
+// и endpoint'ы.
+func runMaterialize(dir string, force bool) error {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("resolve scenario dir: %w", err)
+	}
+
+	cfg, err := config.Load(filepath.Join(absDir, "config.json"))
+	if err != nil {
+		return fmt.Errorf("load config.json: %w", err)
+	}
+
+	seedPath := filepath.Join(absDir, "seed.json")
+	var seed *seedgen.Seed
+	if _, statErr := os.Stat(seedPath); statErr == nil {
+		seed, err = seedgen.Load(seedPath)
+		if err != nil {
+			return fmt.Errorf("load seed.json: %w", err)
+		}
+	} else {
+		slog.Info("seed.json not found — schema only, no data loaded")
+	}
+
+	registry := datasource.NewDefaultRegistry()
+	adapter, ok := registry.Get(string(cfg.DataSource.Driver))
+	if !ok {
+		return fmt.Errorf("unsupported driver: %s", cfg.DataSource.Driver)
+	}
+
+	ctx := context.Background()
+	if err := seedgen.Materialize(ctx, adapter, cfg, seed, absDir, force); err != nil {
+		return err
+	}
+
+	slog.Info("materialize: done", "dir", absDir, "driver", cfg.DataSource.Driver, "dsn", cfg.DataSource.DSN)
+	return nil
+}
 
 // runDiscover открывает БД по env, интроспектирует схему и выводит конфиг в stdout.
 func runDiscover() error {

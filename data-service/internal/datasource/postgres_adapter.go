@@ -84,7 +84,20 @@ func (PostgresAdapter) TranslatePlaceholder(index int) string {
 }
 
 // QuoteIdentifier — двойные кавычки (ANSI SQL).
+//
+// Если в имени есть точка, квотируем каждый сегмент отдельно. Иначе
+// Postgres считает всю строку одним identifier и имя таблицы
+// "public.customers" становится буквальным именем, а не
+// public.customers (schema.table). Квоты делаем для schema-qualified
+// таблиц, а также для надёжности имён с пробелами / спецсимволами.
 func (PostgresAdapter) QuoteIdentifier(name string) string {
+	if strings.Contains(name, ".") {
+		parts := strings.Split(name, ".")
+		for i, p := range parts {
+			parts[i] = `"` + p + `"`
+		}
+		return strings.Join(parts, ".")
+	}
 	return `"` + name + `"`
 }
 

@@ -1,10 +1,10 @@
-// Package seedgen загружает и применяет seed-данные к БД.
+// Package seedgen loads and applies seed data to a database.
 //
-// Используется ТОЛЬКО в dev-режиме через CLI-флаг --seed в data-service.
-// Если БД уже содержит данные — отказывается (предотвращает перезапись).
+// Used ONLY in dev-mode through CLI flag --seed in data-service.
+// If DB already contains data — refuses (prevents overwrite).
 //
-// В фазе 3.3 вынесен в отдельный /cmd/seed-cli для dev/demo,
-// не является частью prod-кода data-service.
+// In phase 3.3 moved to /cmd/seed-cli for dev/demo,
+// not part of data-service prod code.
 package seedgen
 
 import (
@@ -15,17 +15,17 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 )
 
-// ExecContext — минимальный интерфейс для seed-операций.
-// Не зависит от internal/db.DB (удалён в фазе 3.3).
+// ExecContext — minimal interface for seed operations.
 type ExecContext interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// schemaDDL — DDL для university-схемы.
-// Используется только в seed-режиме (dev-only).
+// schemaDDL — DDL for university schema.
+// Used only in seed mode (dev-only).
 const schemaDDL = `
 CREATE TABLE IF NOT EXISTS groups (
     id TEXT PRIMARY KEY,
@@ -67,7 +67,17 @@ CREATE TABLE IF NOT EXISTS schedule (
 );
 `
 
-// Seed — корневая структура файла fixtures/seed.json.
+// PlaceholderFunc generates a placeholder for a given driver:
+// "?" for SQLite, "$1" for PostgreSQL (1-indexed).
+type PlaceholderFunc func(index int) string
+
+// SQLitePlaceholder returns "?" regardless of index.
+func SQLitePlaceholder(_ int) string { return "?" }
+
+// PostgresPlaceholder returns "$1", "$2", etc.
+func PostgresPlaceholder(index int) string { return fmt.Sprintf("$%d", index) }
+
+// Seed — root structure of fixtures/seed.json.
 type Seed struct {
 	Groups      []Group         `json:"groups"`
 	Students    []Student       `json:"students"`
@@ -127,7 +137,7 @@ type Grade struct {
 	Date         string `json:"date"`
 }
 
-// Load читает и парсит JSON-файл с seed-данными.
+// Load reads and parses a seed JSON file.
 func Load(path string) (*Seed, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -140,51 +150,69 @@ func Load(path string) (*Seed, error) {
 	return &s, nil
 }
 
-// ErrDatabaseNotEmpty — БД уже содержит записи, seed отменён.
+// ErrDatabaseNotEmpty — DB already contains records, seed aborted.
 var ErrDatabaseNotEmpty = errors.New("database already contains data, seed aborted")
 
-// ErrSeedFileMissing — файл с seed-данными не найден.
+// ErrSeedFileMissing — seed file not found.
 var ErrSeedFileMissing = errors.New("seed file not found")
 
-// Apply применяет данные к БД в правильном порядке FK:
+// Apply applies data to DB in FK order:
 // groups → disciplines → teachers → students → schedule → grades.
 //
-// Если БД не пустая — возвращает ErrDatabaseNotEmpty.
+// Uses embedded schemaDDL and SQLite placeholders.
+// Returns ErrDatabaseNotEmpty if DB already contains university data.
+// For tests/scenarios where DDL is generated from config — use ApplyWithDDL.
 func Apply(ctx context.Context, database ExecContext, seed *Seed) error {
-	var tableName string
-	row := database.QueryRowContext(ctx,
-		"SELECT name FROM sqlite_master WHERE type='table' AND name='groups' LIMIT 1")
-	if err := row.Scan(&tableName); err != nil {
-		if err := applySchema(ctx, database); err != nil {
-			return fmt.Errorf("apply schema: %w", err)
-		}
-	}
-
+	// Guard: refuse to seed a non-empty DB (seed-cli safety).
+	// The query uses 'groups' — the first table seeded in FK order.
+	// If the table doesn't exist, Scan returns an error → let ApplyWithDDL create it.
 	var count int
-	row = database.QueryRowContext(ctx, "SELECT COUNT(*) FROM groups")
-	if err := row.Scan(&count); err != nil {
-		return fmt.Errorf("check groups empty: %w", err)
-	}
-	if count > 0 {
+	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM groups").Scan(&count); err == nil && count > 0 {
 		return fmt.Errorf("%w: groups has %d rows", ErrDatabaseNotEmpty, count)
 	}
+	return ApplyWithDDL(ctx, database, schemaDDL, seed, SQLitePlaceholder, "sqlite")
+}
 
-	if err := insertGroups(ctx, database, seed.Groups); err != nil {
+// ApplyWithDDL applies DDL and seed data to DB.
+// DDL is split by ';' and each statement is executed individually
+// (SQLite supports multi-statement, PostgreSQL does not — splitting keeps both paths safe).
+// Seed is inserted in FK order: groups → disciplines → teachers → students → schedule → grades.
+// phFn — placeholder generator (SQLitePlaceholder or PostgresPlaceholder).
+// driver — "sqlite" or "postgres". Controls idempotent INSERT syntax:
+//
+//	Postgres: INSERT INTO ... VALUES (...) ON CONFLICT (id) DO NOTHING
+//	SQLite:   INSERT OR IGNORE INTO ... VALUES (...)
+//
+// Unlike Apply, does NOT check DB emptiness — caller controls when DDL is applied.
+func ApplyWithDDL(ctx context.Context, database ExecContext, ddl string, seed *Seed, phFn PlaceholderFunc, driver string) error {
+	if ddl != "" {
+		for _, stmt := range splitDDL(ddl) {
+			if stmt == "" {
+				continue
+			}
+			if _, err := database.ExecContext(ctx, stmt); err != nil {
+				return fmt.Errorf("apply DDL: %w", err)
+			}
+		}
+		slog.Info("DDL applied from parameter")
+	}
+
+	if err := insertGroups(ctx, database, seed.Groups, phFn, driver); err != nil {
 		return fmt.Errorf("insert groups: %w", err)
 	}
-	if err := insertDisciplines(ctx, database, seed.Disciplines); err != nil {
+	if err := insertDisciplines(ctx, database, seed.Disciplines, phFn, driver); err != nil {
 		return fmt.Errorf("insert disciplines: %w", err)
 	}
-	if err := insertTeachers(ctx, database, seed.Teachers); err != nil {
+	if err := insertTeachers(ctx, database, seed.Teachers, phFn, driver); err != nil {
 		return fmt.Errorf("insert teachers: %w", err)
 	}
-	if err := insertStudents(ctx, database, seed.Students); err != nil {
+	if err := insertStudents(ctx, database, seed.Students, phFn, driver); err != nil {
 		return fmt.Errorf("insert students: %w", err)
 	}
-	if err := insertSchedule(ctx, database, seed.Schedule); err != nil {
+	if err := insertSchedule(ctx, database, seed.Schedule, phFn, driver); err != nil {
 		return fmt.Errorf("insert schedule: %w", err)
 	}
-	if err := insertGrades(ctx, database, seed.Grades); err != nil {
+	if err := insertGrades(ctx, database, seed.Grades, phFn, driver); err != nil {
 		return fmt.Errorf("insert grades: %w", err)
 	}
 
@@ -199,19 +227,37 @@ func Apply(ctx context.Context, database ExecContext, seed *Seed) error {
 	return nil
 }
 
-func applySchema(ctx context.Context, database ExecContext) error {
-	if _, err := database.ExecContext(ctx, schemaDDL); err != nil {
-		return err
+// buildInsert builds an idempotent INSERT statement for the given driver and column list.
+//
+// Postgres: INSERT INTO tbl (c1, c2, ...) VALUES ($1, $2, ...) ON CONFLICT (id) DO NOTHING
+// SQLite:   INSERT OR IGNORE INTO tbl (c1, c2, ...) VALUES (?, ?, ...)
+func buildInsert(driver, table string, cols []string, phFn PlaceholderFunc) string {
+	var quoted []string
+	for _, c := range cols {
+		quoted = append(quoted, `"`+c+`"`)
 	}
-	slog.Info("schema applied from embedded DDL")
-	return nil
+	var phs []string
+	for i := 1; i <= len(cols); i++ {
+		phs = append(phs, phFn(i))
+	}
+	values := strings.Join(phs, ", ")
+
+	prefix := "INSERT"
+	suffix := ""
+	if driver == "sqlite" {
+		prefix = "INSERT OR IGNORE"
+	} else if driver == "postgres" {
+		suffix = " ON CONFLICT (\"id\") DO NOTHING"
+	}
+	return fmt.Sprintf("%s INTO %s (%s) VALUES (%s)%s",
+		prefix, `"`+table+`"`, strings.Join(quoted, ", "), values, suffix,
+	)
 }
 
-func insertGroups(ctx context.Context, database ExecContext, groups []Group) error {
+func insertGroups(ctx context.Context, db ExecContext, groups []Group, ph PlaceholderFunc, driver string) error {
+	query := buildInsert(driver, "groups", []string{"id", "name", "speciality"}, ph)
 	for _, g := range groups {
-		_, err := database.ExecContext(ctx,
-			"INSERT INTO groups (id, name, speciality) VALUES (?, ?, ?)",
-			g.ID, g.Name, g.Speciality)
+		_, err := db.ExecContext(ctx, query, g.ID, g.Name, g.Speciality)
 		if err != nil {
 			return fmt.Errorf("group %q: %w", g.ID, err)
 		}
@@ -219,11 +265,10 @@ func insertGroups(ctx context.Context, database ExecContext, groups []Group) err
 	return nil
 }
 
-func insertDisciplines(ctx context.Context, database ExecContext, disciplines []Discipline) error {
+func insertDisciplines(ctx context.Context, db ExecContext, disciplines []Discipline, ph PlaceholderFunc, driver string) error {
+	query := buildInsert(driver, "disciplines", []string{"id", "name", "description"}, ph)
 	for _, d := range disciplines {
-		_, err := database.ExecContext(ctx,
-			"INSERT INTO disciplines (id, name, description) VALUES (?, ?, ?)",
-			d.ID, d.Name, d.Description)
+		_, err := db.ExecContext(ctx, query, d.ID, d.Name, d.Description)
 		if err != nil {
 			return fmt.Errorf("discipline %q: %w", d.ID, err)
 		}
@@ -231,15 +276,14 @@ func insertDisciplines(ctx context.Context, database ExecContext, disciplines []
 	return nil
 }
 
-func insertTeachers(ctx context.Context, database ExecContext, teachers []Teacher) error {
+func insertTeachers(ctx context.Context, db ExecContext, teachers []Teacher, ph PlaceholderFunc, driver string) error {
+	query := buildInsert(driver, "teachers", []string{"id", "name", "disciplines_json"}, ph)
 	for _, t := range teachers {
 		discJSON, err := json.Marshal(t.Disciplines)
 		if err != nil {
 			return fmt.Errorf("marshal teacher %q disciplines: %w", t.ID, err)
 		}
-		_, err = database.ExecContext(ctx,
-			"INSERT INTO teachers (id, name, disciplines_json) VALUES (?, ?, ?)",
-			t.ID, t.Name, string(discJSON))
+		_, err = db.ExecContext(ctx, query, t.ID, t.Name, string(discJSON))
 		if err != nil {
 			return fmt.Errorf("teacher %q: %w", t.ID, err)
 		}
@@ -247,11 +291,10 @@ func insertTeachers(ctx context.Context, database ExecContext, teachers []Teache
 	return nil
 }
 
-func insertStudents(ctx context.Context, database ExecContext, students []Student) error {
+func insertStudents(ctx context.Context, db ExecContext, students []Student, ph PlaceholderFunc, driver string) error {
+	query := buildInsert(driver, "students", []string{"id", "name", "group_id", "course"}, ph)
 	for _, s := range students {
-		_, err := database.ExecContext(ctx,
-			"INSERT INTO students (id, name, group_id, course) VALUES (?, ?, ?, ?)",
-			s.ID, s.Name, s.GroupID, s.Course)
+		_, err := db.ExecContext(ctx, query, s.ID, s.Name, s.GroupID, s.Course)
 		if err != nil {
 			return fmt.Errorf("student %q: %w", s.ID, err)
 		}
@@ -259,15 +302,14 @@ func insertStudents(ctx context.Context, database ExecContext, students []Studen
 	return nil
 }
 
-func insertSchedule(ctx context.Context, database ExecContext, schedule []ScheduleEntry) error {
+func insertSchedule(ctx context.Context, db ExecContext, schedule []ScheduleEntry, ph PlaceholderFunc, driver string) error {
+	query := buildInsert(driver, "schedule", []string{"id", "day", "group_id", "lessons_json"}, ph)
 	for _, e := range schedule {
 		lessonsJSON, err := json.Marshal(e.Lessons)
 		if err != nil {
 			return fmt.Errorf("marshal schedule %q lessons: %w", e.ID, err)
 		}
-		_, err = database.ExecContext(ctx,
-			"INSERT INTO schedule (id, day, group_id, lessons_json) VALUES (?, ?, ?, ?)",
-			e.ID, e.Day, e.GroupID, string(lessonsJSON))
+		_, err = db.ExecContext(ctx, query, e.ID, e.Day, e.GroupID, string(lessonsJSON))
 		if err != nil {
 			return fmt.Errorf("schedule %q: %w", e.ID, err)
 		}
@@ -275,14 +317,41 @@ func insertSchedule(ctx context.Context, database ExecContext, schedule []Schedu
 	return nil
 }
 
-func insertGrades(ctx context.Context, database ExecContext, grades []Grade) error {
+func insertGrades(ctx context.Context, db ExecContext, grades []Grade, ph PlaceholderFunc, driver string) error {
+	query := buildInsert(driver, "grades", []string{"id", "student_id", "discipline_id", "grade", "date"}, ph)
 	for _, g := range grades {
-		_, err := database.ExecContext(ctx,
-			"INSERT INTO grades (id, student_id, discipline_id, grade, date) VALUES (?, ?, ?, ?, ?)",
-			g.ID, g.StudentID, g.DisciplineID, g.Grade, g.Date)
+		_, err := db.ExecContext(ctx, query, g.ID, g.StudentID, g.DisciplineID, g.Grade, g.Date)
 		if err != nil {
 			return fmt.Errorf("grade %q: %w", g.ID, err)
 		}
 	}
 	return nil
+}
+
+// splitDDL splits a multi-statement DDL string into individual SQL statements.
+// Statements are separated by ';' — empty strings are skipped.
+//
+// LIMITATION: naive split — a ';' inside a SQL string literal or identifier
+// would cause incorrect split. This is safe today because ALL DDL passed to
+// this function is generated (GenerateDDL or embedded schemaDDL), never user-
+// supplied, and none of these produce ';' outside statement terminators.
+func splitDDL(ddl string) []string {
+	var out []string
+	cur := ""
+	for _, r := range ddl {
+		if r == ';' {
+			trimmed := strings.TrimSpace(cur)
+			if trimmed != "" {
+				out = append(out, trimmed)
+			}
+			cur = ""
+			continue
+		}
+		cur += string(r)
+	}
+	trimmed := strings.TrimSpace(cur)
+	if trimmed != "" {
+		out = append(out, trimmed)
+	}
+	return out
 }

@@ -65,6 +65,24 @@ go run ./cmd/seed-cli/ --seed-path path/to/seed.json
 ./scripts/dev.sh restart       # Перезапустить
 ```
 
+**Сценарии БД (фабрика тестовых БД для data-service)** — под-команда `db`:
+
+```bash
+./scripts/dev.sh db list                       # список сценариев + метаданные
+./scripts/dev.sh db materialize <name> [--force]  # создать/пересоздать БД из сценария
+./scripts/dev.sh db serve <name>               # только data-service на сценарии (foreground)
+./scripts/dev.sh db test [all|<name>]          # прогнать Go-тесты на сценарии
+./scripts/dev.sh db drop <name>                # удалить материализованную БД
+./scripts/dev.sh db help                       # подробная справка
+```
+
+**Что это даёт**:
+- Готовая фабрика БД из `config.json` + `seed.json` (cross-driver: SQLite и PG).
+- 4 встроенных сценария: `sqlite-testseed`, `postgres-testseed`, `shop` (сторонняя БД), `big-testseed` (4680 entities — для load-tests).
+- Тесты на каждом сценарии: `big_test.go` (нагрузка), `edge_cases_test.go` (malformed inputs), `concurrency_test.go` (heavy load), `custom_queries_test.go` (FK-lookups), `fuzz_test.go` (fuzzing), `benchmark_test.go` (8 бенчмарков).
+- Подробнее: `data-service/README.md` § "Сценарии — фабрика тестовых БД" + § "Тестирование".
+
+
 Логи: `.data/logs/{rag,mcp,api,web}.log`. PID-файлы: `.data/pids/*.pid`. `.env` грузится автоматически.
 
 **Порядок ожидания**: `rag → mcp → api → web` (каждый ждёт `/health` предыдущего, таймаут 60с).
@@ -537,6 +555,9 @@ uv run agent-rag-ingest clear-generated                  # Удалить сге
 - **Сидинг через единый pipeline (выполнен)**: `agent-seedgen` (Python+faker) → `specs/fixtures/seed.json` → `data-service --seed` (Go) → SQLite/PostgreSQL. CLI `agent-rag-ingest` и `agent-rag-docgen` живут в `rag/fixtures/` и ходят к сервисам по HTTP-контракту. Старый Python-пакет `fixtures/` удалён.
 - **Contract sync: Go → JSON Schema → Pydantic (выполнен)**: drift-тесты в `agent-tutor-sdk/tests/unit/test_contracts_drift.py` ловят расхождения между Go-моделями, JSON Schema и Pydantic. seedgen валидирует выход через `StorageSeed` из SDK (`agent_tutor_sdk/seed_models.py`).
 - **Web-frontend сам ходит к data-service (выполнен)**: `demo/api` освобождён от data passthrough. `demo/web` делает reverse-proxy напрямую к `data-service:8084` (`/api/data/*`) и `rag:8082` (`/api/rag/documents`). Агент-эндпойнты (`/api/chat`, `/api/backlog`, `/api/session/history`) идут через `demo/api`.
+- **Сценарии БД (выполнен)**: data-service получил `--materialize` CLI-флаг + `seedgen.GenerateDDL` для генерации DDL из config.json + фабрику фабрику сценариев. `testdata/scenarios/{sqlite-testseed,postgres-testseed,shop,big-testseed}/` — самодостаточные пары `config.json + seed.json + data.db`. Cross-driver (SQLite + PG) из одного кода через `PlaceholderFunc`.
+- **Масштабные Go-тесты (выполнен)**: сценарии покрыты реальной нагрузкой — `big_test.go` (4680 entities, latency checks), `edge_cases_test.go` (30+ subtest'ов malformed inputs), `custom_queries_test.go` (все 6 FK-lookups), `concurrency_test.go` (file-based WAL heavy load), `fuzz_test.go` (FuzzEndpoints/FuzzQueryParams), `benchmark_test.go` (8 бенчмарков). Итого **178+ тестов** в data-service пакетах.
+- **`scripts/dev.sh db` subcommand (выполнен)**: удобная обёртка над сценариями — `db list`, `db materialize`, `db serve`, `db test`, `db drop` — для тех, кто не хочет помнить CONFIG_SCHEMA и спец-флаги. Полная справка: `./scripts/dev.sh db help`.
 
 Полный план — в `doc/NEW_ROADMAP.md`.
 
@@ -601,6 +622,28 @@ SQL `json_extract(...)`, `json_each(...)` — только SQLite.
 Для PostgreSQL нужно переписывать на `jsonb_array_elements(...::jsonb)` и `->>`.
 Проверяй оба конфига при изменении `custom_queries`.
 
+Проявляется в `group_schedule` в сценариях testseed: SQLite отдаёт
+`lessons_json` (JSON-строка), PG — раскрытый массив `lessons`. Endpoints
+возвращают разный формат в зависимости от драйвера. Покрыто тестом
+`TestScenario_BigTestseed_OpenAPISpecValid` (SQLite) и кросс-driver проверками
+в `data-service/internal/server/` (помечены как `Skip` без PG). TODO для
+унификации формата.
+
+### 7. In-memory SQLite плохо для concurrency
+
+При тестах на сценариях используется `?mode=:memory:` — это даёт
+SQLITE_BUSY при 100+ параллельных запросах (до 89% 5xx). Задокументировано
+в `internal/server/edge_cases_test.go` (`TestEdgeCases_DuplicateInsertions/100_concurrent_same_no_panic`).
+
+**Для production-нагрузки используй**:
+- `data-service` с file-based SQLite c WAL (`db_path=data.db` в конфиге),
+  как в `testdata/scenarios/sqlite-testseed/data.db`
+- или PostgreSQL через `DATABASE_URL` (docker compose up -d db)
+
+Production-тесты на нагрузку: см. `internal/server/concurrency_test.go`
+(`TestConcurrency_FileBased_HeavyLoad` — 500 reqs/20 goroutines на file-based
+SQLite с WAL, проверяет ≤10% 5xx).
+
 Работает:
 - Data-service (Go, chi, modernc/sqlite) — единственный сервис со знанием схемы БД
 - MCP-сервер (FastMCP, HTTP-транспорт, `/health` endpoint) — инструменты через HTTP к data-service
@@ -609,9 +652,10 @@ SQL `json_extract(...)`, `json_each(...)` — только SQLite.
 - Веб-интерфейс (FastAPI, reverse-proxy, SSE-прокси)
 - База: SQLite (по умолчанию) или PostgreSQL (через `DATABASE_URL`)
 - `agent-tutor-sdk/` — абстракция БД, моделей и RAG-клиента
-- `scripts/dev.sh` — нативный запуск всех сервисов
+- Сценарии БД в `data-service/testdata/scenarios/`: 4 встроенных (sqlite-testseed, postgres-testseed, shop, big-testseed). Управление через `./scripts/dev.sh db {list,materialize,serve,test,drop}`. Подробная справка: `./scripts/dev.sh db help`.
 - Docker: 5 образов, docker-compose, Caddy, healthchecks
-- 109 тестов, 84% покрытие, ruff чисто
+- 178+ Go-тестов в data-service (`./internal/...`), 109+ Python-тестов в остальных сервисах, 84% покрытие, ruff чисто
+- Масштабное покрытие в data-service: `big_test.go` (4680 entities), `edge_cases_test.go` (malformed inputs), `concurrency_test.go` (heavy load на WAL), `custom_queries_test.go` (все FK-lookups), `benchmark_test.go` (8 бенчмарков), `fuzz_test.go`
 - OpenAPI/Swagger у всех HTTP-сервисов
 - Тесты разнесены по пакетам сервисов: `uv run pytest rag/tests/`, `uv run go test ./mcp-gateway/...`
 - Dockerfile'ы копируют в runtime только нужные исходники (минимальный размер образа)

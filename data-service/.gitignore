@@ -1,0 +1,3 @@
+testdata/scenarios/**/data.db
+testdata/scenarios/**/data.db-wal
+testdata/scenarios/**/data.db-shm

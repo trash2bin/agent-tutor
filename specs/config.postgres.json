@@ -2,7 +2,7 @@
   "version": 1,
   "data_source": {
     "driver": "postgres",
-    "dsn": "postgresql://tutor:tutor@127.0.0.1:5432/agent_tutor",
+    "dsn": "${DATABASE_URL:-postgresql://tutor:tutor@127.0.0.1:5432/agent_tutor?sslmode=disable}",
     "pool_size": 10,
     "read_only": true
   },

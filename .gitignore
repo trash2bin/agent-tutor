@@ -14,10 +14,14 @@ data-service/server
 data-service/seed-cli
 mcp-gateway/mcp-gateway
 mcp-gateway/main
+/server
+/seed-cli
 *.exe
 
 # Local config / dev artifacts
 .claude/
+.pi/fix-*
+.pi/scout-*
 fixtures.json
 TECHNICAL_DOC.md
 .agent_memory.json

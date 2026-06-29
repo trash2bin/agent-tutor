@@ -89,12 +89,11 @@ func Generate(schema *datasource.Schema, ds config.DataSourceConfig, skipPrefixe
 		entity := tableToEntity(tbl)
 		entities = append(entities, entity)
 
-		// get_by_id
-		if canFindByID(tbl.PrimaryKey) {
-			pkCol := tbl.PrimaryKey[0]
+		// get_by_id (по entity.IDColumn — реальному PK или fallback'у)
+		if entity.IDColumn != "" {
 			endpoints = append(endpoints, config.Endpoint{
 				Method: config.MethodGET,
-				Path:   fmt.Sprintf("/%s/{%s}", entity.Name, pkCol),
+				Path:   fmt.Sprintf("/%s/{%s}", entity.Name, entity.IDColumn),
 				Op:     config.OpGetByID,
 				Entity: entity.Name,
 			})
@@ -112,7 +111,9 @@ func Generate(schema *datasource.Schema, ds config.DataSourceConfig, skipPrefixe
 			})
 		}
 
-		// stats
+		// stats — Counter.Name тоже должен пройти regex ^[a-z][a-z0-9_]*$
+		// (JSON Schema строже чем Entity.Name? нет — оба проверяются).
+		// Используем "короткое" имя (без schema prefix).
 		counters = append(counters, config.Counter{
 			Name:   entity.Name,
 			Entity: entity.Name,
@@ -139,30 +140,49 @@ func Generate(schema *datasource.Schema, ds config.DataSourceConfig, skipPrefixe
 }
 
 // tableToEntity конвертирует datasource.Table → config.Entity.
+//
+// Name в config.Entity должен проходить regex ^[a-z][a-z0-9_]*$ (JSON Schema),
+// поэтому для многосхемных БД (Postgres: "public.customers") используем
+// только последний сегмент (без префикса схемы). Table в config.Entity
+// хранит полное имя — QueryBuilder использует его для SQL.
+// Если у таблицы нет PRIMARY KEY (миграционные таблицы реальной prod-БД),
+// id_column берётся как первая колонка — иначе JSON-Schema реджектит пустую.
 func tableToEntity(tbl datasource.Table) config.Entity {
+	shortName := tbl.Name
+	if idx := strings.LastIndex(shortName, "."); idx >= 0 {
+		shortName = shortName[idx+1:]
+	}
+
 	fields := make([]config.EntityField, 0, len(tbl.Columns))
 	pkSet := make(map[string]bool, len(tbl.PrimaryKey))
 	for _, pk := range tbl.PrimaryKey {
 		pkSet[pk] = true
 	}
 
+	colNames := make([]string, 0, len(tbl.Columns))
 	for _, col := range tbl.Columns {
 		nullable := col.Nullable
 		isPK := pkSet[col.Name]
 		fields = append(fields, config.EntityField{
-			Name:       col.Name,
-			Column:     col.Name,
-			Type:       config.FieldType(col.Type),
-			Nullable:   &nullable,
-			PrimaryKey: &isPK,
+			Name:        col.Name,
+			Column:      col.Name,
+			Type:        config.FieldType(col.Type),
+			Nullable:    &nullable,
+			PrimaryKey:  &isPK,
 			Description: col.Description,
 		})
+		colNames = append(colNames, col.Name)
+	}
+
+	idCol := firstPK(tbl.PrimaryKey)
+	if idCol == "" && len(colNames) > 0 {
+		idCol = colNames[0]
 	}
 
 	return config.Entity{
-		Name:     tbl.Name,
+		Name:     shortName,
 		Table:    tbl.Name,
-		IDColumn: firstPK(tbl.PrimaryKey),
+		IDColumn: idCol,
 		Fields:   fields,
 	}
 }
