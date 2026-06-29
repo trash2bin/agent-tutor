@@ -1,415 +1,760 @@
-openapi: 3.1.0
-info:
-  title: RAG Service
-  description: HTTP API for RAG pipeline (indexing and semantic search)
-  version: 0.1.0
-paths:
-  /health:
-    get:
-      summary: Проверка состояния сервиса
-      description: Проверяет доступность SQLite, ChromaDB и загрузку embedding-модели.
-      operationId: health_health_get
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HealthResponse'
-  /documents/list:
-    post:
-      summary: Список документов
-      description: Возвращает список документов в индексе с фильтрацией по дисциплине.
-      operationId: list_documents_documents_list_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ListDocumentsRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListDocumentsResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /documents/import:
-    post:
-      summary: Импорт документа
-      description: Загружает файл в RAG-индекс, разбивает на чанки и индексирует векторы.
-      operationId: import_document_documents_import_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ImportDocumentRequest'
-        required: true
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ImportDocumentResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /documents/delete:
-    post:
-      summary: Удаление документа
-      description: Удаляет документ и его векторы из индекса по пути или ID. Идемпотентно.
-      operationId: delete_document_documents_delete_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DeleteDocumentRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DeleteDocumentResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /search:
-    post:
-      summary: Семантический поиск
-      description: Ищет наиболее релевантные фрагменты документов по текстовому запросу.
-      operationId: search_search_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SearchRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SearchResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /context:
-    post:
-      summary: Сборка контекста
-      description: Формирует итоговую строку контекста для передачи в LLM.
-      operationId: context_context_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ContextRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ContextResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-components:
-  schemas:
-    ContextRequest:
-      properties:
-        query:
-          type: string
-          minLength: 1
-          title: Query
-          description: Вопрос пользователя
-        discipline_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Discipline Id
-          description: ID дисциплины для фильтрации
-        limit:
-          type: integer
-          maximum: 20.0
-          minimum: 1.0
-          title: Limit
-          description: Фрагментов в контексте (1–20)
-          default: 5
-      type: object
-      required:
-      - query
-      title: ContextRequest
-      description: Запрос готового RAG-контекста для LLM.
-    ContextResponse:
-      properties:
-        context:
-          type: string
-          title: Context
-          description: Объединённый текст релевантных фрагментов
-        sources:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Sources
-          description: Список источников, использованных в контексте
-      type: object
-      required:
-      - context
-      - sources
-      title: ContextResponse
-      description: Сформированный контекст для LLM.
-    DeleteDocumentRequest:
-      properties:
-        path:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Path
-          description: Путь к файлу документа
-        document_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Document Id
-          description: ID документа
-      type: object
-      title: DeleteDocumentRequest
-      description: Запрос удаления документа.
-    DeleteDocumentResponse:
-      properties:
-        deleted:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Deleted
-          description: ID удалённого документа
-        title:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Title
-          description: Название удалённого документа
-        message:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Message
-          description: Сообщение о результате (например, если документ не найден)
-      type: object
-      title: DeleteDocumentResponse
-      description: Результат удаления документа.
-    HTTPValidationError:
-      properties:
-        detail:
-          items:
-            $ref: '#/components/schemas/ValidationError'
-          type: array
-          title: Detail
-      type: object
-      title: HTTPValidationError
-    HealthResponse:
-      properties:
-        status:
-          type: string
-          enum:
-          - ok
-          - degraded
-          title: Status
-          default: ok
-        database:
-          additionalProperties: true
-          type: object
-          title: Database
-          description: Статус SQLite-доступа
-        chroma:
-          additionalProperties: true
-          type: object
-          title: Chroma
-          description: Статус ChromaDB-индекса
-        embedding:
-          additionalProperties: true
-          type: object
-          title: Embedding
-          description: Статус embedding-модели
-      type: object
-      title: HealthResponse
-      description: Состояние RAG-сервиса и его зависимостей.
-    ImportDocumentRequest:
-      properties:
-        path:
-          type: string
-          minLength: 1
-          title: Path
-          description: Путь к файлу (PDF, DOCX, TXT, MD, HTML)
-        discipline_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Discipline Id
-          description: ID дисциплины для привязки
-        discipline_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Discipline Name
-          description: Название дисциплины (сохраняется при импорте)
-        title:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Title
-          description: Человекочитаемое название
-      type: object
-      required:
-      - path
-      title: ImportDocumentRequest
-      description: Запрос импорта документа.
-    ImportDocumentResponse:
-      properties:
-        document:
-          additionalProperties: true
-          type: object
-          title: Document
-          description: Метаданные импортированного документа
-        chunks_count:
-          type: integer
-          title: Chunks Count
-          description: Количество созданных чанков
-      type: object
-      required:
-      - document
-      - chunks_count
-      title: ImportDocumentResponse
-      description: Результат импорта документа.
-    ListDocumentsRequest:
-      properties:
-        discipline_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Discipline Id
-          description: ID дисциплины для фильтрации
-        limit:
-          anyOf:
-          - type: integer
-            maximum: 1000.0
-            minimum: 1.0
-          - type: 'null'
-          title: Limit
-          description: Максимум документов (1–1000)
-      type: object
-      title: ListDocumentsRequest
-      description: Запрос списка документов.
-    ListDocumentsResponse:
-      properties:
-        documents:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Documents
-          description: Список метаданных документов
-        count:
-          type: integer
-          title: Count
-          description: Общее количество найденных документов
-      type: object
-      required:
-      - documents
-      - count
-      title: ListDocumentsResponse
-      description: Список документов в индексе.
-    SearchRequest:
-      properties:
-        query:
-          type: string
-          minLength: 1
-          title: Query
-          description: Поисковый запрос
-        discipline_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Discipline Id
-          description: ID дисциплины для фильтрации
-        limit:
-          type: integer
-          maximum: 20.0
-          minimum: 1.0
-          title: Limit
-          description: Количество результатов (1–20)
-          default: 5
-      type: object
-      required:
-      - query
-      title: SearchRequest
-      description: Запрос семантического поиска.
-    SearchResponse:
-      properties:
-        results:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Results
-          description: Список найденных фрагментов
-        count:
-          type: integer
-          title: Count
-          description: Общее количество результатов
-      type: object
-      required:
-      - results
-      - count
-      title: SearchResponse
-      description: Результаты семантического поиска.
-    ValidationError:
-      properties:
-        loc:
-          items:
-            anyOf:
-            - type: string
-            - type: integer
-          type: array
-          title: Location
-        msg:
-          type: string
-          title: Message
-        type:
-          type: string
-          title: Error Type
-        input:
-          title: Input
-        ctx:
-          type: object
-          title: Context
-      type: object
-      required:
-      - loc
-      - msg
-      - type
-      title: ValidationError
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "RAG Service",
+    "description": "HTTP API for RAG pipeline (indexing and semantic search)",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Проверка состояния сервиса",
+        "description": "Проверяет доступность SQLite, ChromaDB и загрузку embedding-модели.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/list": {
+      "post": {
+        "summary": "Список документов",
+        "description": "Возвращает список документов в индексе с фильтрацией по дисциплине.",
+        "operationId": "list_documents_documents_list_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListDocumentsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDocumentsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/import": {
+      "post": {
+        "summary": "Импорт документа",
+        "description": "Загружает файл в RAG-индекс, разбивает на чанки и индексирует векторы.",
+        "operationId": "import_document_documents_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDocumentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/delete": {
+      "post": {
+        "summary": "Удаление документа",
+        "description": "Удаляет документ и его векторы из индекса по пути или ID. Идемпотентно.",
+        "operationId": "delete_document_documents_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteDocumentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search": {
+      "post": {
+        "summary": "Семантический поиск",
+        "description": "Ищет наиболее релевантные фрагменты документов по текстовому запросу.",
+        "operationId": "search_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context": {
+      "post": {
+        "summary": "Сборка контекста",
+        "description": "Формирует итоговую строку контекста для передачи в LLM.",
+        "operationId": "context_context_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ContextRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Query",
+            "description": "Вопрос пользователя"
+          },
+          "discipline_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discipline Id",
+            "description": "ID дисциплины для фильтрации"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "description": "Фрагментов в контексте (1–20)",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "ContextRequest",
+        "description": "Запрос готового RAG-контекста для LLM."
+      },
+      "ContextResponse": {
+        "properties": {
+          "context": {
+            "type": "string",
+            "title": "Context",
+            "description": "Объединённый текст релевантных фрагментов"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/RagSearchResult"
+            },
+            "type": "array",
+            "title": "Sources",
+            "description": "Список источников, использованных в контексте"
+          }
+        },
+        "type": "object",
+        "required": [
+          "context",
+          "sources"
+        ],
+        "title": "ContextResponse",
+        "description": "Сформированный контекст для LLM."
+      },
+      "DeleteDocumentRequest": {
+        "properties": {
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path",
+            "description": "Путь к файлу документа"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id",
+            "description": "ID документа"
+          }
+        },
+        "type": "object",
+        "title": "DeleteDocumentRequest",
+        "description": "Запрос удаления документа."
+      },
+      "DeleteDocumentResponse": {
+        "properties": {
+          "deleted": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted",
+            "description": "ID удалённого документа"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Название удалённого документа"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Сообщение о результате (например, если документ не найден)"
+          }
+        },
+        "type": "object",
+        "title": "DeleteDocumentResponse",
+        "description": "Результат удаления документа."
+      },
+      "Document": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "source_path": {
+            "type": "string",
+            "title": "Source Path"
+          },
+          "mime_type": {
+            "type": "string",
+            "title": "Mime Type"
+          },
+          "discipline_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discipline Id"
+          },
+          "discipline_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discipline Name"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "source_path",
+          "mime_type",
+          "created_at"
+        ],
+        "title": "Document",
+        "description": "Документ, загруженный в RAG-индекс."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded"
+            ],
+            "title": "Status",
+            "default": "ok"
+          },
+          "database": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Database",
+            "description": "Статус SQLite-доступа"
+          },
+          "chroma": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Chroma",
+            "description": "Статус ChromaDB-индекса"
+          },
+          "embedding": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Embedding",
+            "description": "Статус embedding-модели"
+          }
+        },
+        "type": "object",
+        "title": "HealthResponse",
+        "description": "Состояние RAG-сервиса и его зависимостей."
+      },
+      "ImportDocumentRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Path",
+            "description": "Путь к файлу (PDF, DOCX, TXT, MD, HTML)"
+          },
+          "discipline_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discipline Id",
+            "description": "ID дисциплины для привязки"
+          },
+          "discipline_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discipline Name",
+            "description": "Название дисциплины (сохраняется при импорте)"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Человекочитаемое название"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "ImportDocumentRequest",
+        "description": "Запрос импорта документа."
+      },
+      "ImportDocumentResponse": {
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/Document",
+            "description": "Метаданные импортированного документа"
+          },
+          "chunks_count": {
+            "type": "integer",
+            "title": "Chunks Count",
+            "description": "Количество созданных чанков"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document",
+          "chunks_count"
+        ],
+        "title": "ImportDocumentResponse",
+        "description": "Результат импорта документа."
+      },
+      "ListDocumentsRequest": {
+        "properties": {
+          "discipline_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discipline Id",
+            "description": "ID дисциплины для фильтрации"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit",
+            "description": "Максимум документов (1–1000)"
+          }
+        },
+        "type": "object",
+        "title": "ListDocumentsRequest",
+        "description": "Запрос списка документов."
+      },
+      "ListDocumentsResponse": {
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array",
+            "title": "Documents",
+            "description": "Список документов в индексе"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Общее количество найденных документов"
+          }
+        },
+        "type": "object",
+        "required": [
+          "documents",
+          "count"
+        ],
+        "title": "ListDocumentsResponse",
+        "description": "Список документов в индексе."
+      },
+      "RagSearchResult": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "document_title": {
+            "type": "string",
+            "title": "Document Title"
+          },
+          "source_path": {
+            "type": "string",
+            "title": "Source Path"
+          },
+          "discipline_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discipline Id"
+          },
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "chunk_index": {
+            "type": "integer",
+            "title": "Chunk Index"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "document_title",
+          "source_path",
+          "chunk_id",
+          "chunk_index",
+          "score",
+          "content"
+        ],
+        "title": "RagSearchResult",
+        "description": "Результат семантического поиска по документам."
+      },
+      "SearchRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Query",
+            "description": "Поисковый запрос"
+          },
+          "discipline_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discipline Id",
+            "description": "ID дисциплины для фильтрации"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "description": "Количество результатов (1–20)",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "SearchRequest",
+        "description": "Запрос семантического поиска."
+      },
+      "SearchResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/RagSearchResult"
+            },
+            "type": "array",
+            "title": "Results",
+            "description": "Список найденных фрагментов"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Общее количество результатов"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results",
+          "count"
+        ],
+        "title": "SearchResponse",
+        "description": "Результаты семантического поиска."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

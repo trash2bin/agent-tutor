@@ -9,13 +9,19 @@ dependencies = [
     "starlette>=0.50.0",
     "pydantic>=2.0.0",
     "httpx>=0.28.0",
-    "psycopg2-binary>=2.9.0",
     "sentence-transformers>=5.5.1",
     "chromadb>=1.5.9",
     "docling>=2.0.0",
     "chonkie[semantic]>=1.0.0",
+]
+
+[project.optional-dependencies]
+cli = [
     "faker>=20.0.0",
     "python-docx>=1.2.0",
+]
+pg = [
+    "psycopg2-binary>=2.9.0",
 ]
 
 [project.scripts]

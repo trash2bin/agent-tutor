@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/agent-tutor/data-service/internal/config"
+	"github.com/agent-tutor/agent-tutor-go/config"
 )
 
 // Generate создаёт OpenAPI 3.1.0 спецификацию из конфига data-service.

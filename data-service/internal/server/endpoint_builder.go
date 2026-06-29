@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/agent-tutor/data-service/internal/config"
+	"github.com/agent-tutor/agent-tutor-go/config"
 	"github.com/agent-tutor/data-service/internal/configgen"
 	"github.com/agent-tutor/data-service/internal/datasource"
 	"github.com/agent-tutor/data-service/internal/runtime"
@@ -50,6 +50,9 @@ func NewRouterFromConfig(cfg *config.Config, db runtime.AdapterSubset, adapter r
 	r.Get("/docs", swaggerHandler)
 	hasAdmin := introspectAdapter != nil
 	r.Get("/openapi.json", NewOpenAPIHandler(cfg, hasAdmin))
+
+	// MCP-манифест — единственный source of truth для mcp-gateway
+	r.Get("/mcp/manifest", handlers.MCPManifestHandler(cfg))
 
 	// /admin/* — админские эндпоинты (если адаптер передан)
 	if introspectAdapter != nil {

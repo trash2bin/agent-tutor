@@ -89,15 +89,12 @@ services:
   mcp-gateway:
     image: agent-tutor-mcp-gateway:latest
     build:
-      context: ./mcp-gateway
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: mcp-gateway/Dockerfile
     ports:
       - "127.0.0.1:8083:8083"
     environment:
-      - DS_CONFIG=/app/config.json
       - DATA_SERVICE_URL=http://data-service:8084
-    volumes:
-      - ./specs/config.example.json:/app/config.json:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8083/health"]
       <<: *hc-curl
@@ -108,32 +105,6 @@ services:
       - agent-tutor-net
     <<: *restart
 
-  # MCP (Python legacy) — fallback, будет удалён после стабилизации mcp-gateway
-  mcp-legacy:
-    image: agent-tutor-mcp:latest
-    profiles:
-      - legacy
-    build:
-      context: .
-      dockerfile: mcp_server/Dockerfile
-    ports:
-      - "127.0.0.1:8085:8083"
-    volumes:
-      - app_data:/data/app:ro
-    environment:
-      - DATA_SERVICE_URL=http://data-service:8084
-      - RAG_SERVICE_URL=http://rag:8082
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8083/health"]
-      <<: *hc-curl
-    depends_on:
-      data-service:
-        condition: service_healthy
-      rag:
-        condition: service_healthy
-    networks:
-      - agent-tutor-net
-    <<: *restart
 
   api:
     image: agent-tutor-api:latest
@@ -145,7 +116,7 @@ services:
     volumes:
       - app_data:/data/app
     environment:
-      - MCP_SERVICE_URL=http://mcp:8083/mcp
+      - MCP_SERVICE_URL=http://mcp-gateway:8083/mcp
       - DB_PATH=/data/app/university.db
       - DEMO_SESSION_DB_PATH=/data/app/demo_sessions.sqlite
       - BACKLOG_DIR=/data/app/backlog

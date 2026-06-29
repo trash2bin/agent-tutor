@@ -1,14 +1,17 @@
 """HTTP DTO для RAG-сервиса.
 
-Разделены от внутренних моделей `rag.models`, чтобы HTTP-контракт
-не зависел от внутренних TypedDict'ов пайплайна.
+Контрактные Pydantic-модели — единственный source of truth для HTTP-контракта
+между RAG-сервисом и его потребителями.
+Внутренние модели (TypedDict'ы пайплайна) живут в rag._types.
 """
 
 from __future__ import annotations
 
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from agent_tutor_sdk.rag.models import Document, RagSearchResult
 
 
 # === Запросы ===
@@ -18,7 +21,7 @@ class SearchRequest(BaseModel):
     """Запрос семантического поиска."""
 
     query: str = Field(..., min_length=1, description="Поисковый запрос")
-    discipline_id: Optional[str] = Field(
+    discipline_id: str | None = Field(
         default=None, description="ID дисциплины для фильтрации"
     )
     limit: int = Field(
@@ -30,7 +33,7 @@ class ContextRequest(BaseModel):
     """Запрос готового RAG-контекста для LLM."""
 
     query: str = Field(..., min_length=1, description="Вопрос пользователя")
-    discipline_id: Optional[str] = Field(
+    discipline_id: str | None = Field(
         default=None, description="ID дисциплины для фильтрации"
     )
     limit: int = Field(
@@ -41,10 +44,10 @@ class ContextRequest(BaseModel):
 class ListDocumentsRequest(BaseModel):
     """Запрос списка документов."""
 
-    discipline_id: Optional[str] = Field(
+    discipline_id: str | None = Field(
         default=None, description="ID дисциплины для фильтрации"
     )
-    limit: Optional[int] = Field(
+    limit: int | None = Field(
         default=None, ge=1, le=1000, description="Максимум документов (1–1000)"
     )
 
@@ -55,20 +58,20 @@ class ImportDocumentRequest(BaseModel):
     path: str = Field(
         ..., min_length=1, description="Путь к файлу (PDF, DOCX, TXT, MD, HTML)"
     )
-    discipline_id: Optional[str] = Field(
+    discipline_id: str | None = Field(
         default=None, description="ID дисциплины для привязки"
     )
-    discipline_name: Optional[str] = Field(
+    discipline_name: str | None = Field(
         default=None, description="Название дисциплины (сохраняется при импорте)"
     )
-    title: Optional[str] = Field(default=None, description="Человекочитаемое название")
+    title: str | None = Field(default=None, description="Человекочитаемое название")
 
 
 class DeleteDocumentRequest(BaseModel):
     """Запрос удаления документа."""
 
-    path: Optional[str] = Field(default=None, description="Путь к файлу документа")
-    document_id: Optional[str] = Field(default=None, description="ID документа")
+    path: str | None = Field(default=None, description="Путь к файлу документа")
+    document_id: str | None = Field(default=None, description="ID документа")
 
 
 # === Ответы ===
@@ -86,25 +89,25 @@ class HealthResponse(BaseModel):
 class ListDocumentsResponse(BaseModel):
     """Список документов в индексе."""
 
-    documents: List[dict] = Field(..., description="Список метаданных документов")
+    documents: list[Document] = Field(..., description="Список документов в индексе")
     count: int = Field(..., description="Общее количество найденных документов")
 
 
 class ImportDocumentResponse(BaseModel):
     """Результат импорта документа."""
 
-    document: dict = Field(..., description="Метаданные импортированного документа")
+    document: Document = Field(..., description="Метаданные импортированного документа")
     chunks_count: int = Field(..., description="Количество созданных чанков")
 
 
 class DeleteDocumentResponse(BaseModel):
     """Результат удаления документа."""
 
-    deleted: Optional[str] = Field(default=None, description="ID удалённого документа")
-    title: Optional[str] = Field(
+    deleted: str | None = Field(default=None, description="ID удалённого документа")
+    title: str | None = Field(
         default=None, description="Название удалённого документа"
     )
-    message: Optional[str] = Field(
+    message: str | None = Field(
         default=None,
         description="Сообщение о результате (например, если документ не найден)",
     )
@@ -113,7 +116,7 @@ class DeleteDocumentResponse(BaseModel):
 class SearchResponse(BaseModel):
     """Результаты семантического поиска."""
 
-    results: List[dict] = Field(..., description="Список найденных фрагментов")
+    results: list[RagSearchResult] = Field(..., description="Список найденных фрагментов")
     count: int = Field(..., description="Общее количество результатов")
 
 
@@ -121,7 +124,7 @@ class ContextResponse(BaseModel):
     """Сформированный контекст для LLM."""
 
     context: str = Field(..., description="Объединённый текст релевантных фрагментов")
-    sources: List[dict] = Field(
+    sources: list[RagSearchResult] = Field(
         ..., description="Список источников, использованных в контексте"
     )
 
@@ -130,4 +133,4 @@ class ErrorResponse(BaseModel):
     """Унифицированный ответ об ошибке."""
 
     error: str
-    detail: Optional[str] = None
+    detail: str | None = None

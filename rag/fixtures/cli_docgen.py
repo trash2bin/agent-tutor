@@ -3,16 +3,16 @@ import argparse
 import sys
 
 from agent_tutor_sdk.data_client import DataServiceClientSync
+from agent_tutor_sdk.rag.client import RagClientSync, RAG_SERVICE_URL
 from rag.fixtures.document_generator import MaterialDocumentGenerator
-from rag.fixtures.rag_tools import RagTools
 
 
 def cmd_generate(args):
     if args.model:
         os.environ["DOCGEN_MODEL"] = args.model
 
-    rag = RagTools()
-    generator = MaterialDocumentGenerator(rag)
+    rag = RagClientSync(RAG_SERVICE_URL)
+    generator = MaterialDocumentGenerator(rag_client=rag)
 
     try:
         materials = generator.ensure_materials(
@@ -36,9 +36,9 @@ def cmd_generate_all(args):
         os.environ["DOCGEN_MODEL"] = args.model
 
     client = DataServiceClientSync()
-    rag = RagTools()
-    generator = MaterialDocumentGenerator(rag)
-    disciplines = client.get_all_disciplines()
+    rag = RagClientSync(RAG_SERVICE_URL)
+    generator = MaterialDocumentGenerator(rag_client=rag)
+    disciplines = client.list_all("disciplines")
     created_total = 0
 
     try:

@@ -1,212 +1,449 @@
-openapi: 3.1.0
-info:
-  title: Agent-Tutor Core API
-  description: Backend API for the Agent-Tutor system. Handles orchestration, session
-    history, and tool integration.
-  version: 0.1.0
-paths:
-  /health:
-    get:
-      summary: Проверка здоровья API
-      description: Проверяет работоспособность API и доступность LLM провайдера.
-      operationId: health_endpoint_health_get
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HealthResponse'
-  /api/chat:
-    post:
-      summary: Стриминг чата
-      description: Основной эндпоинт для общения с агентом. Возвращает поток SSE событий.
-      operationId: chat_endpoint_api_chat_post
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema: {}
-  /api/backlog:
-    get:
-      summary: Список сессий бэклога
-      description: Возвращает список всех сохраненных сессий из бэклога.
-      operationId: backlog_list_endpoint_api_backlog_get
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BacklogListResponse'
-  /api/backlog/{session_id}:
-    get:
-      summary: Детали сессии бэклога
-      description: Возвращает все события конкретной сессии.
-      operationId: backlog_detail_endpoint_api_backlog__session_id__get
-      parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Session Id
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-          default: 500
-          title: Limit
-      - name: offset
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          default: 0
-          title: Offset
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BacklogDetailResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/session/history:
-    get:
-      summary: История сессии
-      description: Возвращает историю сообщений для указанной сессии.
-      operationId: session_history_endpoint_api_session_history_get
-      parameters:
-      - name: session_id
-        in: query
-        required: false
-        schema:
-          type: string
-          default: default
-          title: Session Id
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SessionHistoryResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-components:
-  schemas:
-    BacklogDetailResponse:
-      properties:
-        records:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Records
-          description: Список событий/записей сессии
-        session_id:
-          type: string
-          title: Session Id
-        count:
-          type: integer
-          title: Count
-      type: object
-      required:
-      - records
-      - session_id
-      - count
-      title: BacklogDetailResponse
-      description: Записи конкретной сессии из бэклога.
-    BacklogListResponse:
-      properties:
-        sessions:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Sessions
-          description: Список метаданных сессий
-      type: object
-      required:
-      - sessions
-      title: BacklogListResponse
-      description: Список всех сессий в бэклоге.
-    HTTPValidationError:
-      properties:
-        detail:
-          items:
-            $ref: '#/components/schemas/ValidationError'
-          type: array
-          title: Detail
-      type: object
-      title: HTTPValidationError
-    HealthResponse:
-      properties:
-        api:
-          type: string
-          title: Api
-          default: ok
-        ollama:
-          additionalProperties: true
-          type: object
-          title: Ollama
-          description: Статус подключения к LLM провайдеру
-      type: object
-      required:
-      - ollama
-      title: HealthResponse
-      description: Состояние API сервиса и его связей с LLM.
-    SessionHistoryResponse:
-      properties:
-        messages:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Messages
-          description: Список сообщений (role, content)
-      type: object
-      required:
-      - messages
-      title: SessionHistoryResponse
-      description: История сообщений чата для сессии.
-    ValidationError:
-      properties:
-        loc:
-          items:
-            anyOf:
-            - type: string
-            - type: integer
-          type: array
-          title: Location
-        msg:
-          type: string
-          title: Message
-        type:
-          type: string
-          title: Error Type
-        input:
-          title: Input
-        ctx:
-          type: object
-          title: Context
-      type: object
-      required:
-      - loc
-      - msg
-      - type
-      title: ValidationError
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Agent-Tutor Core API",
+    "description": "Backend API for the Agent-Tutor system. Handles orchestration, session history, and tool integration.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Проверка здоровья API",
+        "description": "Проверяет работоспособность API и доступность LLM провайдера.",
+        "operationId": "health_endpoint_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "summary": "Стриминг чата",
+        "description": "Основной эндпоинт для общения с агентом. Возвращает поток SSE событий.",
+        "operationId": "chat_endpoint_api_chat_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/backlog": {
+      "get": {
+        "summary": "Список сессий бэклога",
+        "description": "Возвращает список всех сохраненных сессий из бэклога.",
+        "operationId": "backlog_list_endpoint_api_backlog_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacklogListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/backlog/{session_id}": {
+      "get": {
+        "summary": "Детали сессии бэклога",
+        "description": "Возвращает все события конкретной сессии.",
+        "operationId": "backlog_detail_endpoint_api_backlog__session_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 500,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacklogDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/session/history": {
+      "get": {
+        "summary": "История сессии",
+        "description": "Возвращает историю сообщений для указанной сессии.",
+        "operationId": "session_history_endpoint_api_session_history_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BacklogDetailResponse": {
+        "properties": {
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/BacklogEvent"
+            },
+            "type": "array",
+            "title": "Records",
+            "description": "List of session events"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Requested session ID"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Number of records"
+          }
+        },
+        "type": "object",
+        "required": [
+          "records",
+          "session_id",
+          "count"
+        ],
+        "title": "BacklogDetailResponse",
+        "description": "Events of a specific backlog session."
+      },
+      "BacklogEvent": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Session ID"
+          },
+          "turn_id": {
+            "type": "string",
+            "title": "Turn Id",
+            "description": "Turn ID"
+          },
+          "iteration": {
+            "type": "integer",
+            "title": "Iteration",
+            "description": "Iteration number"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event",
+            "description": "Event type"
+          },
+          "ts": {
+            "type": "string",
+            "title": "Ts",
+            "description": "Timestamp"
+          },
+          "data": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Data",
+            "description": "Event data"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "session_id",
+          "turn_id",
+          "iteration",
+          "event",
+          "ts",
+          "data"
+        ],
+        "title": "BacklogEvent",
+        "description": "A single event/record in a backlog session.\n\nFields vary by ``event`` type — ``model_response`` events contain\n``duration_ms`` and ``tokens``. Extra fields are preserved via\n``extra='allow'``."
+      },
+      "BacklogListResponse": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/BacklogSessionMetadata"
+            },
+            "type": "array",
+            "title": "Sessions",
+            "description": "List of session metadata entries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sessions"
+        ],
+        "title": "BacklogListResponse",
+        "description": "List of backlog sessions."
+      },
+      "BacklogSessionMetadata": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Session ID"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes",
+            "description": "File size in bytes"
+          },
+          "num_events": {
+            "type": "integer",
+            "title": "Num Events",
+            "description": "Number of events"
+          },
+          "first_event": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Event",
+            "description": "First event"
+          },
+          "last_event": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event",
+            "description": "Last event"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "size_bytes",
+          "num_events"
+        ],
+        "title": "BacklogSessionMetadata",
+        "description": "Metadata for one backlog session entry."
+      },
+      "ChatMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "description": "Role: user / assistant / system"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Message text",
+            "default": ""
+          },
+          "tool_calls": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Calls",
+            "description": "Tool calls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "title": "ChatMessage",
+        "description": "A single message in chat history."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "api": {
+            "type": "string",
+            "title": "Api",
+            "default": "ok"
+          },
+          "ollama": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ollama",
+            "description": "LLM provider connection status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ollama"
+        ],
+        "title": "HealthResponse",
+        "description": "API service health status."
+      },
+      "SessionHistoryResponse": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "type": "array",
+            "title": "Messages",
+            "description": "Messages (role, content, tool_calls)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "title": "SessionHistoryResponse",
+        "description": "Chat message history for a session."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

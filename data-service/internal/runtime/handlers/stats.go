@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/agent-tutor/data-service/internal/config"
+	"github.com/agent-tutor/agent-tutor-go/config"
 )
 
 // StatsHandler возвращает количество записей по счётчикам из конфига.

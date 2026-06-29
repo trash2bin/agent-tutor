@@ -25,7 +25,7 @@ declare -A SERVICE_CMD=(
   [rag]="uv run --package rag python -m rag.service"
   [mcp]="$PROJECT_ROOT/mcp-gateway/mcp-gateway"
   # Legacy (Python): раскомментировать для отладки
-  # [mcp]="uv run --package mcp_server python -m mcp_server.server"
+
   [api]="uv run --package demo-api python -m demo.api.server"
   [web]="uv run --package demo-web python -m demo.web.server"
 )
@@ -121,7 +121,7 @@ cmd_start() {
     echo "⚠️  .venv not found, running uv sync..."
     # uv sync ставит dev-зависимости, uv pip install -e — workspace members
     # (чтобы их транзитивные зависимости тоже установились)
-    (cd "$PROJECT_ROOT" && uv sync --group dev && uv pip install -e agent-tutor-sdk -e mcp_server -e rag -e demo/api -e demo/web -e fixtures)
+    (cd "$PROJECT_ROOT" && uv sync --group dev && uv pip install -e agent-tutor-sdk -e rag -e demo/api -e demo/web -e fixtures)
     
     # .pth для editable install: hatchling кладёт папку пакета на sys.path вместо корня проекта
     local pyver=$("$PROJECT_ROOT/.venv/bin/python3" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
@@ -173,7 +173,7 @@ cmd_start() {
     local extra_env=""
     case "$svc" in
       mcp)
-        extra_env="DATA_SERVICE_URL=http://127.0.0.1:$DATA_PORT DS_CONFIG=$PROJECT_ROOT/specs/config.example.json LOG_LEVEL=info"
+        extra_env="DATA_SERVICE_URL=http://127.0.0.1:$DATA_PORT LOG_LEVEL=info"
         if [ "$MCP_DEV" = "true" ]; then
           extra_env="MCP_DEV=true $extra_env"
         fi

@@ -18,7 +18,6 @@ members = [
     "agent-tutor-workspace",
     "demo-api",
     "demo-web",
-    "mcp-server",
     "rag",
 ]
 
@@ -62,12 +61,14 @@ source = { virtual = "." }
 
 [package.dev-dependencies]
 dev = [
+    { name = "demo-api", extra = ["pg"] },
     { name = "freezegun" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "pytest-mock" },
     { name = "pyyaml" },
+    { name = "rag", extra = ["cli", "pg"] },
     { name = "respx" },
     { name = "ruff" },
 ]
@@ -76,12 +77,15 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "demo-api", extras = ["pg"], editable = "demo/api" },
     { name = "freezegun", specifier = ">=1.5.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "pytest-cov", specifier = ">=5.0.0" },
     { name = "pytest-mock", specifier = ">=3.14.0" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rag", extras = ["cli"], editable = "rag" },
+    { name = "rag", extras = ["pg"], editable = "rag" },
     { name = "respx", specifier = ">=0.21.0" },
     { name = "ruff", specifier = ">=0.7.0" },
 ]
@@ -663,11 +667,15 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "litellm" },
-    { name = "mcp", extra = ["cli"] },
-    { name = "psycopg2-binary" },
+    { name = "mcp" },
     { name = "pydantic" },
     { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+pg = [
+    { name = "psycopg2-binary" },
 ]
 
 [package.metadata]
@@ -676,12 +684,13 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.137.2" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "litellm", specifier = ">=1.86.2" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.0.0" },
-    { name = "psycopg2-binary", specifier = ">=2.9.0" },
+    { name = "mcp", specifier = ">=1.0.0" },
+    { name = "psycopg2-binary", marker = "extra == 'pg'", specifier = ">=2.9.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "starlette", specifier = ">=0.50.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.38.0" },
 ]
+provides-extras = ["pg"]
 
 [[package]]
 name = "demo-web"
@@ -1535,39 +1544,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/38/83/d1efe7c2980d8a3afa476f4e3d42d53dd54c0ab94c27bee5d755b45c8b73/mcp-1.27.1.tar.gz", hash = "sha256:0f47e1820f8f8f941466b39749eb1d1839a04caddca2bc60e9d46e8a99914924", size = 608458, upload-time = "2026-05-08T16:50:12.601Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fd/73/42d9596facebdb533b7f0b86c1b0364ef350d1f8ba78b1052e8a58b48b65/mcp-1.27.1-py3-none-any.whl", hash = "sha256:1af3c4203b329430fde7a87b4fcb6392a041f5cb851fd68fc674016ab4e7c06f", size = 216260, upload-time = "2026-05-08T16:50:10.547Z" },
-]
-
-[package.optional-dependencies]
-cli = [
-    { name = "python-dotenv" },
-    { name = "typer" },
-]
-
-[[package]]
-name = "mcp-server"
-version = "0.2.0"
-source = { editable = "mcp_server" }
-dependencies = [
-    { name = "agent-tutor-sdk" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "mcp", extra = ["cli"] },
-    { name = "psycopg2-binary" },
-    { name = "pydantic" },
-    { name = "starlette" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "agent-tutor-sdk", editable = "agent-tutor-sdk" },
-    { name = "fastapi", specifier = ">=0.137.2" },
-    { name = "httpx", specifier = ">=0.28.0" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.0.0" },
-    { name = "psycopg2-binary", specifier = ">=2.9.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "starlette", specifier = ">=0.50.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.38.0" },
 ]
 
 [[package]]
@@ -2830,15 +2806,21 @@ dependencies = [
     { name = "chonkie", extra = ["semantic"] },
     { name = "chromadb" },
     { name = "docling" },
-    { name = "faker" },
     { name = "fastapi" },
     { name = "httpx" },
-    { name = "psycopg2-binary" },
     { name = "pydantic" },
-    { name = "python-docx" },
     { name = "sentence-transformers" },
     { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+cli = [
+    { name = "faker" },
+    { name = "python-docx" },
+]
+pg = [
+    { name = "psycopg2-binary" },
 ]
 
 [package.metadata]
@@ -2847,16 +2829,17 @@ requires-dist = [
     { name = "chonkie", extras = ["semantic"], specifier = ">=1.0.0" },
     { name = "chromadb", specifier = ">=1.5.9" },
     { name = "docling", specifier = ">=2.0.0" },
-    { name = "faker", specifier = ">=20.0.0" },
+    { name = "faker", marker = "extra == 'cli'", specifier = ">=20.0.0" },
     { name = "fastapi", specifier = ">=0.137.2" },
     { name = "httpx", specifier = ">=0.28.0" },
-    { name = "psycopg2-binary", specifier = ">=2.9.0" },
+    { name = "psycopg2-binary", marker = "extra == 'pg'", specifier = ">=2.9.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "python-docx", specifier = ">=1.2.0" },
+    { name = "python-docx", marker = "extra == 'cli'", specifier = ">=1.2.0" },
     { name = "sentence-transformers", specifier = ">=5.5.1" },
     { name = "starlette", specifier = ">=0.50.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.38.0" },
 ]
+provides-extras = ["cli", "pg"]
 
 [[package]]
 name = "rapidocr"

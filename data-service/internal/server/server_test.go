@@ -13,7 +13,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/agent-tutor/data-service/internal/config"
+	"github.com/agent-tutor/agent-tutor-go/config"
 	"github.com/agent-tutor/data-service/internal/seedgen"
 	"github.com/agent-tutor/data-service/internal/server"
 )

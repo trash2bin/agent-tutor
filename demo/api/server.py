@@ -22,7 +22,10 @@ from demo.api.sessions import session_store
 from demo.settings import settings
 from demo.api.http_models import (
     BacklogDetailResponse,
+    BacklogEvent,
     BacklogListResponse,
+    BacklogSessionMetadata,
+    ChatMessage,
     ChatRequest,
     HealthResponse,
     SessionHistoryResponse,
@@ -81,7 +84,8 @@ async def get_health() -> HealthResponse:
 
 async def get_backlog_list() -> BacklogListResponse:
     """List all backlog sessions."""
-    return BacklogListResponse(sessions=backlog.list_sessions())
+    sessions = backlog.list_sessions()
+    return BacklogListResponse(sessions=[BacklogSessionMetadata(**s) for s in sessions])
 
 
 async def get_backlog_detail(
@@ -90,14 +94,16 @@ async def get_backlog_detail(
     """Read records of a specific backlog session."""
     records = backlog.read_session(session_id, limit=limit, offset=offset)
     return BacklogDetailResponse(
-        records=records, session_id=session_id, count=len(records)
+        records=[BacklogEvent(**r) for r in records],
+        session_id=session_id,
+        count=len(records),
     )
 
 
 async def get_session_history(session_id: str = "default") -> SessionHistoryResponse:
     """Get chat history for a session."""
     history = await asyncio.to_thread(session_store.history_messages, session_id)
-    return SessionHistoryResponse(messages=history)
+    return SessionHistoryResponse(messages=[ChatMessage(**m) for m in history])
 
 
 async def chat_handler(request: Request) -> StreamingResponse:

@@ -1,19 +1,20 @@
 # Data-service: Go-сервис доступа к БД
-# Two-stage: golang:1.22-alpine → gcr.io/distroless/static-debian12:nonroot
-# Distroless содержит статический бинарь wget для healthcheck compose (curl/wget отсутствуют в scratch).
-FROM golang:1.22-alpine AS builder
+# Two-stage: golang:1.24-alpine → gcr.io/distroless/static-debian12:nonroot
+FROM golang:1.24-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /build
 
 # Кешируем зависимости
-COPY data-service/go.mod data-service/go.sum ./
-RUN go mod download
+COPY agent-tutor-go/go.mod agent-tutor-go/go.sum /build/agent-tutor-go/
+COPY data-service/go.mod data-service/go.sum /build/data-service/
+RUN cd /build/data-service && go mod download
 
 # Копируем исходники и собираем
-COPY data-service/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /data-service ./cmd/server/
+COPY agent-tutor-go/ /build/agent-tutor-go/
+COPY data-service/ /build/data-service/
+RUN cd /build/data-service && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /data-service ./cmd/server/
 
 # ── Runtime ──
 FROM gcr.io/distroless/static-debian12:nonroot

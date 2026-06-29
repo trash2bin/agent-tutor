@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/agent-tutor/agent-tutor-go/config"
 )
 
 // defaultBaseURL — адрес data-service по умолчанию.
@@ -49,6 +51,47 @@ func New() *Client {
 			Timeout: timeout,
 		},
 	}
+}
+
+// BaseURL возвращает базовый URL data-service (для логирования).
+func (c *Client) BaseURL() string {
+	return c.baseURL
+}
+
+// FetchConfig получает конфигурацию MCP-инструментов от data-service через /mcp/manifest.
+//
+// Это заменяет прямой парсинг config.json — data-service остаётся
+// единственным source of truth для конфигурации. Парсинг в config.Config
+// возможен потому, что стру��туры Config размечены тегами json,
+// а /mcp/manifest ��озвращает те же ключи (endpoints, entities, ...).
+func (c *Client) FetchConfig() (*config.Config, error) {
+	u := c.baseURL + "/mcp/manifest"
+
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("mcp: create config request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("mcp: fetch config from %s: %w", u, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("mcp: config endpoint returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Десериализуем прямо в config.Config — структуры размечены JSON-тегами.
+	// В /mcp/manifest приходят только endpoint/entity/custom_query/mcp_tool секции.
+	var cfg config.Config
+	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("mcp: decode config: %w", err)
+	}
+
+	return &cfg, nil
 }
 
 // Call выполняет HTTP GET к data-service.

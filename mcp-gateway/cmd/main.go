@@ -1,20 +1,18 @@
 // Package mcp-gateway — MCP (Model Context Protocol) сервер на Go.
 //
-// Читает тот же config.json что и data-service, авто-генерирует
-// MCP-инструменты из cfg.endpoints[] с опциональными оверрайдами
-// из cfg.mcp_tools[] и делегирует вызовы через HTTP к data-service.
+// Конфигурация MCP-инструментов получается по HTTP от data-service
+// (эндпоинт /mcp/manifest), а не прямым парсингом config.json.
+// data-service остаётся единственным source of truth для конфигурации.
 package main
 
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -24,7 +22,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/agent-tutor/mcp-gateway/internal/config"
+	"github.com/agent-tutor/agent-tutor-go/config"
+	"github.com/agent-tutor/mcp-gateway/internal/httpclient"
 	"github.com/agent-tutor/mcp-gateway/internal/tools"
 )
 
@@ -36,9 +35,6 @@ type sseSession struct {
 }
 
 func main() {
-	cfgPath := flag.String("config", "", "путь к config.json (по умолчанию $DS_CONFIG или поиск по locations)")
-	flag.Parse()
-
 	devMode := os.Getenv("MCP_DEV") == "true"
 	logLevel := slog.LevelInfo
 	if devMode {
@@ -52,190 +48,31 @@ func main() {
 	}
 	slog.Info("mcp-gateway starting")
 
-	// ── Конфиг ──
-	cfgFile := resolveConfigPath(*cfgPath)
-	absPath, err := filepath.Abs(cfgFile)
+	// ── Конфиг через HTTP от data-service ──
+	client := httpclient.New()
+	mcpCfg, err := client.FetchConfig()
 	if err != nil {
-		slog.Error("resolve config path", "error", err)
+		slog.Error("fetch config from data-service", "error", err)
 		os.Exit(1)
 	}
 
-	mcpCfg, err := config.Load(absPath)
+	// ── MCP-сервер + регистрация тулов ──
+	mcpServer, registry, err := buildMCPServer(mcpCfg)
 	if err != nil {
-		slog.Error("load config", "error", err)
+		slog.Error("build MCP server", "error", err)
 		os.Exit(1)
 	}
 
-	// ── MCP-сервер ──
-	mcpServer := server.NewMCPServer(
-		"agent-tutor",
-		"1.0.0",
-	)
-
-	registry := tools.NewRegistry(mcpCfg)
-	registry.RegisterAll(mcpServer)
-
-	toolDefs := registry.GetToolDefs()
-	slog.Info("config loaded",
-		"auto_tools", len(toolDefs),
+	slog.Info("config loaded from data-service",
+		"data_service_url", client.BaseURL(),
+		"auto_tools", len(registry.GetToolDefs()),
 		"explicit_mcp_tools", len(mcpCfg.MCPTools),
 		"entities", len(mcpCfg.Entities),
 		"endpoints", len(mcpCfg.Endpoints),
-		"path", absPath,
 	)
 
-	// ── SSE session manager ──
-	sessions := &sync.Map{}
-
-	// ── HTTP-роутер (chi) ──
-	r := chi.NewRouter()
-
-	// Dev middleware: логируем каждый HTTP-запрос
-	if devMode {
-		r.Use(requestLogger)
-	}
-
-	// Health
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
-			"status":  "ok",
-			"service": "mcp-gateway",
-		})
-	})
-
-	// SSE endpoint — GET /mcp
-	r.Get("/mcp", func(w http.ResponseWriter, r *http.Request) {
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-
-		sessionID := uuid.New().String()
-		session := &sseSession{
-			writer:  w,
-			flusher: flusher,
-			done:    make(chan struct{}),
-		}
-		sessions.Store(sessionID, session)
-		defer sessions.Delete(sessionID)
-
-		scheme := "http"
-		if r.TLS != nil {
-			scheme = "https"
-		}
-		messageURL := fmt.Sprintf("%s://%s/mcp/message?sessionId=%s", scheme, r.Host, sessionID)
-		fmt.Fprintf(w, "event: endpoint\ndata: %s\r\n\r\n", messageURL)
-		flusher.Flush()
-
-		<-r.Context().Done()
-		close(session.done)
-	})
-
-	// JSON-RPC messages — POST /mcp/message (стандартный MCP streamable HTTP)
-	mcpPost := mcpPostHandler(mcpServer, sessions)
-	r.Post("/mcp/message", mcpPost)
-
-	// Некоторые реализа��ии Python MCP SDK шлют POST на тот же URL что SSE (/mcp),
-	// а не на полученный из event: endpoint URL — поэтому дублируем хендлер
-	r.Post("/mcp", mcpPost)
-
-	// Dev-режим endpoint'ы: доступны всегда, но в devMode — с дополнительным контекстом
-	if devMode {
-		r.Get("/debug/sessions", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			var sseIDs []string
-			sessions.Range(func(key, value any) bool {
-				sseIDs = append(sseIDs, fmt.Sprint(key))
-				return true
-			})
-			json.NewEncoder(w).Encode(map[string]any{
-				"total_sessions": len(sseIDs),
-				"session_ids":    sseIDs,
-				"note":           "SSE-сессии; POST/message без sessionId создаёт новый UUID",
-			})
-		})
-
-		r.Get("/debug/config", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			toolDefs := registry.GetToolDefs()
-			toolNames := make([]string, 0, len(toolDefs))
-			for _, td := range toolDefs {
-				toolNames = append(toolNames, td.Name)
-			}
-			json.NewEncoder(w).Encode(map[string]any{
-				"config_path":   absPath,
-				"entities":      len(mcpCfg.Entities),
-				"endpoints":     len(mcpCfg.Endpoints),
-				"tools":         toolNames,
-				"tools_count":   len(toolDefs),
-				"mcp_tools_cfg": len(mcpCfg.MCPTools),
-				"auto_tools":    true,
-				"dev_mode":      devMode,
-			})
-		})
-
-		// MCP Playground — встроенный HTML-UI для тестирования инструментов
-		r.Get("/debug", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(playgroundHTML))
-		})
-
-		// Редирект с / на /debug в dev-режиме
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/debug", http.StatusFound)
-		})
-	}
-
-	// Debug endpoints (всегда, для тестов)
-	r.Get("/tools/list", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		req := map[string]any{
-			"jsonrpc": "2.0", "id": uuid.New().String(),
-			"method": "tools/list", "params": map[string]any{},
-		}
-		rawReq, _ := json.Marshal(req)
-		ctx := mcpServer.WithContext(r.Context(), server.NotificationContext{
-			ClientID: "debug", SessionID: "debug",
-		})
-		response := mcpServer.HandleMessage(ctx, rawReq)
-		if response != nil {
-			json.NewEncoder(w).Encode(response)
-		}
-	})
-
-	r.Post("/tools/call", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		var body struct {
-			Name      string         `json:"name"`
-			Arguments map[string]any `json:"arguments"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"invalid JSON: %s"}`, err), http.StatusBadRequest)
-			return
-		}
-		req := map[string]any{
-			"jsonrpc": "2.0", "id": uuid.New().String(),
-			"method": "tools/call",
-			"params": map[string]any{"name": body.Name, "arguments": body.Arguments},
-		}
-		rawReq, _ := json.Marshal(req)
-		ctx := mcpServer.WithContext(r.Context(), server.NotificationContext{
-			ClientID: "debug", SessionID: "debug",
-		})
-		response := mcpServer.HandleMessage(ctx, rawReq)
-		if response != nil {
-			json.NewEncoder(w).Encode(response)
-		}
-	})
+	// ── HTTP-роутер ──
+	r := buildRouter(mcpServer, registry, mcpCfg, devMode)
 
 	port := os.Getenv("MCP_PORT")
 	if port == "" {
@@ -266,12 +103,199 @@ func main() {
 		}
 	}()
 
-	slog.Info("mcp-gateway listening", "port", port, "config", absPath)
+	slog.Info("mcp-gateway listening", "port", port)
 	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
 		slog.Error("server failed", "error", err)
 		os.Exit(1)
 	}
 	slog.Info("mcp-gateway stopped")
+}
+
+// buildMCPServer создаёт MCP-сервер и регистрирует инструменты по конфигу.
+func buildMCPServer(cfg *config.Config) (*server.MCPServer, *tools.Registry, error) {
+	mcpServer := server.NewMCPServer("agent-tutor", "1.0.0")
+	registry := tools.NewRegistry(cfg)
+	registry.RegisterAll(mcpServer)
+	return mcpServer, registry, nil
+}
+
+// buildRouter собирает chi-роутер со всеми endpoint'ами, включая MCP- и debug.
+func buildRouter(mcpServer *server.MCPServer, registry *tools.Registry, cfg *config.Config, devMode bool) *chi.Mux {
+	sessions := &sync.Map{}
+	r := chi.NewRouter()
+
+	if devMode {
+		r.Use(requestLogger)
+	}
+
+	// Health
+	r.Get("/health", healthHandler())
+
+	// SSE endpoint — GET /mcp
+	r.Get("/mcp", sseHandler(sessions))
+
+	// JSON-RPC messages — POST /mcp/message
+	mcpPost := mcpPostHandler(mcpServer, sessions)
+	r.Post("/mcp/message", mcpPost)
+
+	// Fallback POST /mcp (Python SDK compat)
+	r.Post("/mcp", mcpPost)
+
+	// Dev-режим endpoints
+	if devMode {
+		r.Get("/debug/sessions", debugSessionsHandler(sessions))
+		r.Get("/debug/config", debugConfigHandler(registry, cfg, devMode))
+		r.Get("/debug", debugPlaygroundHandler())
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/debug", http.StatusFound)
+		})
+	}
+
+	// tools/list (always available)
+	r.Get("/tools/list", toolsListHandler(mcpServer))
+
+	// tools/call (always available)
+	r.Post("/tools/call", toolsCallHandler(mcpServer))
+
+	return r
+}
+
+// ── Handler constructors ──
+
+func healthHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "ok",
+			"service": "mcp-gateway",
+		})
+	}
+}
+
+func sseHandler(sessions *sync.Map) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		sessionID := uuid.New().String()
+		session := &sseSession{
+			writer:  w,
+			flusher: flusher,
+			done:    make(chan struct{}),
+		}
+		sessions.Store(sessionID, session)
+		defer sessions.Delete(sessionID)
+
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		messageURL := fmt.Sprintf("%s://%s/mcp/message?sessionId=%s", scheme, r.Host, sessionID)
+		fmt.Fprintf(w, "event: endpoint\ndata: %s\r\n\r\n", messageURL)
+		flusher.Flush()
+
+		<-r.Context().Done()
+		close(session.done)
+	}
+}
+
+func debugSessionsHandler(sessions *sync.Map) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var sseIDs []string
+		sessions.Range(func(key, value any) bool {
+			sseIDs = append(sseIDs, fmt.Sprint(key))
+			return true
+		})
+		json.NewEncoder(w).Encode(map[string]any{
+			"total_sessions": len(sseIDs),
+			"session_ids":    sseIDs,
+			"note":           "SSE-сессии; POST/message без sessionId создаёт новый UUID",
+		})
+	}
+}
+
+func debugConfigHandler(registry *tools.Registry, cfg *config.Config, devMode bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		toolDefs := registry.GetToolDefs()
+		toolNames := make([]string, 0, len(toolDefs))
+		for _, td := range toolDefs {
+			toolNames = append(toolNames, td.Name)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"source":        "data-service /mcp/manifest",
+			"entities":      len(cfg.Entities),
+			"endpoints":     len(cfg.Endpoints),
+			"tools":         toolNames,
+			"tools_count":   len(toolDefs),
+			"mcp_tools_cfg": len(cfg.MCPTools),
+			"auto_tools":    true,
+			"dev_mode":      devMode,
+		})
+	}
+}
+
+func debugPlaygroundHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(playgroundHTML))
+	}
+}
+
+func toolsListHandler(mcpServer *server.MCPServer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		req := map[string]any{
+			"jsonrpc": "2.0", "id": uuid.New().String(),
+			"method": "tools/list", "params": map[string]any{},
+		}
+		rawReq, _ := json.Marshal(req)
+		ctx := mcpServer.WithContext(r.Context(), server.NotificationContext{
+			ClientID: "debug", SessionID: "debug",
+		})
+		response := mcpServer.HandleMessage(ctx, rawReq)
+		if response != nil {
+			json.NewEncoder(w).Encode(response)
+		}
+	}
+}
+
+func toolsCallHandler(mcpServer *server.MCPServer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var body struct {
+			Name      string         `json:"name"`
+			Arguments map[string]any `json:"arguments"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"invalid JSON: %s"}`, err), http.StatusBadRequest)
+			return
+		}
+		req := map[string]any{
+			"jsonrpc": "2.0", "id": uuid.New().String(),
+			"method": "tools/call",
+			"params": map[string]any{"name": body.Name, "arguments": body.Arguments},
+		}
+		rawReq, _ := json.Marshal(req)
+		ctx := mcpServer.WithContext(r.Context(), server.NotificationContext{
+			ClientID: "debug", SessionID: "debug",
+		})
+		response := mcpServer.HandleMessage(ctx, rawReq)
+		if response != nil {
+			json.NewEncoder(w).Encode(response)
+		}
+	}
 }
 
 // mcpPostHandler возвращает HTTP-хендлер для JSON-RPC сообщений MCP.
@@ -338,34 +362,7 @@ func mcpPostHandler(mcpServer *server.MCPServer, sessions *sync.Map) http.Handle
 	}
 }
 
-// resolveConfigPath ищет config.json по приоритету: флаг → DS_CONFIG → кандидаты.
-func resolveConfigPath(userPath string) string {
-	if userPath != "" {
-		return userPath
-	}
-	if env := os.Getenv("DS_CONFIG"); env != "" {
-		return env
-	}
 
-	cwd, _ := os.Getwd()
-	candidates := []string{
-		filepath.Join(cwd, "..", "specs", "config.example.json"),
-		filepath.Join(cwd, "specs", "config.example.json"),
-	}
-	if exe, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(exeDir, "..", "..", "specs", "config.example.json"),
-		)
-	}
-
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
-		}
-	}
-	return candidates[0]
-}
 
 // requestLogger — middleware: пишет method, path, status, duration
 func requestLogger(next http.Handler) http.Handler {

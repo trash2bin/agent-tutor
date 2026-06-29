@@ -229,14 +229,18 @@ async def test_context_success(mock_state):
     """Проверка сборки RAG-контекста."""
     pipeline, _ = mock_state
 
-    # Мокаем RagContext с answer_instruction и chunks
-    mock_chunk = MagicMock()
-    mock_chunk.model_dump.return_value = {
-        "id": "doc1",
-        "title": "T1",
-        "content": "...",
-        "score": 0.95,
-    }
+    # Используем реальные Pydantic-модели вместо MagicMock
+    mock_chunk = RagSearchResult(
+        document_id="doc1",
+        document_title="T1",
+        source_path="p1",
+        discipline_id="d1",
+        chunk_id="c1",
+        chunk_index=0,
+        page=1,
+        score=0.95,
+        content="...",
+    )
 
     mock_context = MagicMock()
     mock_context.answer_instruction = "The actual context text"

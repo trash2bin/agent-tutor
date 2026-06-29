@@ -76,7 +76,7 @@ go run ./cmd/seed-cli/ --seed-path path/to/seed.json
 | Файл | Назначение |
 |---|---|
 | `rag/Dockerfile` | Образ RAG-сервиса |
-| `mcp_server/Dockerfile` | Образ MCP-сервера |
+| `mcp-gateway/Dockerfile` | Образ MCP-сервера (Go) |
 | `demo/api/Dockerfile` | Образ API-сервера |
 | `demo/web/Dockerfile` | Образ WEB-сервера |
 
@@ -195,8 +195,8 @@ uv run agent-rag-ingest import ~/Documents/some.pdf -d <discipline-id>
 # Терминал 1: RAG
 RAG_PORT=8082 uv run python -m rag.service
 
-# Терминал 2: MCP
-RAG_SERVICE_URL=http://127.0.0.1:8082 MCP_PORT=8083 uv run python -m mcp_server.server
+# Терминал 2: MCP (mcp-gateway Go)
+cd mcp-gateway && go run ./cmd/ --config ../specs/config.example.json
 
 # Терминал 3: API
 MCP_SERVICE_URL=http://127.0.0.1:8083/mcp DEMO_API_PORT=8081 uv run python -m demo.api.server
@@ -248,7 +248,7 @@ agent-tutor/
 │   │       └── testdata.go    # TestSeed для in-memory тестов
 │   ├── Dockerfile
 │   └── README.md              # config-driven архитектура, --discover, примеры
-├── mcp_server/                # MCP-сервер (FastMCP, HTTP :8083)
+├── mcp-gateway/                # MCP-сервер (Go, HTTP :8083)
 │   ├── server.py              # FastMCP-роутер + /health + uvicorn (:8083)
 │   ├── tools_via_http.py      # тонкие async-обёртки над AsyncDataServiceClient
 │   ├── tools_rag.py           # обёртки над RagClient (list_documents, search_documents, ...)
@@ -316,7 +316,7 @@ agent-tutor/
 │   ├── catalog.py             # статический каталог фиктивных данных (TEXTS, SPECIALITIES, CURRICULUM, ...)
 │   └── _material.py           # dev-only Pydantic-модель Material
 ├── scripts/                   # dev.sh (нативный запуск всех 5 сервисов), init-db.sql
-├── doc/                       # ROADMAP.md
+├── doc/                       # NEW_ROADMAP.md
 ├── docker-compose.yml         # 5 long-running сервисов + db + caddy (prod-профиль)
 └── .env.example               # Все переменные окружения
 ```
@@ -383,7 +383,7 @@ agent-tutor/
 ### Замена любого сервиса
 - Каждый long-running сервис имеет HTTP-контракт (OpenAPI/Swagger на `/docs`)
 - `data-service` (Go) — контракт генерируется runtime из конфига (`/openapi.json`)
-- Если переписать `rag` на Go — `mcp_server` продолжает ходить к `http://rag:8082`
+- Если переписать `rag` на Go — `mcp-gateway` продолжает ходить к `http://rag:8082`
 - Если переписать `mcp_server` на Rust — `api` продолжает слать MCP-over-HTTP
 - Если переписать `data-service` на Rust — все потребители видят тот же HTTP-контракт
 - CLI-утилиты (`rag/fixtures/`) не привязаны к Python-коду сервисов — работают по HTTP
@@ -528,15 +528,15 @@ uv run agent-rag-ingest clear-generated                  # Удалить сге
 - **Этап 0** (0.0–0.5): Разделение на 4 независимых HTTP-сервиса, FastAPI, CLI-утилиты, HTTP-транспорт MCP
 - **Этап 1**: Тестовая инфраструктура (84% покрытие, 109 тестов, ruff, OpenAPI/Swagger)
 - **Этап 2**: Контейнеризация (5 Dockerfile'ов, docker-compose с 7 сервисами, Caddy, healthchecks)
-- **Этап 2.x**: Тесты разнесены по сервисам (rag/tests/, mcp_server/tests/, demo/api/tests/, demo/web/tests/, agent-tutor-sdk/tests/),
+- **Этап 2.x**: Тесты разнесены по сервисам (rag/tests/, mcp-gateway/tests/, demo/api/tests/, demo/web/tests/, agent-tutor-sdk/tests/),
   Dockerfile'ы копируют только нужные исходники, а не весь проект целиком
-- **Этап 2.7 (выполнен)**: Data-service на Go — изоляция схемы БД. `mcp_server` и `demo/api` не содержат SQL университетских данных. `specs/schemas/` с JSON Schema, авто-генерация из Go-моделей.
+- **Этап 2.7 (выполнен)**: Data-service на Go — изоляция схемы БД. `mcp-gateway` и `demo/api` не содержат SQL университетских данных. `specs/schemas/` с JSON Schema, авто-генерация из Go-моделей.
 - **Этап 2.7.x (выполнен)**: RAG отделён в `rag_documents.db`. Репозитории SDK удалены. `agent_tutor_sdk/db/` — только connector + schema + fixtures для тестов и CLI.
 - **Сидинг через единый pipeline (выполнен)**: `agent-seedgen` (Python+faker) → `specs/fixtures/seed.json` → `data-service --seed` (Go) → SQLite/PostgreSQL. CLI `agent-rag-ingest` и `agent-rag-docgen` живут в `rag/fixtures/` и ходят к сервисам по HTTP-контракту. Старый Python-пакет `fixtures/` удалён.
 - **Contract sync: Go → JSON Schema → Pydantic (выполнен)**: drift-тесты в `agent-tutor-sdk/tests/unit/test_contracts_drift.py` ловят расхождения между Go-моделями, JSON Schema и Pydantic. seedgen валидирует выход через `StorageSeed` из SDK (`agent_tutor_sdk/seed_models.py`).
 - **Web-frontend сам ходит к data-service (выполнен)**: `demo/api` освобождён от data passthrough. `demo/web` делает reverse-proxy напрямую к `data-service:8084` (`/api/data/*`) и `rag:8082` (`/api/rag/documents`). Агент-эндпойнты (`/api/chat`, `/api/backlog`, `/api/session/history`) идут через `demo/api`.
 
-Полный план — в `doc/ROADMAP.md`.
+Полный план — в `doc/NEW_ROADMAP.md`.
 
 Работает:
 - Data-service (Go, chi, modernc/sqlite) — единственный сервис со знанием схемы БД
@@ -550,7 +550,7 @@ uv run agent-rag-ingest clear-generated                  # Удалить сге
 - Docker: 5 образов, docker-compose, Caddy, healthchecks
 - 109 тестов, 84% покрытие, ruff чисто
 - OpenAPI/Swagger у всех HTTP-сервисов
-- Тесты разнесены по пакетам сервисов: `uv run pytest rag/tests/`, `uv run pytest mcp_server/tests/`
+- Тесты разнесены по пакетам сервисов: `uv run pytest rag/tests/`, `uv run go test ./mcp-gateway/...`
 - Dockerfile'ы копируют в runtime только нужные исходники (минимальный размер образа)
 
 ## Конфиг data-service (новая архитектура)

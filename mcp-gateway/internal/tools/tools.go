@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/agent-tutor/mcp-gateway/internal/config"
+	"github.com/agent-tutor/agent-tutor-go/config"
 	"github.com/agent-tutor/mcp-gateway/internal/httpclient"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -103,9 +103,9 @@ func registerOne(mcpServer *server.MCPServer, td toolDef, client *httpclient.Cli
 			propOpts = append(propOpts, mcp.Required())
 		}
 		switch p.Type {
-		case "int", "float":
+		case config.ParamTypeInt, config.ParamTypeFloat:
 			opts = append(opts, mcp.WithNumber(p.Name, propOpts...))
-		case "bool":
+		case config.ParamTypeBool:
 			opts = append(opts, mcp.WithBoolean(p.Name, propOpts...))
 		default:
 			opts = append(opts, mcp.WithString(p.Name, propOpts...))
@@ -171,9 +171,9 @@ func endpointToToolDef(ep config.Endpoint, entities []config.Entity, customQueri
 // deriveToolName generates a unique tool name from endpoint metadata.
 func deriveToolName(ep config.Endpoint) string {
 	switch ep.Op {
-	case "builtin_health":
+	case config.OpBuiltinHealth:
 		return "health"
-	case "builtin_stats":
+	case config.OpBuiltinStats:
 		return "stats"
 	}
 
@@ -189,13 +189,13 @@ func deriveToolName(ep config.Endpoint) string {
 	}
 
 	switch ep.Op {
-	case "get_by_id":
+	case config.OpGetByID:
 		return "get_" + entityName
-	case "find":
+	case config.OpFind:
 		return "find_" + entityName
-	case "list":
+	case config.OpList:
 		return "list_" + entityName
-	case "custom_query":
+	case config.OpCustomQuery:
 		if ep.QueryID != "" {
 			return ep.QueryID
 		}
@@ -225,13 +225,13 @@ func buildDefaultDesc(ep config.Endpoint, entities []config.Entity) string {
 	}
 
 	switch ep.Op {
-	case "get_by_id":
+	case config.OpGetByID:
 		desc := "Get " + entityName + " by ID"
 		if entityDesc != "" {
 			desc += " (" + entityDesc + ")"
 		}
 		return desc
-	case "find":
+	case config.OpFind:
 		desc := "Find " + entityName
 		if ep.SearchField != "" {
 			desc += " by " + ep.SearchField
@@ -240,9 +240,9 @@ func buildDefaultDesc(ep config.Endpoint, entities []config.Entity) string {
 			desc += " (" + entityDesc + ")"
 		}
 		return desc
-	case "list":
+	case config.OpList:
 		return "List all " + entityName
-	case "custom_query":
+	case config.OpCustomQuery:
 		return "Execute custom query: " + entityName
 	default:
 		return "Call " + ep.Path
@@ -267,7 +267,7 @@ func deriveParams(ep config.Endpoint, entities []config.Entity) []config.Endpoin
 
 	// 3. Build param for each path param
 	for _, pp := range pathParams {
-		fieldType := "string"
+		fieldType := config.FieldTypeString
 		for _, f := range entityFields {
 			if f.Name == pp || f.Column == pp {
 				fieldType = f.Type
@@ -278,7 +278,7 @@ func deriveParams(ep config.Endpoint, entities []config.Entity) []config.Endpoin
 		required := true
 		params = append(params, config.EndpointParam{
 			Name:        pp,
-			In:          "path",
+			In:          config.ParamInPath,
 			Type:        ptype,
 			Required:    &required,
 			Description: pp,
@@ -286,7 +286,7 @@ func deriveParams(ep config.Endpoint, entities []config.Entity) []config.Endpoin
 	}
 
 	// 4. For find/list: add search query param
-	if ep.Op == "find" || ep.Op == "list" {
+	if ep.Op == config.OpFind || ep.Op == config.OpList {
 		qp := ep.QueryParam
 		if qp == "" {
 			qp = ep.SearchField
@@ -299,8 +299,8 @@ func deriveParams(ep config.Endpoint, entities []config.Entity) []config.Endpoin
 			}
 			params = append(params, config.EndpointParam{
 				Name:        qp,
-				In:          "query",
-				Type:        "string",
+				In:          config.ParamInQuery,
+				Type:        config.ParamTypeString,
 				Required:    &required,
 				Description: desc,
 			})
@@ -311,14 +311,16 @@ func deriveParams(ep config.Endpoint, entities []config.Entity) []config.Endpoin
 }
 
 // fieldTypeToParamType maps entity field types to MCP parameter types.
-func fieldTypeToParamType(ft string) string {
+func fieldTypeToParamType(ft config.FieldType) config.ParamType {
 	switch ft {
-	case "int", "float":
-		return ft
-	case "bool":
-		return "bool"
+	case config.FieldTypeInt:
+		return config.ParamTypeInt
+	case config.FieldTypeFloat:
+		return config.ParamTypeFloat
+	case config.FieldTypeBool:
+		return config.ParamTypeBool
 	default:
-		return "string"
+		return config.ParamTypeString
 	}
 }
 

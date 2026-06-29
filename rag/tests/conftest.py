@@ -1,7 +1,10 @@
-"""Shared pytest fixtures for all service tests.
+"""Shared pytest fixtures for RAG tests.
 
-Located at project root so pytest discovers them from any service's test directory.
+Relocated from project-root conftest.py (removed) — these fixtures
+are only used by rag/tests/.
 """
+
+from __future__ import annotations
 
 import shutil
 import tempfile

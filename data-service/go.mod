@@ -3,12 +3,15 @@ module github.com/agent-tutor/data-service
 go 1.24.0
 
 require (
+	github.com/agent-tutor/agent-tutor-go v0.0.0-00010101000000-000000000000
 	github.com/go-chi/chi/v5 v5.2.1
 	github.com/invopop/jsonschema v0.14.0
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/xeipuuv/gojsonschema v1.2.0
 	modernc.org/sqlite v1.37.1
 )
+
+replace github.com/agent-tutor/agent-tutor-go => ../agent-tutor-go
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -34,3 +37,4 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+

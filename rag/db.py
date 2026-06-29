@@ -27,8 +27,8 @@ class RagDB:
         logger.info("Opening RAG database: %s", path)
         # check_same_thread=False: FastAPI использует run_in_threadpool,
         # поэтому соединение может использоваться из разных worker-потоков.
-        # Безопасность гарантируется WAL-режимом и тем, что SQLite
-        # сериализует доступ к БД на уровне драйвера (мьютекс внутри _sqlite3).
+        # Thread-safe доступ к conn обеспечивается через DocumentRepository._lock
+        # (threading.RLock), который сериализует все SQL-операции.
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")

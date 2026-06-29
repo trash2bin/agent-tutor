@@ -174,7 +174,7 @@ async def list_documents(req: ListDocumentsRequest) -> ListDocumentsResponse:
             limit=req.limit,
         )
         return ListDocumentsResponse(
-            documents=[doc.model_dump(mode="json") for doc in docs],
+            documents=list(docs),
             count=len(docs),
         )
     except Exception as exc:
@@ -203,7 +203,7 @@ async def import_document(req: ImportDocumentRequest) -> ImportDocumentResponse:
             title=req.title,
         )
         return ImportDocumentResponse(
-            document=result.document.model_dump(mode="json"),
+            document=result.document,
             chunks_count=result.chunks_count,
         )
     except FileNotFoundError as exc:
@@ -287,7 +287,7 @@ async def search(req: SearchRequest) -> SearchResponse:
             limit=req.limit,
         )
         return SearchResponse(
-            results=[r.model_dump(mode="json") for r in results],
+            results=list(results),
             count=len(results),
         )
     except Exception as exc:
@@ -314,7 +314,7 @@ async def context(req: ContextRequest) -> ContextResponse:
         )
         return ContextResponse(
             context=rag_context.answer_instruction,
-            sources=[chunk.model_dump(mode="json") for chunk in rag_context.chunks],
+            sources=list(rag_context.chunks),
         )
     except Exception as exc:
         logger.exception("context failed")

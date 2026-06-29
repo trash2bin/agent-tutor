@@ -9,12 +9,14 @@ dependencies = []
 # ── Workspace ─────────────────────────────────────────────────────────
 [tool.uv.sources]
 agent-tutor-sdk = { workspace = true }
+rag = { workspace = true }
+demo-api = { workspace = true }
+demo-web = { workspace = true }
 
 [tool.uv.workspace]
 members = [
     "agent-tutor-sdk",
     "rag",
-    "mcp_server",
     "demo/api",
     "demo/web",
 ]
@@ -22,6 +24,9 @@ members = [
 # ── Dev dependencies ─────────────────────────────────────────────────
 [dependency-groups]
 dev = [
+    "rag[cli]",        # faker, python-docx для agent-rag-ingest/docgen/seedgen
+    "rag[pg]",         # psycopg2-binary для RAG с PostgreSQL
+    "demo-api[pg]",    # psycopg2-binary для API с PostgreSQL
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=5.0.0",
@@ -36,9 +41,7 @@ dev = [
 asyncio_mode = "auto"
 testpaths = [
     "agent-tutor-sdk/tests",
-    "fixtures/tests",
     "rag/tests",
-    "mcp_server/tests",
     "demo/api/tests",
     "demo/web/tests",
 ]

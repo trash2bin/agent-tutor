@@ -17,8 +17,9 @@ from docx.oxml.ns import qn
 from docx.shared import Pt
 from faker import Faker
 
-from agent_tutor_sdk.contracts import Discipline
 from agent_tutor_sdk.data_client import DataServiceClientSync as DataServiceClient
+from agent_tutor_sdk.models import Entity
+from agent_tutor_sdk.rag.client import RagClientSync, RAG_SERVICE_URL
 from rag.fixtures._material import Material
 from rag.fixtures.catalog import (
     CURRICULUM,
@@ -27,7 +28,6 @@ from rag.fixtures.catalog import (
     GROUP_SPECIALTY_MAP,
     SPECIALITIES,
 )
-from rag.fixtures.rag_tools import RagTools
 
 # Выходная директория для сгенерированных материалов.
 # По умолчанию — ./generated_materials относительно cwd.
@@ -119,7 +119,7 @@ class GeneratedDocument:
 
 @dataclass(frozen=True)
 class DocumentScenario:
-    discipline: Discipline
+    discipline: Entity
     spec: MaterialSpec
     specialty: str
     group_name: str
@@ -273,7 +273,7 @@ class DocumentScenarioFactory:
     def from_env(cls) -> DocumentScenarioFactory:
         return cls(seed=_env_optional_int("DOCGEN_FAKE_SEED"))
 
-    def build(self, discipline: Discipline, spec: MaterialSpec) -> DocumentScenario:
+    def build(self, discipline: Entity, spec: MaterialSpec) -> DocumentScenario:
         specialty = self._specialty_for_discipline(discipline.name)
         group_name = self._group_for_specialty(specialty)
         course = self.random.randint(1, 4)
@@ -349,7 +349,7 @@ class DocumentTextGenerator:
 
     def generate(
         self,
-        discipline: Discipline,
+        discipline: Entity,
         material: MaterialSpec | str,
     ) -> str:
         spec = (
@@ -437,15 +437,14 @@ MATERIAL_SPECS: tuple[MaterialSpec, ...] = (
 class MaterialDocumentGenerator:
     def __init__(
         self,
-        rag_tools: RagTools,
+        rag_client: RagClientSync | None = None,
         output_dir: str | Path | None = None,
         text_generator: DocumentTextGenerator | None = None,
         material_specs: Sequence[MaterialSpec] = MATERIAL_SPECS,
         data_client: "DataServiceClient | None" = None,
     ) -> None:
-        self.rag_tools = rag_tools
+        self._rag = rag_client or RagClientSync(RAG_SERVICE_URL)
         self._data_client = data_client or DataServiceClient()
-        self.doc_repo = rag_tools.pipeline.repository
         self.output_dir = Path(
             output_dir or os.environ.get("DOCGEN_OUTPUT_DIR", DEFAULT_OUTPUT_DIR)
         )
@@ -458,7 +457,7 @@ class MaterialDocumentGenerator:
         force: bool = False,
     ) -> list[Material]:
         # Проверяем что дисциплина существует через data-service HTTP
-        disciplines = self._data_client.get_all_disciplines()
+        disciplines = self._data_client.list_all("disciplines")
         discipline = next((d for d in disciplines if d.id == discipline_id), None)
         if discipline is None:
             return []
@@ -466,7 +465,7 @@ class MaterialDocumentGenerator:
         self._remove_stale_generated_documents(discipline_id, force=force)
 
         existing = self._valid_generated_materials(
-            self.doc_repo.get_materials(discipline_id)
+            self._list_materials(discipline_id)
         )
         missing_types = self._expected_material_types() - {
             material.type for material in existing
@@ -481,11 +480,11 @@ class MaterialDocumentGenerator:
         for document in generated:
             self._index_generated_document(discipline.id, document)
 
-        return self.doc_repo.get_materials(discipline_id)
+        return self._list_materials(discipline_id)
 
     def generate_documents(
         self,
-        discipline: Discipline,
+        discipline: Entity,
         material_types: set[str] | None = None,
     ) -> list[GeneratedDocument]:
         discipline_dir = self.output_dir / _slugify(discipline.name)
@@ -500,7 +499,7 @@ class MaterialDocumentGenerator:
 
     def _generate_document(
         self,
-        discipline: Discipline,
+        discipline: Entity,
         spec: MaterialSpec,
         discipline_dir: Path,
     ) -> GeneratedDocument:
@@ -516,10 +515,28 @@ class MaterialDocumentGenerator:
             text=text,
         )
 
-    def _file_name(self, spec: MaterialSpec, discipline: Discipline) -> str:
+    def _file_name(self, spec: MaterialSpec, discipline: Entity) -> str:
         prefix = _slugify(spec.title_prefix)
         discipline_name = _slugify(discipline.name)
         return f"{prefix}_{discipline_name}{spec.suffix}"
+
+    def _list_materials(self, discipline_id: str) -> list[Material]:
+        from rag.fixtures._material import Material
+
+        docs = self._rag.list_documents(discipline_id=discipline_id)
+        return [
+            Material(
+                id=doc.id,
+                discipline_id=doc.discipline_id or "",
+                type="document",
+                title=doc.title,
+                file_name=doc.source_path.split("/")[-1],
+                source_path=doc.source_path,
+                mime_type=doc.mime_type,
+                content="",
+            )
+            for doc in docs
+        ]
 
     def _index_generated_document(
         self,
@@ -527,23 +544,13 @@ class MaterialDocumentGenerator:
         document: GeneratedDocument,
     ) -> None:
         try:
-            chunks = self.rag_tools.pipeline.chunker.chunk_pages(
-                [{"page": None, "text": document.text}]
-            )
-            self.rag_tools.pipeline.repository.save_document_with_chunks(
-                source_path=str(document.path.resolve()),
-                chunks=chunks,
+            self._rag.import_document(
+                path=str(document.path.resolve()),
                 discipline_id=discipline_id,
                 title=document.title,
-                vector_store=self.rag_tools.pipeline.vector_store,
             )
         except Exception:
-            self.rag_tools.pipeline.repository.save_generated_document_fallback(
-                path=str(document.path),
-                discipline_id=discipline_id,
-                title=document.title,
-                text=document.text,
-            )
+            self._save_fallback(str(document.path), discipline_id, document.title, document.text)
 
     def _remove_stale_generated_documents(
         self,
@@ -551,13 +558,13 @@ class MaterialDocumentGenerator:
         force: bool,
     ) -> None:
         if force:
-            self._delete_generated_documents_where(
+            self._delete_generated_docs_where(
                 discipline_id=discipline_id,
                 missing_only=False,
             )
             return
 
-        self._delete_generated_documents_where(
+        self._delete_generated_docs_where(
             discipline_id=discipline_id,
             missing_only=True,
         )
@@ -565,65 +572,50 @@ class MaterialDocumentGenerator:
 
     def _delete_outdated_generated_documents(self, discipline_id: str) -> None:
         expected_extensions = self._expected_extensions()
-        rows_to_delete = []
-        for material in self.doc_repo.get_materials(discipline_id):
+        to_delete = []
+        for material in self._list_materials(discipline_id):
             source_path = Path(material.source_path)
             if not self._is_generated_path(source_path):
                 continue
 
             expected_extension = expected_extensions.get(material.type)
             if expected_extension and source_path.suffix.lower() != expected_extension:
-                rows_to_delete.append(
-                    {"id": material.id, "source_path": material.source_path}
-                )
+                to_delete.append(material)
 
-        self._delete_document_rows(rows_to_delete)
+        self._delete_materials(to_delete)
 
-    def _delete_generated_documents_where(
+    def _delete_generated_docs_where(
         self,
         discipline_id: str,
         missing_only: bool,
     ) -> None:
-        rows = self.doc_repo.list_generated_document_rows(
-            path_marker=self.output_dir.name,
-            discipline_id=discipline_id,
-        )
-
-        rows_to_delete = []
-        for row in rows:
-            source_path = Path(row["source_path"])
+        materials = self._list_materials(discipline_id)
+        to_delete = []
+        for material in materials:
+            source_path = Path(material.source_path)
             if not self._is_generated_path(source_path):
                 continue
             if missing_only and source_path.exists():
                 continue
-            rows_to_delete.append(row)
+            to_delete.append(material)
 
-        self._delete_document_rows(rows_to_delete)
+        self._delete_materials(to_delete)
 
-    def _delete_document_rows(self, rows: Iterable[Any]) -> None:
-        deleted_any = False
-        for row in rows:
-            self._delete_generated_document_row(row)
-            deleted_any = True
-
-        if deleted_any:
-            self._cleanup_empty_output_dirs()
-
-    def _delete_generated_document_row(self, row: Any) -> None:
-        document_id = row["id"]
-        source_path = Path(row["source_path"])
-
-        try:
-            self.rag_tools._delete_document_vectors(document_id)
-        except Exception:
-            pass
-
-        self.doc_repo.delete_document_record(document_id, commit=False)
-        if source_path.exists():
+    def _delete_materials(self, materials: list[Material]) -> None:
+        for material in materials:
+            source_path = Path(material.source_path)
             try:
-                source_path.unlink()
-            except OSError:
+                self._rag.delete_document(document_id=material.id)
+            except Exception:
                 pass
+            if source_path.exists():
+                try:
+                    source_path.unlink()
+                except OSError:
+                    pass
+
+        if materials:
+            self._cleanup_empty_output_dirs()
 
     def _cleanup_empty_output_dirs(self) -> None:
         if not self.output_dir.exists():
@@ -661,6 +653,12 @@ class MaterialDocumentGenerator:
                 continue
             valid.append(material)
         return valid
+
+    @staticmethod
+    def _save_fallback(path: str, discipline_id: str, title: str, text: str) -> None:
+        path_obj = Path(path)
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
+        path_obj.write_text(text, encoding="utf-8")
 
     def _expected_extensions(self) -> dict[str, str]:
         return {spec.material_type: spec.suffix for spec in self.material_specs}

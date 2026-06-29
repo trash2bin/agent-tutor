@@ -1,56 +1,27 @@
-"""HTTP DTO для Core API сервиса.
+"""Re-exports from the canonical SDK location.
 
-Определяет контракты взаимодействия между Web-фронтендом и API-сервером.
-
-Доменные модели (Student, Teacher, Grade, ...) живут в agent_tutor_sdk.contracts.
+All HTTP DTO models moved to ``agent_tutor_sdk.api.models``
+to be the single source of truth for OpenAPI generation.
 """
 
-from __future__ import annotations
+from agent_tutor_sdk.api.models import (
+    BacklogDetailResponse,
+    BacklogEvent,
+    BacklogListResponse,
+    BacklogSessionMetadata,
+    ChatMessage,
+    ChatRequest,
+    HealthResponse,
+    SessionHistoryResponse,
+)
 
-from typing import List, Optional
-
-from pydantic import BaseModel, Field
-
-
-# === Запросы ===
-
-
-class ChatRequest(BaseModel):
-    """Запрос на начало или продолжение чата."""
-
-    message: str = Field(
-        ..., min_length=1, description="Текст сообщения от пользователя"
-    )
-    session_id: Optional[str] = Field(
-        default="default", description="ID сессии для сохранения истории"
-    )
-
-
-# === Ответы ===
-
-
-class HealthResponse(BaseModel):
-    """Состояние API сервиса и его связей с LLM."""
-
-    api: str = "ok"
-    ollama: dict = Field(..., description="Статус подключения к LLM провайдеру")
-
-
-class BacklogListResponse(BaseModel):
-    """Список всех сессий в бэклоге."""
-
-    sessions: List[dict] = Field(..., description="Список метаданных сессий")
-
-
-class BacklogDetailResponse(BaseModel):
-    """Записи конкретной сессии из бэклога."""
-
-    records: List[dict] = Field(..., description="Список событий/записей сессии")
-    session_id: str
-    count: int
-
-
-class SessionHistoryResponse(BaseModel):
-    """История сообщений чата для сессии."""
-
-    messages: List[dict] = Field(..., description="Список сообщений (role, content)")
+__all__ = [
+    "BacklogDetailResponse",
+    "BacklogEvent",
+    "BacklogListResponse",
+    "BacklogSessionMetadata",
+    "ChatMessage",
+    "ChatRequest",
+    "HealthResponse",
+    "SessionHistoryResponse",
+]

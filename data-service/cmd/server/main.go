@@ -31,7 +31,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/agent-tutor/data-service/internal/config"
+	"github.com/agent-tutor/agent-tutor-go/config"
 	"github.com/agent-tutor/data-service/internal/configgen"
 	"github.com/agent-tutor/data-service/internal/datasource"
 	"github.com/agent-tutor/data-service/internal/server"
