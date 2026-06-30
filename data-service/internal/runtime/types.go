@@ -22,6 +22,10 @@ import (
 	"fmt"
 )
 
+// PlaceholderFunc преобразует порядковый номер '?' в нативный плейсхолдер.
+// Сигнатура совпадает с AdapterSubset.TranslatePlaceholder.
+type PlaceholderFunc func(index int) string
+
 // Entity — публичное описание одной сущности (таблицы) клиента.
 //
 // Имена полей (Fields[].Name) — публичные (camelCase, для API/JSON).

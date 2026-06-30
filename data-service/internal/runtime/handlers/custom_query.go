@@ -10,6 +10,11 @@ import (
 )
 
 // CustomQueryHandler обрабатывает эндпоинты с операцией custom_query.
+//
+// Tenant row-level фильтрация НЕ применяется автоматически для custom queries —
+// запрос должен включать tenant_id в SQL самостоятельно. Это осознанное решение:
+// custom queries — это JOIN'ы и сложные выражения, где автоматическая подстановка
+// WHERE была бы ненадёжной.
 func CustomQueryHandler(c *Context, queryID string, params []config.EndpointParam) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cq, ok := c.CustomQueries[queryID]

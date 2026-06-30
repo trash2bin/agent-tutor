@@ -25,6 +25,14 @@ func GetByIDHandler(c *Context, entityName string) http.HandlerFunc {
 			return
 		}
 
+		// Tenant filter
+		translate := asPlaceholderFunc(c.Adapter)
+		tenantWhere, tenantArgs := tenantFilter(entityName, c.Auth, c.tenantID(r), len(query.Args), translate)
+		if tenantWhere != "" {
+			query.SQL += " AND " + tenantWhere
+			query.Args = append(query.Args, tenantArgs...)
+		}
+
 		rows, err := c.DB.QueryContext(r.Context(), query.SQL, query.Args...)
 		if err != nil {
 			RespondError(w, http.StatusInternalServerError, "db_error", err.Error())

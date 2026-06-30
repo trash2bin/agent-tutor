@@ -7,36 +7,30 @@
 
 ## 📋 Системный промпт
 
-Системный промпт задает **критически важные правила** работы агента:
+Системный промпт задает **критически важные правила** работы агента и теперь генерируется динамически в зависимости от доступных инструментов текущего тенанта.
 
-**Файл:** [`orchestrator.py`](orchestrator.py)
+**Файл:** [`orchestrator.py`](orchestrator.py) → метод `_generate_system_prompt()`
 
-```python
-SYSTEM_PROMPT = """
-Ты университетский ассистент с доступом к базе данных через MCP-инструменты.
+Агент больше не использует статичный `SYSTEM_PROMPT`. Вместо этого он:
+1. Получает список доступных инструментов от MCP-клиента.
+2. Формирует описание инструментов.
+3. Вставляет это описание в шаблон промпта, чтобы модель точно знала, какие данные она может запрашивать для конкретного клиента (тенанта).
 
-КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА:
-1. Ты НЕ знаешь никаких данных о студентах, расписании, оценках, преподавателях или документах без инструментов.
-2. При любом вопросе о данных университета сначала используй MCP-инструмент.
-3. Не выдумывай ответ из памяти.
-4. Если вопрос общий — отвечай кратко и по делу.
+Это предотвращает «кризис идентичности» при переключении между разными доменами данных (например, университет $\rightarrow$ магазин).
 
-ПРАВИЛА ОТВЕТА:
-- Отвечай на языке пользователя, по умолчанию используй русский.
-- Если данных нет — прямо скажи об этом.
-- Если не понял запрос — уточни.
-""".strip()
-```
-
-**Где используется:** В начале каждого запроса добавляется как первое сообщение в список `messages`:
+**Где используется:** В начале каждого запроса в методе `_build_messages_raw()`:
 
 **Файл:** [`orchestrator.py`](orchestrator.py) → метод `_build_messages_raw()`
 
 ```python
 def _build_messages_raw(self, user_message: str, session_id: SessionId) -> list[dict[str, Any]]:
     history = self.conversation_manager.get_history_messages(session_id)
+    
+    # Динамическая генерация промпта на основе доступных инструментов
+    system_prompt = self._generate_system_prompt(self.current_tools) 
+    
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},  # <-- СЮДА
+        {"role": "system", "content": system_prompt},  # <-- ДИНАМИЧЕСКИЙ ПРОМПТ
         *history,
         {"role": "user", "content": user_message},
     ]
@@ -156,13 +150,19 @@ async def stream_events(
 
 **Файл:** [`orchestrator.py`](orchestrator.py) → метод `_build_messages_raw()`
 
+Агент использует заголовок `X-Tenant-ID` для определения контекста тенанта и динамически генерирует системный промпт.
+
 ```python
 def _build_messages_raw(self, user_message: str, session_id: SessionId) -> list[dict[str, Any]]:
     history = self.conversation_manager.get_history_messages(session_id)
+    
+    # Динамическая генерация промпта на основе доступных инструментов текущего тенанта
+    system_prompt = self._generate_system_prompt(self.current_tools) 
+    
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},  # Системный промпт
-        *history,                                      # История сессии
-        {"role": "user", "content": user_message},    # Текущий запрос
+        {"role": "system", "content": system_prompt},
+        *history,
+        {"role": "user", "content": user_message},
     ]
 ```
 
@@ -308,6 +308,7 @@ async def _handle_tool_calls(
         ))
         
         # === ВЫЗОВ MCP ИНСТРУМЕНТА (try/except — per-tool error recovery) ===
+        # MCPClient теперь автоматически пробрасывает X-Tenant-ID из сессии
         try:
             tool_result: ToolResult = await self.mcp_client.call_tool(session, name, arguments)
         except Exception as exc:

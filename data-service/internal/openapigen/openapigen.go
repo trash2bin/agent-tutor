@@ -30,6 +30,9 @@ func Generate(cfg *config.Config, host, title, version string, hasAdmin bool) ma
 		},
 		"paths":      buildPaths(cfg, hasAdmin),
 		"components": buildComponents(cfg),
+		"security": []map[string]any{
+			{"BearerAuth": []string{}},
+		},
 	}
 }
 
@@ -85,14 +88,173 @@ func buildPaths(cfg *config.Config, hasAdmin bool) map[string]any {
 		paths[path].(map[string]any)[method] = op
 	}
 
-	// /admin/* (если адаптер передан в роутер)
+	// /admin/* (if admin is enabled)
 	if hasAdmin {
+		adminTag := []string{"Admin"}
+		adminSec := []map[string]any{{"BearerAuth": []string{}}}
+
+		// --- Tenant Management ---
+		paths["/admin/tenants"] = map[string]any{
+			"get": map[string]any{
+				"summary":     "Список всех тенантов",
+				"operationId": "admin_list_tenants",
+				"tags":        adminTag,
+				"security":    adminSec,
+				"responses": map[string]any{
+					"200": map[string]any{
+						"description": "Список тенантов",
+						"content": map[string]any{
+							"application/json": map[string]any{
+								"schema": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/TenantResponse"}},
+							},
+						},
+					},
+				},
+			},
+			"post": map[string]any{
+				"summary":     "Добавить новый тенант",
+				"operationId": "admin_add_tenant",
+				"tags":        adminTag,
+				"security":    adminSec,
+				"requestBody": map[string]any{
+					"required": true,
+					"content": map[string]any{
+						"application/json": map[string]any{
+							"schema": map[string]any{"$ref": "#/components/schemas/TenantRequest"},
+						},
+					},
+				},
+				"responses": map[string]any{
+					"201": map[string]any{
+						"description": "Тенант создан",
+						"content": map[string]any{
+							"application/json": map[string]any{
+								"schema": map[string]any{"type": "object"},
+							},
+						},
+					},
+					"409": errorResponse("Тенант уже существует"),
+					"500": errorResponse("Ошибка при создании тенанта"),
+				},
+			},
+		}
+
+		paths["/admin/tenants/{id}"] = map[string]any{
+			"get": map[string]any{
+				"summary":     "Информация о конкретном тенанте",
+				"operationId": "admin_get_tenant",
+				"tags":        adminTag,
+				"security":    adminSec,
+				"parameters": []map[string]any{
+					{"name": "id", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
+				},
+				"responses": map[string]any{
+					"200": map[string]any{
+						"description": "Данные тенанта",
+						"content": map[string]any{
+							"application/json": map[string]any{
+								"schema": map[string]any{"$ref": "#/components/schemas/TenantResponse"},
+							},
+						},
+					},
+					"404": errorResponse("Тенант не найден"),
+				},
+			},
+			"delete": map[string]any{
+				"summary":     "Удалить тенант",
+				"operationId": "admin_remove_tenant",
+				"tags":        adminTag,
+				"security":    adminSec,
+				"parameters": []map[string]any{
+					{"name": "id", "in": "path", "required": true, "schema": map[string]any{"type": "string"}},
+				},
+				"responses": map[string]any{
+					"200": map[string]any{"description": "Успешно удалено"},
+					"403": errorResponse("Нельзя удалить default тенант"),
+					"404": errorResponse("Тенант не найден"),
+				},
+			},
+		}
+
+		// --- Config Management ---
+		paths["/admin/config"] = map[string]any{
+			"get": map[string]any{
+				"summary":     "Текущий конфиг default-тенанта",
+				"operationId": "admin_get_config",
+				"tags":        adminTag,
+				"security":    adminSec,
+				"responses": map[string]any{
+					"200": map[string]any{
+						"description": "Конфигурация",
+						"content": map[string]any{
+							"application/json": map[string]any{
+								"schema": map[string]any{"$ref": "#/components/schemas/ConfigResponse"},
+							},
+						},
+					},
+				},
+			},
+			"post": map[string]any{
+				"summary":     "Обновить конфиг default-тенанта",
+				"operationId": "admin_update_config",
+				"tags":        adminTag,
+				"security":    adminSec,
+				"requestBody": map[string]any{
+					"required": true,
+					"content": map[string]any{
+						"application/json": map[string]any{
+							"schema": map[string]any{"type": "object"},
+						},
+					},
+				},
+				"responses": map[string]any{
+					"200": map[string]any{"description": "Конфиг обновлен и применен"},
+					"400": errorResponse("Ошибка валидации или сборки роутера"),
+					"500": errorResponse("Ошибка записи на диск"),
+				},
+			},
+		}
+
+		paths["/admin/config/reload"] = map[string]any{
+			"post": map[string]any{
+				"summary":     "Hot reload конфига с диска",
+				"operationId": "admin_config_reload",
+				"tags":        adminTag,
+				"security":    adminSec,
+				"responses": map[string]any{
+					"200": map[string]any{"description": "Конфиг перезагружен"},
+					"500": errorResponse("Ошибка перезагрузки"),
+				},
+			},
+		}
+
+		paths["/admin/config/versions"] = map[string]any{
+			"get": map[string]any{
+				"summary":     "История версий конфига",
+				"operationId": "admin_config_versions",
+				"tags":        adminTag,
+				"security":    adminSec,
+				"responses": map[string]any{
+					"200": map[string]any{
+						"description": "Список версий",
+						"content": map[string]any{
+							"application/json": map[string]any{
+								"schema": map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/VersionInfo"}},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Existing legacy admin endpoints
 		paths["/admin/discover"] = map[string]any{
 			"get": map[string]any{
 				"summary":     "Сгенерировать конфиг из схемы БД (GET-версия)",
 				"description": "Интроспектирует БД и возвращает config.json. ?raw=true — чистый JSON без обёртки.",
 				"operationId": "admin_discover",
-				"tags":        []string{"Admin"},
+				"tags":        adminTag,
+				"security":    adminSec,
 				"parameters": []map[string]any{
 					{
 						"name": "raw", "in": "query", "required": false,
@@ -118,7 +280,8 @@ func buildPaths(cfg *config.Config, hasAdmin bool) map[string]any {
 				"summary":     "Перегенерировать и сохранить конфиг из схемы БД",
 				"description": "Интроспектирует БД, генерирует config.json и перезаписывает файл на диске. Требует настроенный configPath.",
 				"operationId": "admin_config_rewrite",
-				"tags":        []string{"Admin"},
+				"tags":        adminTag,
+				"security":    adminSec,
 				"responses": map[string]any{
 					"200": map[string]any{
 						"description": "Конфиг перезаписан",
@@ -168,11 +331,61 @@ func buildComponents(cfg *config.Config) map[string]any {
 		},
 	}
 
+	// Admin API schemas
+	schemas["TenantResponse"] = map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id":         map[string]any{"type": "string"},
+			"driver":     map[string]any{"type": "string"},
+			"entities":   map[string]any{"type": "integer"},
+			"endpoints":  map[string]any{"type": "integer"},
+			"healthy":    map[string]any{"type": "boolean"},
+			"error":      map[string]any{"type": "string"},
+			"created_at": map[string]any{"type": "string", "format": "date-time"},
+		},
+	}
+	schemas["TenantRequest"] = map[string]any{
+		"type": "object",
+		"required": []string{"id", "config"},
+		"properties": map[string]any{
+			"id":         map[string]any{"type": "string"},
+			"config":     map[string]any{"type": "object", "description": "Full config.Config object"},
+			"config_path": map[string]any{"type": "string", "description": "Optional path to save config file"},
+		},
+	}
+	schemas["ConfigResponse"] = map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"version":   map[string]any{"type": "integer"},
+			"driver":    map[string]any{"type": "string"},
+			"entities":  map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"endpoints": map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+		},
+	}
+	schemas["VersionInfo"] = map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name":      map[string]any{"type": "string"},
+			"size_bytes": map[string]any{"type": "integer"},
+			"mod_time":  map[string]any{"type": "string", "format": "date-time"},
+		},
+	}
+
 	for _, e := range cfg.Entities {
 		schemas[e.Name] = entitySchema(e)
 	}
 
-	return map[string]any{"schemas": schemas}
+	return map[string]any{
+		"schemas": schemas,
+		"securitySchemes": map[string]any{
+			"BearerAuth": map[string]any{
+				"type":         "http",
+				"scheme":       "bearer",
+				"bearerFormat": "JWT",
+				"description":  "Введите ADMIN_TOKEN из .env",
+			},
+		},
+	}
 }
 
 func entitySchema(e config.Entity) map[string]any {

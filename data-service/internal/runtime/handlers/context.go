@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/agent-tutor/agent-tutor-go/config"
 	"github.com/agent-tutor/data-service/internal/runtime"
 )
 
@@ -20,6 +21,21 @@ type Context struct {
 	Resolver      *runtime.EntityResolver
 	CustomQueries map[string]runtime.CustomQuery
 	URLParam      URLParamFunc
+
+	// Auth — multi-tenancy row-level isolation (фаза 3.7).
+	Auth *config.AuthConfig
+
+	// TenantIDFunc извлекает tenant_id из HTTP request context.
+	// Устанавливается TenantIDMiddleware в endpoint_builder.
+	TenantIDFunc func(r *http.Request) string
+}
+
+// tenantID извлекает tenant_id из request с помощью TenantIDFunc.
+func (c *Context) tenantID(r *http.Request) string {
+	if c.TenantIDFunc == nil {
+		return ""
+	}
+	return c.TenantIDFunc(r)
 }
 
 // RespondJSON отправляет JSON-ответ с заданным статусом.

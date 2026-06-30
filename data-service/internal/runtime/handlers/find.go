@@ -15,6 +15,8 @@ func FindHandler(c *Context, entityName, searchField, queryParam string) http.Ha
 			return
 		}
 
+		translate := asPlaceholderFunc(c.Adapter)
+
 		paramName := queryParam
 		if paramName == "" {
 			paramName = searchField
@@ -22,8 +24,9 @@ func FindHandler(c *Context, entityName, searchField, queryParam string) http.Ha
 
 		value := r.URL.Query().Get(paramName)
 		if value == "" {
-			// Fallback — список всех записей
-			query, err := c.Builder.BuildList(entity, "", nil)
+			// Fallback — список всех записей (с row_filter)
+			tenantWhere, tenantArgs := tenantFilter(entityName, c.Auth, c.tenantID(r), 0, translate)
+			query, err := c.Builder.BuildList(entity, tenantWhere, tenantArgs)
 			if err != nil {
 				RespondError(w, http.StatusInternalServerError, "query_error", err.Error())
 				return
@@ -45,10 +48,18 @@ func FindHandler(c *Context, entityName, searchField, queryParam string) http.Ha
 			return
 		}
 
+		// BuildFind с row_filter: формируем where clause из find + tenant
 		query, err := c.Builder.BuildFind(entity, searchField, value)
 		if err != nil {
 			RespondError(w, http.StatusInternalServerError, "query_error", err.Error())
 			return
+		}
+
+		// Добавляем tenant-фильтр
+		tenantWhere, tenantArgs := tenantFilter(entityName, c.Auth, c.tenantID(r), len(query.Args), translate)
+		if tenantWhere != "" {
+			query.SQL += " AND " + tenantWhere
+			query.Args = append(query.Args, tenantArgs...)
 		}
 
 		rows, err := c.DB.QueryContext(r.Context(), query.SQL, query.Args...)

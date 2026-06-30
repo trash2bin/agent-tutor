@@ -20,7 +20,9 @@ import (
 //
 // Если introspectAdapter не nil — регистрируются /admin/* endpoint'ы.
 // configPath — путь к файлу конфига (для /admin/config/rewrite).
-func NewRouterFromConfig(cfg *config.Config, db runtime.AdapterSubset, adapter runtime.AdapterSubset, introspectAdapter datasource.Adapter, configPath string) (http.Handler, error) {
+// adminCtx — опциональный контекст для admin API (hot reload и версионирование).
+// Если nil — admin endpoints не регистрируются.
+func NewRouterFromConfig(cfg *config.Config, db runtime.AdapterSubset, adapter runtime.AdapterSubset, introspectAdapter datasource.Adapter, configPath string, adminCtx *AdminContext) (http.Handler, error) {
 	entities := runtime.ConfigToEntities(cfg.Entities)
 	customQueries := runtime.ConfigToCustomQueries(cfg.CustomQueries)
 
@@ -38,6 +40,8 @@ func NewRouterFromConfig(cfg *config.Config, db runtime.AdapterSubset, adapter r
 		Resolver:      resolver,
 		CustomQueries: customQueries,
 		URLParam:      chi.URLParam,
+		Auth:          cfg.Auth,
+		TenantIDFunc:  tenantIDFromContext,
 	}
 
 	r := chi.NewRouter()
@@ -45,6 +49,15 @@ func NewRouterFromConfig(cfg *config.Config, db runtime.AdapterSubset, adapter r
 	r.Use(RequestIDMiddleware)
 	r.Use(StructuredLoggingMiddleware)
 	r.Use(chimw.RealIP)
+
+	// Multi-tenancy: X-Tenant-ID middleware (если auth настроен)
+	if cfg.Auth != nil && cfg.Auth.Strategy == config.AuthStrategyHeader {
+		tenantHeader := cfg.Auth.TenantHeader
+		if tenantHeader == "" {
+			tenantHeader = "X-Tenant-ID"
+		}
+		r.Use(TenantIDMiddleware(tenantHeader))
+	}
 
 	// Системные эндпоинты (всегда)
 	r.Get("/docs", swaggerHandler)
@@ -54,10 +67,17 @@ func NewRouterFromConfig(cfg *config.Config, db runtime.AdapterSubset, adapter r
 	// MCP-манифест — единственный source of truth для mcp-gateway
 	r.Get("/mcp/manifest", handlers.MCPManifestHandler(cfg))
 
-	// /admin/* — админские эндпоинты (если адаптер передан)
-	if introspectAdapter != nil {
-		r.Get("/admin/discover", discoverHandler(introspectAdapter, cfg.DataSource))
-		r.Post("/admin/config/rewrite", rewriteHandler(introspectAdapter, cfg.DataSource, configPath))
+	// /admin/* — admin endpoints (protect ADMIN_TOKEN, фаза 3.7)
+	if introspectAdapter != nil && adminCtx != nil {
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(AdminAuthMiddleware)
+			r.Get("/config", adminConfigHandler(cfg))
+			r.Post("/config", adminConfigUpdateHandler(adminCtx))
+			r.Post("/config/reload", adminConfigReloadHandler(adminCtx))
+			r.Get("/config/versions", adminConfigVersionsHandler(adminCtx))
+			r.Post("/config/rewrite", adminRewriteHandler(introspectAdapter, cfg.DataSource, configPath, adminCtx))
+			r.Get("/discover", discoverHandler(introspectAdapter, cfg.DataSource))
+		})
 	}
 
 	for _, ep := range cfg.Endpoints {
@@ -206,4 +226,11 @@ func rewriteHandler(adp datasource.Adapter, ds config.DataSourceConfig, configPa
 			"note":      "Конфиг сохранён. Перезапусти сервис чтобы применить.",
 		})
 	}
+}
+
+// tenantIDFromContext — реализация handlers.Context.TenantIDFunc.
+// Извлекает tenant_id из контекста HTTP-запроса, помещённый TenantIDMiddleware.
+func tenantIDFromContext(r *http.Request) string {
+	v, _ := r.Context().Value(tenantIDKey).(string)
+	return v
 }

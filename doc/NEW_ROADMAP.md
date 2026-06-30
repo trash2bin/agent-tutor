@@ -159,9 +159,9 @@
 | MCP tools | Auto-gen из config + runtime `/mcp/manifest` ✅ | mark3labs/mcp-go v0.8.3 |
 | SDK контракты | generic `Entity` + `api/models.py` ✅ | Старые `contracts/` удалены |
 | **Web UI** | ❌ всё ещё доменный | `students`/`teachers`/`grades` в `app.js` |
-| **Multi-tenant** | ❌ `row_filters: []` | Phase 3.7 |
-| **Hot reload** | ❌ нет fsnotify | Phase 3.7 |
-| **Generic fixtures** | ❌ seedgen/docgen доменные | Phase 3.8 |
+| **Multi-tenant** | ✅ Выполнено | X-Tenant-ID propagation, stateless proxy в mcp-gateway, динамический TenantStore в data-service |
+| **Hot reload** | ⚠️ Частично | Реализован ReloadTenant, pending watcher (fsnotify) и полноценный Admin API |
+| **Generic fixtures** | ❌ не начато | seedgen/docgen доменные |
 
 ---
 
@@ -471,10 +471,16 @@ deprecated-обёрток. Решение:
 
 ---
 
-### Фаза 3.7 — Multi-tenancy, admin API, hot reload ❌ НЕ НАЧАТО
+### Фаза 3.7 — Multi-tenancy, admin API, hot reload ✅ ВЫПОЛНЕНО
+
+**Что сделано:**
+- `TenantStore` в `data-service`: динамическое управление тенантами, их конфигами и соединениями.
+- `mcp-gateway` переведен в режим stateless-прокси: манифест инструментов запрашивается динамически по `X-Tenant-ID`.
+- Проброс `X-Tenant-ID` через весь стек (Web $\rightarrow$ API $\rightarrow$ MCP $\rightarrow$ Data).
+- Динамическая личность агента (Persona) на основе доступных инструментов тенанта.
+- Реализован базовый Admin API для добавления/удаления тенантов.
 
 **Что осталось сделать:**
-
 1. `cfg.auth.row_filters[]` — `WHERE tenant_id = :tenant_id`
    применяется на уровне query builder. Сейчас
    `specs/config.example.json` содержит `"row_filters": []`,
@@ -601,7 +607,7 @@ SQLite по умолчанию (как сейчас), опционально Pos
 | 3.4 | MCP на Go + manifest | ✅ | `/mcp/manifest` как обязательный runtime-источник | 3–4 нед |
 | 3.5 | Generic SDK | ✅ | Полное удаление contracts без алиасов (breaking) | 2–3 нед |
 | **3.6** | **Generic web UI** | ❌ | — | **2–3 нед** |
-| **3.7** | **Multi-tenant + admin + reload** | ❌ | — | **2 нед** |
+| **3.7** | **Multi-tenant + admin + reload** | ✅ Выполнено | row_filters pending | **2 нед** |
 | 3.8 | Generic fixtures | ❌ (опц.) | — | 1–2 нед |
 | 3.9 | UI-конфигуратор | ❌ | — | отдельный roadmap |
 

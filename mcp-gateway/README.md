@@ -5,36 +5,40 @@ Generic MCP (Model Context Protocol) сервер на Go. Заменил Python
 **Ключевая фича**: MCP-инструменты **авто-генерируются** из конфига data-service.
 Не нужно писать ни строчки кода для новой БД — достаточно запустить `--discover`.
 
-## Как это работает
+## 🏢 Multi-tenancy и Stateless архитектура
+
+`mcp-gateway` реализован как **stateless динамический шлюз**. Он не хранит статический реестр инструментов при старте, а разрешает их на лету на основе идентификатора тенанта.
+
+### Как это работает
 
 ```
-                     config.json
-                          │
-               ┌──────────┘
-               ▼
-     ┌──────────────────────┐
-     │     data-service     │
-     │     (Go, :8084)      │
-     │                      │
-     │  /mcp/manifest ──────┼──HTTP──► mcp-gateway (Go, :8083)
-     │                      │                   │
-     │  REST API ◀──────────┼──HTTP── mcp-gateway │
-     └──────────────────────┘              │
-                                       tools/list
-                                            │
-                                       ┌────▼────┐
-                                       │  Агент  │
-                                       │(LiteLLM)│
-                                       └─────────┘
+                      X-Tenant-ID: <id>
+                               │
+                               ▼
+     ┌──────────────────────────────────────────────────┐
+     │                 mcp-gateway (Go)                 │
+     │                                                  │
+     │  1. Fetch Manifest ──────┼───► data-service      │
+     │     (with X-Tenant-ID)   │     (/mcp/manifest)   │
+     │                          │                      │
+     │  2. Resolve Tool ────────┼───► Mapping Logic     │
+     │                          │                      │
+     │  3. Proxy Call ──────────┼───► data-service      │
+     │     (with X-Tenant-ID)   │     (REST API)        │
+     └──────────────────────────┴───────────────────────┘
+                                       │
+                                       ▼
+                                   Агент (LLM)
 ```
 
-1. **config.json** — единый конфиг, описывающий БД, сущности, эндпоинты, MCP-инструменты
-2. **data-service** строит REST API по `cfg.endpoints[]` и **публикует MCP-манифест** на `/mcp/manifest`
-3. **mcp-gateway** при старте фетчит манифест через HTTP (а не парсит config.json напрямую)
-4. data-service остаётся **единственным source of truth** для конфигурации
-5. Каждый endpoint → MCP tool. Имя выводится из `op` + entity: `get_by_id/students → get_students`
+1. **X-Tenant-ID**: Основной ключ изоляции. Передается в заголовках каждого запроса.
+2. **Динамический манифест**: При каждом вызове инструментов (`tools/list` или `tools/call`) шлюз запрашивает актуальный манифест конкретного тенанта у `data-service` через `/mcp/manifest`.
+3. **Разрешение инструментов**: `toolsCallHandler` сопоставляет имя вызванного инструмента с путем к эндпоинту из полученного манифеста.
+4. **Проброс (Propagation)**: Заголовок `X-Tenant-ID` пробрасывается сквозь шлюз в `data-service`, обеспечивая доступ к правильной БД тенанта.
 
 ## Два режима генерации инструментов
+
+Инструменты определяются в конфиге тенанта в `data-service`.
 
 ### 1. Auto-generated (рекомендуемый)
 
@@ -62,7 +66,7 @@ Generic MCP (Model Context Protocol) сервер на Go. Заменил Python
 
 ### 2. Explicit override (для кастомных имён и параметров)
 
-Если нужно другое имя или описание — добавьте `mcp_tools[]`:
+Если нужно другое имя или описание — добавьте `mcp_tools[]` в конфиг тенанта:
 
 ```json
 {
@@ -77,36 +81,7 @@ Generic MCP (Model Context Protocol) сервер на Go. Заменил Python
 }
 ```
 
-Explicit тулы перезаписывают auto-generated с тем же именем. Всё остальное — из `endpoints`.
-
-### Демо: БД маркетплейса за 2 минуты
-
-Создали SQLite с таблицами `customers, products, orders, order_items, categories`,
-запустили `--discover` — получили конфиг без единой ручной правки:
-
-```bash
-# data-service
-DATA_SERVICE_URL=http://127.0.0.1:8084 DS_CONFIG=/tmp/marketplace.json go run ./cmd/server/
-
-# mcp-gateway (конфиг получает из data-service по HTTP)
-DATA_SERVICE_URL=http://127.0.0.1:8084 go run ./cmd/
-```
-
-→ **10 MCP-инструментов** авто-сгенерировано:
-```
-🔧 health             — проверка статуса
-🔧 stats              — счётчики по всем таблицам
-🔧 get_products(id)   — товар по ID
-🔧 find_products(name) — ��оиск товаров
-🔧 get_customers(id)  — клиент по ID
-🔧 find_customers(name) — пои��к клиентов
-🔧 get_categories(id) — категория по ID
-🔧 find_categories(name) — поиск категорий
-🔧 get_orders(id)     — заказ по ID
-🔧 get_order_items(id) — позиция заказа по ID
-```
-
-**Ни одной строчки Go/Python кода. Только `--discover` + `config.json`.**
+Explicit тулы перезаписывают auto-generated с тем же именем.
 
 ## Схема именования инструментов
 
@@ -119,63 +94,57 @@ DATA_SERVICE_URL=http://127.0.0.1:8084 go run ./cmd/
 | `builtin_stats` | `stats` | `stats` |
 | `custom_query` | `{query_id}` | `student_grades` |
 
-Параметры выводятся из path-паттерна (`{id}`, `{name}`) и `search_field` для `find`/`list`.
-
 ## Архитектура
 
 ```
 mcp-gateway/
 ├── cmd/
-│   ├── main.go                 # точка входа, HTTP-роутер, SSE + JSON-RPC
+│   ├── main.go                 # Точка входа: динамический toolsCallHandler, SSE + JSON-RPC
 │   ├── mcp_debug.go            # //go:embed playground.html (MCP_DEV)
-│   └── playground.html         # веб-интерфейс для тестирования тулов
+│   └── playground.html         # Веб-интерфейс для тестирования тулов
 ├── internal/
 │   ├── httpclient/
-│   │   └── client.go           # HTTP-клиент к data-service: FetchConfig + Call
+│   │   └── client.go           # HTTP-клиент к data-service: FetchConfigWithTenant + Call
 │   ├── ragclient/
 │   │   └── client.go           # HTTP-клиент к RAG: SearchDocuments, ListDocuments, GetRagContext
 │   └── tools/
-│       └── tools.go            # авто-генерация data-тулов + статические RAG-тулы
+│       └── tools.go            # Статические RAG-тулы
 ├── Dockerfile
 ├── go.mod / go.sum
 └── README.md
 ```
 
-## Поток вызова инструмента
+## Поток вызова инструмента (Detailed)
 
-1. Агент шлёт `POST /mcp/message` с JSON-RPC `tools/call`
-2. mcp-gateway находит инструмент по име��и, получает endpoint URL
-3. Path-параметры (`{id}`) подставляются через `url.PathEscape`, остальные — query
-4. HTTP GET к data-service, JSON-ответ → `CallToolResult`
-
-```
-MCP вызывающий → POST /mcp/message { method: "tools/call", params: { name: "get_student", arguments: { id: "123" } } }
-                      │
-                      ▼
-mcp-gateway: name="get_student" → endpoint="/students/{id}" → args={id:"123"}
-                      │
-                      ▼ resolvePathParams("/students/{id}", {id:"123"}) = "/students/123"
-                      │
-                      ▼ GET http://data-service:8084/students/123
-                      │
-                      ▼ { "course": 1, "full_name": "Иванов Иван", ... }
-                      │
-MCP ← CallToolResult { content: [{ type: "text", text: "{ ... }" }] }
-```
+1. **Запрос**: Агент шлёт `POST /tools/call` с заголовком `X-Tenant-ID: uni-tenant`.
+2. **Манифест**: `mcp-gateway` делает `GET /mcp/manifest` $\rightarrow$ `data-service` с тем же заголовком.
+3. **Разрешение**:
+   - Ищет инструмент в `endpoints` (по правилам именования).
+   - Если не найден $\rightarrow$ ищет в `mcp_tools`.
+   - Если не найден $\rightarrow$ проверяет статические RAG-тулы.
+4. **Вызов**:
+   - Подставляет path-параметры (`{id}`) из аргументов.
+   - Выполняет `GET` к `data-service` с заголовком `X-Tenant-ID`.
+5. **Ответ**: JSON-ответ от `data-service` оборачивается в MCP-результат и возвращается агенту.
 
 ## Запуск
 
+### 1. Запуск сервисов
 ```bash
-# 1. Запустить data-service (публикует конфиг на /mcp/manifest)
+# data-service
 cd ../data-service
 DS_CONFIG=/tmp/myapp-config.json go run ./cmd/server/
 
-# 2. Запустить mcp-gateway (фетчит манифест из data-service)
+# mcp-gateway
 cd ../mcp-gateway
 DATA_SERVICE_URL=http://127.0.0.1:8084 go run ./cmd/
+```
 
-# Сборка
-go build -o mcp-gateway ./cmd/
+### 2. Регистрация тенантов (Обязательно)
+Так как шлюз теперь stateless, тенанты должны быть зарегистрированы в `data-service` перед использованием:
+```bash
+# Используйте вспомогательный скрипт для локальной разработки
+uv run scripts/setup_tenants.py
 ```
 
 ## Dev-режим
@@ -185,67 +154,37 @@ MCP_DEV=true DATA_SERVICE_URL=http://127.0.0.1:8084 go run ./cmd/
 ```
 
 Доступно:
-- `/debug` — MCP Playground: веб-интерфейс для тестирования всех инструментов
+- `/debug` — MCP Playground: веб-интерфейс для тестирования всех инструментов (требует `X-Tenant-ID` в запросах)
 - `/debug/sessions` — активные SSE-сессии
-- `/debug/config` — загруженный конфиг (source: data-service /mcp/manifest)
-- `/` → редирект на `/debug`
-- Логирование всех HTTP-запросов и MCP-сообщений (уровень debug)
+- `/debug/config` — текущий конфиг тенанта (фетчится из `/mcp/manifest`)
 
 ## Эндпоинты
 
-| Путь | Метод | Описание |
-|---|---|---|
-| `/health` | GET | Статус сервиса |
-| `/mcp` | GET | SSE endpoint (streamable HTTP) |
-| `/mcp` | POST | JSON-RPC (fallback для Python SDK) |
-| `/mcp/message` | POST | JSON-RPC сообщения |
-| `/tools/list` | GET | Список инструментов (JSON-RPC) |
-| `/tools/call` | POST | Вызов инструмента (JSON-RPC) |
-| `/debug` | GET | MCP Playground (dev) |
-| `/debug/sessions` | GET | Активные SSE сессии (dev) |
-| `/debug/config` | GET | Текущий конфиг (dev) |
-
-### SSE протокол
-
-```
-1. GET /mcp  →  event: endpoint, data: http://host/mcp/message?sessionId=<uuid>
-2. POST /mcp/message?sessionId=<uuid>  →  JSON-RPC запрос
-```
-
-Совместим с `mcp.client.streamable_http.streamable_http_client` (Python SDK).
+| Путь | Метод | Описание | Заголовок |
+|---|---|---|---|
+| `/health` | GET | Статус сервиса | - |
+| `/mcp` | GET | SSE endpoint (streamable HTTP) | `X-Tenant-ID` |
+| `/mcp/message` | POST | JSON-RPC сообщения | `X-Tenant-ID` |
+| `/tools/list` | GET | Список инструментов тенанта | `X-Tenant-ID` |
+| `/tools/call` | POST | Вызов инструмента тенанта | `X-Tenant-ID` |
+| `/debug` | GET | MCP Playground (dev) | `X-Tenant-ID` |
 
 ## Переменные окружения
 
 | Переменная | Дефолт | Описание |
 |---|---|---|
-| `DATA_SERVICE_URL` | `http://127.0.0.1:8084` | Базовый URL data-service (откуда fetch-ится `/mcp/manifest`) |
+| `DATA_SERVICE_URL` | `http://127.0.0.1:8084` | Базовый URL data-service |
 | `DATA_SERVICE_TIMEOUT` | `30` | Таймаут HTTP-запроса в секундах |
-| `RAG_SERVICE_URL` | `http://127.0.0.1:8082` | Базовый URL RAG-сервиса (для `search_documents` и др.) |
-| `RAG_HTTP_TIMEOUT` | `30` | Таймаут HTTP-запроса к RAG в секундах |
+| `RAG_SERVICE_URL` | `http://127.0.0.1:8082` | Базовый URL RAG-сервиса |
 | `MCP_PORT` | `8083` | Порт HTTP |
 | `MCP_DEV` | — | Включает debug endpoints + логирование |
 
-## Ограничения
-
-- **No JOIN endpoints** — для объединения таблиц (`customer → orders`) нужны `custom_queries` в конфиге
-- **Только SELECT** — data-service read-only по дизайну
-- **Нет фильтрации** — `find` только по одному полю (`search_field`)
-- **Одна БД на инстанс** — multi-tenancy в фазе 3.7
-
 ## RAG-инструменты (статическая регистрация)
 
-Три RAG-тула регистрируются всегда, независимо от конфига data-service:
+Три RAG-тула доступны всем тенантам:
 
 | Инструмент | RAG-эндпоинт | Описание |
 |---|---|---|
-| `search_documents` | `POST /search` | Семантический поиск по загруженным документам (лекции, методички) |
-| `list_documents` | `POST /documents/list` | Список документов в базе знаний с фильтрацией по дисциплине |
-| `get_rag_context` | `POST /context` | Готовый контекст из релевантных фрагментов для подстановки в ответ LLM |
-
-Если RAG-сервис недоступен (проверяется через `GET /health` при регистрации),
-вызов тула возвращает осмысленную ошибку вместо краша шлюза.
-
-## Совместимость с Python mcp_server (legacy — удалён)
-
-Python-сервер `mcp_server/` был заменён на `mcp-gateway` (Go) и полностью удалён.
-Все инструменты (data-service + RAG) теперь обслуживаются Go-шлюзом.
+| `search_documents` | `POST /search` | Семантический поиск по документам |
+| `list_documents` | `POST /documents/list` | Список документов с фильтром по дисциплине |
+| `get_rag_context` | `POST /context` | Готовый контекст для ответа LLM |

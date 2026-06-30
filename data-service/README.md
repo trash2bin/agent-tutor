@@ -124,10 +124,68 @@ internal/
 └── db/                        ← legacy connector (только для тестов)
     └── connector.go           ← DB interface + New()
 ```
+## Multi-tenancy Support (Фаза 3.7 ✅)
 
-## API
+Data-service поддерживает изоляцию данных нескольких клиентов (вузов) в одном процессе через `TenantStore`. Каждый tenant — это независимый набор конфигураций, соединений с БД и HTTP-роутеров.
 
-### Пользовательские эндпоинты (из конфига)
+### Архитектура TenantStore
+
+`TenantStore` работает как главный диспетчер запросов. Вместо одного глобального роутера, он управляет мапой `TenantInstance`.
+
+```
+                     X-Tenant-ID: tenant-a
+                        ↓
+┌────────────────── TenantStore ──────────────────────┐
+│                                                      │
+│  default   → config.json  → router_default (pg/sqlite)│
+│  tenant-a  → config_a     → router_a (pg_a)          │
+│  tenant-b  → config_b     → router_b (pg_b)          │
+│  ...                                                  │
+│                                                      │
+│  /admin/*  → adminRouter (CRUD tenant'ов + конфигов)  │
+│  /health   → multi-tenant health check                │
+└──────────────────────────────────────────────────────┘
+```
+
+**TenantInstance** содержит всё необходимое для работы одного клиента:
+- `ID`: Идентификатор тенанта (соответствует значению `X-Tenant-ID`).
+- `Config`: Специфичный для этого тенанта JSON-конфиг.
+- `Conn`: Собственный пул соединений с БД (`*sql.DB`).
+- `Router`: Изолированный `chi.Router`, построенный на основе конфига тенанта.
+- `ConfigPath`: Путь к файлу конфига для поддержки hot-reload.
+
+### Маршрутизация и X-Tenant-ID
+
+Разделение потоков происходит на уровне `TenantStore.ServeHTTP`:
+1. **Админские запросы** (`/admin/*`) всегда уходят в общий `adminRouter`.
+2. **Проверка здоровья** (`/health`) обрабатывается специальным `multiTenantHealthHandler`.
+3. **Все остальные запросы**:
+   - Сервис извлекает значение заголовка `X-Tenant-ID`.
+   - Если заголовок присутствует $\rightarrow$ запрос направляется в роутер соответствующего `TenantInstance`.
+   - Если заголовок отсутствует $\rightarrow$ запрос направляется в роутер `default` тенанта.
+   - Если тенант не найден $\rightarrow$ возвращается `404 Not Found (tenant_not_found)`.
+
+### Admin API для управления тенантами
+
+Управление тенантами происходит динамически без перезагрузки сервиса:
+
+| Метод | Путь | Описание |
+|---|---|---|
+| POST | `/admin/tenants` | Добавить tenant на лету. Принимает `{id, config, config_path}`. Создает соединение с БД и билдит роутер. |
+| GET | `/admin/tenants` | Список всех активных tenant'ов и их текущий статус (healthy/unhealthy). |
+| GET | `/admin/tenants/{id}` | Детали конкретного tenant'а. |
+| DELETE | `/admin/tenants/{id}` | Удалить tenant. Происходит «мягкое» удаление (graceful drain): тенант удаляется из мапы, и после этого закрывается его пул соединений. |
+
+*Примечание: `default` тенант защищен от удаления и возвращает `403 Forbidden` при попытке DELETE.*
+
+### Обратная совместимость /health
+
+Для поддержки существующих инструментов мониторинга (Docker healthcheck, `dev.sh status`) эндпоинт `/health` работает в двух режимах:
+- **Single-tenant**: Если в системе только один (дефолтный) тенант и он здоров $\rightarrow$ возвращается классический `{"status": "ok"}`.
+- **Multi-tenant**: Если тенантов несколько $\rightarrow$ возвращается агрегированный статус (`healthy`, `degraded` или `unhealthy`) и список состояний всех тенантов.
+
+---
+
 
 Эндпоинты определяются в `config.json` → `endpoints[]`. Типовой набор:
 
@@ -148,8 +206,16 @@ internal/
 | GET | `/admin/discover` | Прочитать схему БД, сгенерировать и отдать конфиг |
 | GET | `/admin/discover?raw=true` | То же, но чистый JSON (можно сохранить в файл) |
 | POST | `/admin/config/rewrite` | Прочитать схему, сгенерировать, **сохранить в config-файл** |
+| GET | `/admin/config` | Текущий конфиг (DSN замаскирован) |
+| POST | `/admin/config` | Загрузить новый конфиг (с валидацией по JSON Schema) |
+| POST | `/admin/config/reload` | Перезагрузить конфиг с диска (hot reload) |
+| GET | `/admin/config/versions` | История версий конфига |
+| POST | `/admin/tenants` | Добавить tenant на лету (`{id, config, config_path}`) |
+| GET | `/admin/tenants` | Список всех активных tenant'ов и их статусов |
+| GET | `/admin/tenants/{id}` | Детали конкретного tenant'а |
+| DELETE | `/admin/tenants/{id}` | Удалить tenant (graceful drain, default удалить нельзя) |
 
-> Админские эндпоинты доступны только если адаптер данных передан в роутер.
+Все admin-эндпоинты требуют `Authorization: Bearer <ADMIN_TOKEN>`.
 
 ### Системные
 
@@ -306,6 +372,7 @@ PORT=8085 ./bin/data-service
 | `DB_PATH` | `university.db` | Для --seed режима |
 | `DATABASE_URL` | — | Для --seed режима (PostgreSQL) |
 | `CONFIG_SCHEMA` | `specs/config.schema.json` | Путь к JSON Schema |
+| `ADMIN_TOKEN` | (пусто) | Bearer-токен для `/admin/*` эндпоинтов. Без токена admin API возвращает 401 |
 
 ### Docker
 
@@ -699,6 +766,94 @@ cd data-service && go run ./cmd/seed-cli/ --seed-path /tmp/seed.json
 Вся логика обработки запросов (`runtime/`, `server/`, `openapigen/`) не меняется —
 она работает через `database/sql` и не зависит от драйвера.
 
+## Мульти-тенантность (фаза 3.7 ✅)
+
+Data-service поддерживает несколько изолированных конфигураций БД в одном процессе
+через `TenantStore`. Каждый tenant — отдельный connection pool + роутер.
+
+### Как это работает
+
+```
+                     X-Tenant-ID: tenant-a
+                        ↓
+┌────────────────── TenantStore ──────────────────────┐
+│                                                      │
+│  default   → config.json  → router_default (pg/sqlite)│
+│  tenant-a  → config_a     → router_a (pg_a)          │
+│  tenant-b  → config_b     → router_b (pg_b)          │
+│  ...                                                  │
+│                                                      │
+│  /admin/*  → adminRouter (CRUD tenant'ов + конфигов)  │
+│  /health   → multi-tenant health check                │
+└──────────────────────────────────────────────────────┘
+```
+
+### Tenant API
+
+```bash
+# Добавить tenant на лету (новая БД подключается без рестарта)
+curl -X POST http://localhost:8084/admin/tenants \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"school-x","config":{...конфиг...}}'
+
+# Список всех tenant'ов
+curl http://localhost:8084/admin/tenants \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# Удалить tenant (graceful drain — коннекшн закрывается после удаления из мапы)
+curl -X DELETE http://localhost:8084/admin/tenants/school-x \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# Health показывает статус всех tenant'ов
+curl http://localhost:8084/health
+# Single-tenant:  {"db":"ok","status":"ok"}
+# Multi-tenant:   {"status":"degraded","tenants":[{"id":"default","status":"healthy"},{"id":"broken","status":"unhealthy"}]}
+```
+
+### Ключевые свойства
+
+- **Router-per-tenant**: Каждый tenant получает свой `chi.Router`, построенный через `NewRouterFromConfig`.
+- **Независимые connection pool'ы**: У каждого tenant свой `*sql.DB` со своим `pool_size`.
+- **Default tenant**: Неудаляемый через admin API (возвращает 403).
+- **X-Tenant-ID**: Заголовок, по которому `TenantStore.ServeHTTP` диспатчит запрос в роутер конкретного tenant'а. Без заголовка — default tenant.
+- **Admin-auth**: Все `/admin/*` эндпоинты требуют `Authorization: Bearer <ADMIN_TOKEN>` (env `ADMIN_TOKEN`).
+
+### Точки входа
+
+| Файл | Что |
+|---|---|
+| `internal/server/tenant.go` | `TenantStore`, `TenantInstance`, `ConnAdapter`, admin handlers, health check |
+| `internal/server/tenant_test.go` | 27 unit-тестов (lifecycle, routing, health, admin API) |
+| `cmd/server/main.go` | Bootstrap: `store.SetDefault()` + `store.BuildAdminRouter()` |
+
+### Row filters (фаза 3.7, частично)
+
+`row_filters` в конфиге позволяют автоматически добавлять `WHERE`-условия в
+generic-запросы (`get_by_id`, `find`, `list`). На текущий момент это основа
+для X-Tenant-ID-фильтрации в multi-tenant сценариях.
+
+```jsonc
+{
+  "endpoints": [
+    {
+      "method": "GET", "path": "/items", "op": "list", "entity": "item",
+      "row_filters": [
+        { "field": "tenant_id", "from": "header", "header": "X-Tenant-ID" }
+      ]
+    }
+  ]
+}
+```
+
+Где `from`:
+- `header` — взять значение из HTTP-заголовка
+- `query` — из query-параметра
+- `value` — фиксированное значение (для admin-эндпоинтов)
+
+Custom-queries **не** фильтруются автоматически (ответственность на авторе SQL).
+Подробнее — `internal/runtime/handlers/row_filter.go` (7 unit-тестов).
+
 ## Тестирование
 
 ### Быстрый запуск
@@ -783,7 +938,7 @@ Python-тесты (MCP, API, Web) стучатся к data-service по HTTP и 
 | Фаза | Содержание | Оценка |
 |---|---|---|
 | 3.6 | Generic Web UI (рендер по схеме endpoint'а) | 2–3 недели |
-| 3.7 | Multi-tenancy, admin API, hot reload конфига | 2 недели |
+| 3.7 | ~~Multi-tenancy, admin API, hot reload конфига~~ ✅ Выполнено | — |
 | 3.8 | Generic fixtures (`agent-seedgen` для любого конфига) | опционально, 1–2 недели |
 | 3.9 | UI-конфигуратор | отдельный roadmap |
 

@@ -264,7 +264,7 @@ func makeHandler(td toolDef, client *httpclient.Client) server.ToolHandlerFunc {
 			}
 		}
 
-		result, err := client.Call(td.Endpoint, args)
+		result, err := client.Call(ctx, td.Endpoint, args)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("error calling %s: %v", td.Endpoint, err)), nil
 		}

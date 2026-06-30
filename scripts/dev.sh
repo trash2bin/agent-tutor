@@ -190,6 +190,12 @@ cmd_start() {
     # Доп. env для сервиса
     local extra_env=""
     case "$svc" in
+      data)
+        # ADMIN_TOKEN — если задан в .env, прокидываем в data-service для /admin/* эндпоинтов
+        if [ -n "${ADMIN_TOKEN:-}" ]; then
+          extra_env="ADMIN_TOKEN=$ADMIN_TOKEN"
+        fi
+        ;;
       mcp)
         extra_env="DATA_SERVICE_URL=http://127.0.0.1:$DATA_PORT LOG_LEVEL=info"
         if [ "$MCP_DEV" = "true" ]; then
@@ -228,6 +234,20 @@ cmd_start() {
   echo "    ./scripts/dev.sh logs api        — tail -f лога"
   echo "    ./scripts/dev.sh stop            — остановить все"
   echo "    ./scripts/dev.sh start          — dev-режим (MCP Playground ��строен)"
+  if [ -n "${ADMIN_TOKEN:-}" ]; then
+    echo ""
+    echo "  🔐 ADMIN_TOKEN задан — admin-эндпоинты data-service активны:"
+    echo "    curl -H 'Authorization: Bearer \$ADMIN_TOKEN' http://127.0.0.1:$DATA_PORT/admin/tenants"
+    echo "    POST   /admin/tenants         — добавить tenant"
+    echo "    GET    /admin/tenants         — список tenant'ов"
+    echo "    DELETE /admin/tenants/{id}    — удалить tenant"
+    echo "    GET    /admin/config          — текущий конфиг"
+    echo "    POST   /admin/config/reload   — перечитать конфиг с диска"
+  else
+    echo ""
+    echo "  ⚠️  ADMIN_TOKEN не задан — /admin/* эндпоинты data-service недоступны (401)."
+    echo "      Задай в .env: ADMIN_TOKEN=my-secret-token"
+  fi
 }
 
 wait_healthy() {

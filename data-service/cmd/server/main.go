@@ -15,13 +15,18 @@
 //	PORT          — порт HTTP (по умолчанию 8084)
 //	DS_CONFIG     — путь к конфигу (по умолчанию specs/config.example.json)
 //	LOG_LEVEL     — info (по умолчанию) или debug
+//	ADMIN_TOKEN   — Bearer-токен для /admin/* эндпоинтов (опционально; без токена admin API возвращает 401)
+//
+// Multi-tenancy: один процесс обслуживает несколько изолированных конфигов.
+// Все запросы диспатчатся через TenantStore (default tenant по умолчанию,
+// либо X-Tenant-ID заголовок). Tenant CRUD — через /admin/tenants.
+// Hot reload конфига — через fsnotify на config-файле (см. cmd/server/main.go → watchConfig).
 //
 // Seed-режим (dev-only) вынесен в отдельную утилиту cmd/seed-cli.
 package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -33,6 +38,10 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
+	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/agent-tutor/agent-tutor-go/config"
 	"github.com/agent-tutor/data-service/internal/configgen"
@@ -92,37 +101,54 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Для относительного DSN (SQLite) резолвим относительно директории конфига
+	// ── Determin DSN resolution (для относительных SQLite-путей) ──
 	if cfg.DataSource.Driver == config.DriverSQLite && !filepath.IsAbs(cfg.DataSource.DSN) && cfg.DataSource.DSN != ":memory:" && !strings.HasPrefix(cfg.DataSource.DSN, ":memory:?") {
 		cfg.DataSource.DSN = filepath.Join(filepath.Dir(absCfgPath), cfg.DataSource.DSN)
 	}
 
-
-	// ── Открываем БД через datasource registry ──
+	// ── Реестр адаптеров ──
 	registry := datasource.NewDefaultRegistry()
-	adapter, ok := registry.Get(string(cfg.DataSource.Driver))
+	_, ok := registry.Get(string(cfg.DataSource.Driver))
 	if !ok {
 		slog.Error("unsupported driver", "driver", cfg.DataSource.Driver, "drivers", registry.Drivers())
 		os.Exit(1)
 	}
 
-	dsn := cfg.DataSource.DSN
-	conn, err := adapter.Connect(context.Background(), dsn)
-	if err != nil {
-		slog.Error("connect to database", "driver", cfg.DataSource.Driver, "error", err)
+	// ── TenantStore: multi-tenant foundation (фаза 3.7) ──
+	store := server.NewTenantStore(registry)
+
+	// Bootstrap default tenant
+	bctx, bcancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := store.SetDefault(bctx, "default", cfg, absCfgPath); err != nil {
+		slog.Error("set default tenant", "error", err)
 		os.Exit(1)
 	}
-	defer conn.Close()
+	bcancel()
 
-	// ── Оборачиваем в AdapterSubset ──
-	dbAdapter := &connAdapter{conn: conn, adp: adapter}
+	// Build admin router (requires introspection adapter)
+	defaultInst, _ := store.GetTenant("default")
+	adminRouter := store.BuildAdminRouter(defaultInst.Adapter, absCfgPath)
 
-	// ── Строим config-driven роутер ──
-	router, err := server.NewRouterFromConfig(cfg, dbAdapter, dbAdapter, adapter, absCfgPath)
-	if err != nil {
-		slog.Error("build router", "error", err)
-		os.Exit(1)
-	}
+	// ── Hot reload: fsnotify на config-файл ──
+	go watchConfig(absCfgPath, func() {
+		rctx, rcancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer rcancel()
+		if err := store.ReloadTenant(rctx, "default", absCfgPath); err != nil {
+			slog.Error("hot reload: default tenant reload failed", "error", err)
+		}
+	})
+
+	// ── Top-level router ──
+	rootRouter := chi.NewRouter()
+	rootRouter.Use(server.RecoveryMiddleware)
+	rootRouter.Use(server.RequestIDMiddleware)
+	rootRouter.Use(server.StructuredLoggingMiddleware)
+	rootRouter.Use(chimw.RealIP)
+	rootRouter.Use(server.TenantIDMiddleware("X-Tenant-ID"))
+
+	// Mount admin endpoints separately to avoid routing conflicts
+	rootRouter.Mount("/admin", adminRouter)
+	rootRouter.Mount("/", store)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -133,7 +159,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:         addr,
-		Handler:      router,
+		Handler:      rootRouter,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -167,20 +193,6 @@ func main() {
 
 	slog.Info("data-service stopped")
 }
-
-// connAdapter combines datasource.Conn (query/ping) and datasource.Adapter
-// (quote/placeholder) into a single runtime.AdapterSubset-compatible type.
-type connAdapter struct {
-	conn datasource.Conn
-	adp  datasource.Adapter
-}
-
-func (c *connAdapter) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	return c.conn.QueryContext(ctx, query, args...)
-}
-func (c *connAdapter) PingContext(ctx context.Context) error          { return c.conn.PingContext(ctx) }
-func (c *connAdapter) QuoteIdentifier(name string) string            { return c.adp.QuoteIdentifier(name) }
-func (c *connAdapter) TranslatePlaceholder(index int) string         { return c.adp.TranslatePlaceholder(index) }
 
 // runMaterialize читает config.json (+ опциональный seed.json) из директории
 // сценария и создаёт БД.
@@ -283,6 +295,66 @@ func runDiscover() error {
 	// Выводим КОНФИГ в stdout (slog автоматически пишет в stderr с JSON-хендлером)
 	fmt.Println(string(b))
 	return nil
+}
+
+// watchConfig отслеживает изменения config-файла через fsnotify и вызывает
+// onReload при каждом изменении. Не следит за рекурсивными директориями —
+// только за файлом конфига.
+//
+// Требует абсолютного пути.
+func watchConfig(configPath string, onReload func()) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		slog.Error("fsnotify create watcher", "error", err)
+		return
+	}
+
+	configDir := filepath.Dir(configPath)
+	if err := watcher.Add(configDir); err != nil {
+		slog.Error("fsnotify add directory", "dir", configDir, "error", err)
+		return
+	}
+
+	slog.Info("hot reload: watching config", "path", configPath)
+
+	// Debounce: несколько событий подряд за N мс → один перезапуск
+	var debounceTimer *time.Timer
+	const debounceMs = 500 * time.Millisecond
+
+	go func() {
+		defer watcher.Close()
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				// Игнорируем события кроме WRITE/CREATE для нашего файла
+				if event.Op&(fsnotify.Write|fsnotify.Create) == 0 {
+					continue
+				}
+				// Разрешаем как точное совпадение, так и события на директории
+				if event.Name != configPath && event.Name == configDir {
+					// CREATE на директории — проверим stat файла
+					if _, err := os.Stat(configPath); os.IsNotExist(err) {
+						continue
+					}
+				} else if event.Name != configPath {
+					continue
+				}
+				slog.Debug("hot reload: config change detected", "event", event.String())
+				if debounceTimer != nil {
+					debounceTimer.Stop()
+				}
+				debounceTimer = time.AfterFunc(debounceMs, onReload)
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				slog.Error("fsnotify error", "error", err)
+			}
+		}
+	}()
 }
 
 

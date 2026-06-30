@@ -171,6 +171,24 @@ docker compose build
 | `hf_cache` | `/home/app/.cache/huggingface` | embedding-модели |
 | `pg_data` | `/var/lib/postgresql/data` | PostgreSQL-данные |
 
+### 🏢 Multi-tenancy Operational Model
+
+Проект поддерживает многопоточность (multi-tenancy) на уровне всего стека для изоляции данных разных клиентов (вузов) и обеспечения горизонтального масштабирования (stateless).
+
+**Архитектура изоляции**:
+- **X-Tenant-ID**: Основной ключ изоляции. Заголовок передаётся от клиента через все сервисы до БД.
+- **Data-service (TenantStore)**: Вместо одного конфига использует `TenantStore` — in-memory реестр `tenantID → TenantInstance`. Каждый экземпляр содержит свой конфиг, пул соединений с БД и изолированный роутер.
+- **MCP-gateway (Stateless Proxy)**: Больше не хранит статический реестр инструментов. При каждом запросе динамически запрашивает манифест инструментов из `data-service` для конкретного `X-Tenant-ID`.
+- **API (Dynamic Persona)**: Личность агента и его системный промпт генерируются динамически на основе доступных инструментов текущего тенанта.
+
+**Operational Flow**:
+`User Request` $\rightarrow$ `demo-web` (проксирует заголовок) $\rightarrow$ `demo-api` (извлекает TenantID, формирует промпт) $\rightarrow$ `mcp-gateway` (пробрасывает заголовок) $\rightarrow$ `data-service` (`TenantStore` роутит запрос в конкретную БД).
+
+**Преимущества**:
+- **Statelessness**: Все сервисы не хранят состояние сессии, что позволяет масштабировать их в Kubernetes.
+- **Изоляция**: Данные и инструменты одного вуза недоступны другому.
+- **Динамика**: Новые тенанты добавляются через Admin API без перезагрузки сервисов.
+
 ### 🐘 PostgreSQL (опционально, вместо SQLite)
 
 По умолчанию — SQLite (`university.db`). Для PostgreSQL задай `DATABASE_URL`:
@@ -873,3 +891,23 @@ git rev-parse HEAD  # сравнить с built_at_commit в graph.json
 - Не удаляй `graphify-out/` — перестройка графа стоит API-токенов.
 - В рабочем дереве могут быть пользовательские изменения. Не откатывай без просьбы.
 - Не коммить изменения без прямой просьбы пользователя.
+
+## 🏢 Multi-tenancy Operational Model
+
+Проект поддерживает многопоточность (multi-tenancy) на уровне `data-service` для изоляции данных разных клиентов (вузов).
+
+**Архитектура**:
+- **TenantStore**: Центральный реестр в `data-service`, хранящий карту `tenantID → TenantInstance`.
+- **TenantInstance**: Содержит отдельный `config.Config`, соединение с БД (`sql.DB`) и изолированный `chi.Router`.
+- **Маршрутизация**:
+  - Запрос с заголовком `X-Tenant-ID: <id>` роутится в соответствующий экземпляр БД и роутер.
+  - Запросы без заголовка роутятся в `default` tenant.
+- **Админ API** (`/admin/*`):
+  - Позволяет динамически добавлять, удалять и обновлять тенанты без перезагрузки сервиса.
+  - Защищен через `ADMIN_TOKEN`.
+  - `POST /admin/tenants` — создание нового тенанта (создает соединение и билдит роутер).
+- **Row-level Filtering**: Для сущностей, поддерживающих многопоточность внутри одной БД, применяется автоматическая фильтрация по `tenant_id`.
+- **Pass-through**: `mcp-gateway` и `demo-api` пробрасывают заголовок `X-Tenant-ID` в `data-service`.
+
+**Operational Flow**:
+`User Request` → `demo-api` (extracts TenantID) → `mcp-gateway` (forwards X-Tenant-ID) → `data-service` (TenantStore routes to specific DB).

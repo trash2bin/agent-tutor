@@ -29,9 +29,10 @@ import (
 
 // sseSession представляет активное SSE-подключение.
 type sseSession struct {
-	writer  http.ResponseWriter
-	flusher http.Flusher
-	done    chan struct{}
+	writer    http.ResponseWriter
+	flusher   http.Flusher
+	done      chan struct{}
+	tenantID  string
 }
 
 func main() {
@@ -48,12 +49,27 @@ func main() {
 	}
 	slog.Info("mcp-gateway starting")
 
-	// ── Конфиг через HTTP от data-service ──
-	client := httpclient.New()
-	mcpCfg, err := client.FetchConfig()
-	if err != nil {
-		slog.Error("fetch config from data-service", "error", err)
-		os.Exit(1)
+	// ── Конфиг: локальный файл (если задан MCP_LOCAL_CONFIG_PATH) или HTTP от data-service ──
+	var mcpCfg *config.Config
+	var configSource string
+	var err error
+
+	if localPath := os.Getenv("MCP_LOCAL_CONFIG_PATH"); localPath != "" {
+		slog.Info("loading config from local file", "path", localPath)
+		mcpCfg, err = config.Load(localPath)
+		if err != nil {
+			slog.Error("load local config", "path", localPath, "error", err)
+			os.Exit(1)
+		}
+		configSource = fmt.Sprintf("local:%s", localPath)
+	} else {
+		client := httpclient.New()
+		mcpCfg, err = client.FetchConfig()
+		if err != nil {
+			slog.Error("fetch config from data-service", "error", err)
+			os.Exit(1)
+		}
+		configSource = fmt.Sprintf("data-service:%s", client.BaseURL())
 	}
 
 	// ── MCP-сервер + регистрация тулов ──
@@ -63,8 +79,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("config loaded from data-service",
-		"data_service_url", client.BaseURL(),
+	slog.Info("config loaded",
+		"source", configSource,
 		"auto_tools", len(registry.GetToolDefs()),
 		"explicit_mcp_tools", len(mcpCfg.MCPTools),
 		"entities", len(mcpCfg.Entities),
@@ -132,6 +148,9 @@ func buildRouter(mcpServer *server.MCPServer, registry *tools.Registry, cfg *con
 	sessions := &sync.Map{}
 	r := chi.NewRouter()
 
+	// Create a shared HTTP client for handlers
+	client := httpclient.New()
+
 	if devMode {
 		r.Use(requestLogger)
 	}
@@ -160,10 +179,10 @@ func buildRouter(mcpServer *server.MCPServer, registry *tools.Registry, cfg *con
 	}
 
 	// tools/list (always available)
-	r.Get("/tools/list", toolsListHandler(mcpServer))
+	r.Get("/tools/list", toolsListHandler(mcpServer, client))
 
 	// tools/call (always available)
-	r.Post("/tools/call", toolsCallHandler(mcpServer))
+	r.Post("/tools/call", toolsCallHandler(mcpServer, client))
 
 	return r
 }
@@ -196,9 +215,10 @@ func sseHandler(sessions *sync.Map) http.HandlerFunc {
 
 		sessionID := uuid.New().String()
 		session := &sseSession{
-			writer:  w,
-			flusher: flusher,
-			done:    make(chan struct{}),
+			writer:    w,
+			flusher:   flusher,
+			done:      make(chan struct{}),
+			tenantID:  r.Header.Get("X-Tenant-ID"),
 		}
 		sessions.Store(sessionID, session)
 		defer sessions.Delete(sessionID)
@@ -242,8 +262,12 @@ func debugConfigHandler(registry *tools.Registry, cfg *config.Config, devMode bo
 		} else {
 			ragReason = registry.RagDisabledReason()
 		}
+		source := "data-service /mcp/manifest"
+		if localPath := os.Getenv("MCP_LOCAL_CONFIG_PATH"); localPath != "" {
+			source = fmt.Sprintf("local file: %s", localPath)
+		}
 		json.NewEncoder(w).Encode(map[string]any{
-			"source":        "data-service /mcp/manifest",
+			"source":        source,
 			"entities":      len(cfg.Entities),
 			"endpoints":     len(cfg.Endpoints),
 			"all_tools":     registry.GetToolNames(),
@@ -264,27 +288,90 @@ func debugPlaygroundHandler() http.HandlerFunc {
 	}
 }
 
-func toolsListHandler(mcpServer *server.MCPServer) http.HandlerFunc {
+func toolsListHandler(mcpServer *server.MCPServer, client *httpclient.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		req := map[string]any{
-			"jsonrpc": "2.0", "id": uuid.New().String(),
-			"method": "tools/list", "params": map[string]any{},
+		tenantID := r.Header.Get("X-Tenant-ID")
+		
+		cfg, err := client.FetchConfigWithTenant(tenantID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"failed to fetch tenant config: %s"}`, err), http.StatusInternalServerError)
+			return
 		}
-		rawReq, _ := json.Marshal(req)
-		ctx := mcpServer.WithContext(r.Context(), server.NotificationContext{
-			ClientID: "debug", SessionID: "debug",
+
+		tools := make([]map[string]any, 0)
+		for _, ep := range cfg.Endpoints {
+			name := ""
+			switch ep.Op {
+			case config.OpGetByID: name = "get_" + ep.Entity
+			case config.OpFind: name = "find_" + ep.Entity
+			case config.OpList: name = "list_" + ep.Entity
+			case config.OpCustomQuery: 
+				if ep.QueryID != "" { name = ep.QueryID }
+			}
+
+			if name != "" {
+				props := make(map[string]any)
+				for _, p := range ep.Params {
+					props[p.Name] = map[string]any{
+						"type": p.Type,
+						"description": p.Description,
+					}
+				}
+				tools = append(tools, map[string]any{
+					"name": name,
+					"description": ep.Description,
+					"inputSchema": map[string]any{
+						"type": "object",
+						"properties": props,
+					},
+				})
+			}
+		}
+		for _, mt := range cfg.MCPTools {
+			props := make(map[string]any)
+			for _, p := range mt.Params {
+				props[p.Name] = map[string]any{
+					"type": p.Type,
+					"description": p.Description,
+				}
+			}
+			tools = append(tools, map[string]any{
+				"name": mt.Name,
+				"description": mt.Description,
+				"inputSchema": map[string]any{
+					"type": "object",
+					"properties": props,
+				},
+			})
+		}
+		tools = append(tools, map[string]any{
+			"name": "search_documents",
+			"description": "Search documents",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{"type": "string", "description": "Search query"},
+				},
+			},
 		})
-		response := mcpServer.HandleMessage(ctx, rawReq)
-		if response != nil {
-			json.NewEncoder(w).Encode(response)
+
+		response := map[string]any{
+			"jsonrpc": "2.0",
+			"id": uuid.New().String(),
+			"result": map[string]any{
+				"tools": tools,
+			},
 		}
+		json.NewEncoder(w).Encode(response)
 	}
 }
 
-func toolsCallHandler(mcpServer *server.MCPServer) http.HandlerFunc {
+func toolsCallHandler(mcpServer *server.MCPServer, client *httpclient.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		tenantID := r.Header.Get("X-Tenant-ID")
+
 		var body struct {
 			Name      string         `json:"name"`
 			Arguments map[string]any `json:"arguments"`
@@ -293,19 +380,70 @@ func toolsCallHandler(mcpServer *server.MCPServer) http.HandlerFunc {
 			http.Error(w, fmt.Sprintf(`{"error":"invalid JSON: %s"}`, err), http.StatusBadRequest)
 			return
 		}
-		req := map[string]any{
-			"jsonrpc": "2.0", "id": uuid.New().String(),
-			"method": "tools/call",
-			"params": map[string]any{"name": body.Name, "arguments": body.Arguments},
+
+		cfg, err := client.FetchConfigWithTenant(tenantID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"failed to fetch tenant config: %s"}`, err), http.StatusInternalServerError)
+			return
 		}
-		rawReq, _ := json.Marshal(req)
-		ctx := mcpServer.WithContext(r.Context(), server.NotificationContext{
-			ClientID: "debug", SessionID: "debug",
-		})
-		response := mcpServer.HandleMessage(ctx, rawReq)
-		if response != nil {
-			json.NewEncoder(w).Encode(response)
+		
+		slog.Debug("tool call resolve", "name", body.Name, "tenant", tenantID)
+		var endpoint string
+		for _, ep := range cfg.Endpoints {
+			name := ""
+			switch ep.Op {
+			case config.OpGetByID: name = "get_" + ep.Entity
+			case config.OpFind: name = "find_" + ep.Entity
+			case config.OpList: name = "list_" + ep.Entity
+			case config.OpCustomQuery: 
+				if ep.QueryID != "" { name = ep.QueryID }
+			}
+			if name == body.Name {
+				slog.Debug("tool matched", "name", name, "endpoint", ep.Path)
+				endpoint = ep.Path
+				break
+			}
 		}
+		
+		if endpoint == "" {
+			for _, mt := range cfg.MCPTools {
+				if mt.Name == body.Name { endpoint = mt.Endpoint; break }
+			}
+		}
+		
+		if endpoint == "" {
+			if body.Name == "search_documents" {
+				endpoint = "/rag/search"
+			}
+			if body.Name == "list_documents" {
+				endpoint = "/rag/list"
+			}
+			if body.Name == "get_rag_context" {
+				endpoint = "/rag/context"
+			}
+			if endpoint == "" {
+				http.Error(w, fmt.Sprintf(`{"error":"tool %s not found for tenant %s"}`, body.Name, tenantID), http.StatusNotFound)
+				return
+			}
+		}
+
+		ctx := r.Context()
+		ctx = context.WithValue(ctx, httpclient.TenantIDKey, tenantID)
+		
+		result, err := client.Call(ctx, endpoint, body.Arguments)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"call failed: %s"}`, err), http.StatusInternalServerError)
+			return
+		}
+
+		response := map[string]any{
+			"jsonrpc": "2.0",
+			"id": uuid.New().String(),
+			"result": map[string]any{
+				"content": result,
+			},
+		}
+		json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -337,10 +475,24 @@ func mcpPostHandler(mcpServer *server.MCPServer, sessions *sync.Map) http.Handle
 			}
 		}
 
+		// Extract tenant ID: priority Header > Session
+		tenantID := r.Header.Get("X-Tenant-ID")
+		if tenantID == "" {
+			if si, ok := sessions.Load(sessionID); ok {
+				s := si.(*sseSession)
+				tenantID = s.tenantID
+			}
+		}
+
 		ctx := mcpServer.WithContext(r.Context(), server.NotificationContext{
 			ClientID:  sessionID,
 			SessionID: sessionID,
 		})
+
+		// Inject tenant ID into context for tools
+		if tenantID != "" {
+			ctx = context.WithValue(ctx, httpclient.TenantIDKey, tenantID)
+		}
 
 		response := mcpServer.HandleMessage(ctx, rawMessage)
 		if response != nil {

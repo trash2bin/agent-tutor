@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -74,7 +75,34 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 
 type contextKey string
 
-const correlationIDKey contextKey = "correlation_id"
+const (
+	correlationIDKey contextKey = "correlation_id"
+	tenantIDKey      contextKey = "tenant_id"
+)
+
+// TenantIDMiddleware извлекает tenant_id из заголовка (по конфигу auth.tenant_header).
+// Если auth не настроен — пропускает (tenantIDKey в контексте = "").
+func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
+	if tenantHeader == "" {
+		tenantHeader = "X-Tenant-ID"
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tenantID := r.Header.Get(tenantHeader)
+			if tenantID == "" {
+				// Case-insensitive fallback
+				for k, v := range r.Header {
+					if len(v) > 0 && strings.EqualFold(k, tenantHeader) {
+						tenantID = v[0]
+						break
+					}
+				}
+			}
+			ctx := context.WithValue(r.Context(), tenantIDKey, tenantID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
 
 type responseWriter struct {
 	http.ResponseWriter

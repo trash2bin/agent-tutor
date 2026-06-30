@@ -119,6 +119,7 @@ async def chat_handler(request: Request) -> StreamingResponse:
 
     message = chat_req.message
     session_id = chat_req.session_id
+    tenant_id = request.headers.get("X-Tenant-ID", "")
 
     if not message:
         return StreamingResponse(
@@ -133,7 +134,7 @@ async def chat_handler(request: Request) -> StreamingResponse:
     async def events():
         try:
             async for event in get_agent().stream_events(
-                message, session_id=session_id
+                message, session_id=session_id, tenant_id=tenant_id
             ):
                 payload = _event_payload(event.type, event.data)
                 if payload is not None:

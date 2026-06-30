@@ -2,9 +2,275 @@
   "version": 1,
   "data_source": {
     "driver": "sqlite",
-    "dsn": "/Users/ivan/code/agent-tutor/specs/university.db"
+    "dsn": "/Users/ivan/code/agent-tutor/university.db"
   },
+  "entities": [
+    {
+      "name": "disciplines",
+      "table": "disciplines",
+      "id_column": "id",
+      "fields": [
+        {
+          "name": "id",
+          "column": "id",
+          "type": "string",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "name",
+          "column": "name",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        },
+        {
+          "name": "description",
+          "column": "description",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        }
+      ]
+    },
+    {
+      "name": "grades",
+      "table": "grades",
+      "id_column": "id",
+      "fields": [
+        {
+          "name": "id",
+          "column": "id",
+          "type": "string",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "student_id",
+          "column": "student_id",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        },
+        {
+          "name": "discipline_id",
+          "column": "discipline_id",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        },
+        {
+          "name": "grade",
+          "column": "grade",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        },
+        {
+          "name": "date",
+          "column": "date",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        }
+      ]
+    },
+    {
+      "name": "groups",
+      "table": "groups",
+      "id_column": "id",
+      "fields": [
+        {
+          "name": "id",
+          "column": "id",
+          "type": "string",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "name",
+          "column": "name",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        },
+        {
+          "name": "speciality",
+          "column": "speciality",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        }
+      ]
+    },
+    {
+      "name": "schedule",
+      "table": "schedule",
+      "id_column": "id",
+      "fields": [
+        {
+          "name": "id",
+          "column": "id",
+          "type": "string",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "day",
+          "column": "day",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        },
+        {
+          "name": "group_id",
+          "column": "group_id",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        },
+        {
+          "name": "lessons_json",
+          "column": "lessons_json",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        }
+      ]
+    },
+    {
+      "name": "students",
+      "table": "students",
+      "id_column": "id",
+      "fields": [
+        {
+          "name": "id",
+          "column": "id",
+          "type": "string",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "name",
+          "column": "name",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        },
+        {
+          "name": "group_id",
+          "column": "group_id",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        },
+        {
+          "name": "course",
+          "column": "course",
+          "type": "int",
+          "nullable": true,
+          "primary_key": false
+        }
+      ]
+    },
+    {
+      "name": "teachers",
+      "table": "teachers",
+      "id_column": "id",
+      "fields": [
+        {
+          "name": "id",
+          "column": "id",
+          "type": "string",
+          "nullable": false,
+          "primary_key": true
+        },
+        {
+          "name": "name",
+          "column": "name",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        },
+        {
+          "name": "disciplines_json",
+          "column": "disciplines_json",
+          "type": "string",
+          "nullable": true,
+          "primary_key": false
+        }
+      ]
+    }
+  ],
   "endpoints": [
+    {
+      "method": "GET",
+      "path": "/disciplines/{id}",
+      "op": "get_by_id",
+      "entity": "disciplines"
+    },
+    {
+      "method": "GET",
+      "path": "/disciplines",
+      "op": "find",
+      "entity": "disciplines",
+      "search_field": "name",
+      "query_param": "name"
+    },
+    {
+      "method": "GET",
+      "path": "/grades/{id}",
+      "op": "get_by_id",
+      "entity": "grades"
+    },
+    {
+      "method": "GET",
+      "path": "/groups/{id}",
+      "op": "get_by_id",
+      "entity": "groups"
+    },
+    {
+      "method": "GET",
+      "path": "/groups",
+      "op": "find",
+      "entity": "groups",
+      "search_field": "name",
+      "query_param": "name"
+    },
+    {
+      "method": "GET",
+      "path": "/schedule/{id}",
+      "op": "get_by_id",
+      "entity": "schedule"
+    },
+    {
+      "method": "GET",
+      "path": "/students/{id}",
+      "op": "get_by_id",
+      "entity": "students"
+    },
+    {
+      "method": "GET",
+      "path": "/students",
+      "op": "find",
+      "entity": "students",
+      "search_field": "name",
+      "query_param": "name"
+    },
+    {
+      "method": "GET",
+      "path": "/teachers/{id}",
+      "op": "get_by_id",
+      "entity": "teachers"
+    },
+    {
+      "method": "GET",
+      "path": "/teachers",
+      "op": "find",
+      "entity": "teachers",
+      "search_field": "name",
+      "query_param": "name"
+    },
     {
       "method": "GET",
       "path": "/health",
@@ -16,5 +282,32 @@
       "op": "builtin_stats"
     }
   ],
-  "stats": {}
+  "stats": {
+    "counters": [
+      {
+        "name": "disciplines",
+        "entity": "disciplines"
+      },
+      {
+        "name": "grades",
+        "entity": "grades"
+      },
+      {
+        "name": "groups",
+        "entity": "groups"
+      },
+      {
+        "name": "schedule",
+        "entity": "schedule"
+      },
+      {
+        "name": "students",
+        "entity": "students"
+      },
+      {
+        "name": "teachers",
+        "entity": "teachers"
+      }
+    ]
+  }
 }

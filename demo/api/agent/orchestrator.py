@@ -119,23 +119,24 @@ class LLMAgent:
             yield self._format_sse_event(event)
 
     async def stream_events(
-        self, user_message: str, session_id: SessionId = "default"
+        self, user_message: str, session_id: SessionId = "default", tenant_id: str = ""
     ) -> AsyncIterator[AgentEvent]:
         """Stream agent events (tokens, tool calls, results, etc.)."""
         session_id = self.conversation_manager.normalize_session_id(session_id)
         logger.info(
-            "[AGENT] User message for session %s: %s...",
+            "[AGENT] User message for session %s (tenant: %s): %s...",
             session_id,
+            tenant_id,
             user_message[:100],
         )
 
         lock = self.conversation_manager.get_session_lock(session_id)
         async with lock:
-            async for event in self._run_turn(user_message, session_id):
+            async for event in self._run_turn(user_message, session_id, tenant_id):
                 yield event
 
     async def _run_turn(
-        self, user_message: str, session_id: SessionId
+        self, user_message: str, session_id: SessionId, tenant_id: str = ""
     ) -> AsyncIterator[AgentEvent]:
         """Execute a single conversation turn with multiple iterations."""
         # Build initial messages (async — sync SQLite через to_thread)
@@ -149,7 +150,7 @@ class LLMAgent:
         turn_id: TurnId = backlog.turn_start(session_id, user_message)
 
         try:
-            async with self.mcp_client.get_session() as session:
+            async with self.mcp_client.get_session(tenant_id=tenant_id) as session:
                 tools: list[dict[str, Any]] = await self.mcp_client.list_tools(session)
                 logger.info(
                     "[AGENT] Available tools: %s",
@@ -389,10 +390,12 @@ class LLMAgent:
                 tool_result: ToolResult = await self.mcp_client.call_tool(
                     session, name, arguments
                 )
+                # DETAILED LOGGING
+                logger.info("[ORCHESTRATOR] Tool %s returned OK=%s, ContentLength=%d", 
+                            name, tool_result.ok, len(tool_result.tool_content))
+                logger.debug("[ORCHESTRATOR] Tool %s full content: %s", name, tool_result.tool_content)
             except Exception as exc:
-                logger.warning(
-                    "[AGENT] Tool call '%s' failed: %s", name, exc
-                )
+                logger.exception("[ORCHESTRATOR] Tool call '%s' failed with exception", name)
                 tool_result = ToolResult(
                     tool_content=json.dumps({"error": True, "message": str(exc)}),
                     reminder=(
@@ -420,6 +423,7 @@ class LLMAgent:
             # ToolResult.reminder — system-сообщение с подсказкой для LLM.
             # ToolResult.tool_content — чистый JSON для role="tool" message.
             if tool_result.reminder:
+                logger.info("[ORCHESTRATOR] Adding system reminder: %s", tool_result.reminder)
                 messages.append(
                     {"role": "system", "content": tool_result.reminder}
                 )
@@ -429,6 +433,7 @@ class LLMAgent:
                 "tool_call_id": tool_call_id,
                 "name": name,
             }
+            logger.info("[ORCHESTRATOR] Adding tool message to history. Role=tool, ContentLength=%d", len(tool_result.tool_content))
             messages.append(tool_message)
             turn_messages.append(tool_message)
 

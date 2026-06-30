@@ -14,7 +14,11 @@ func ListHandler(c *Context, entityName string) http.HandlerFunc {
 			return
 		}
 
-		query, err := c.Builder.BuildList(entity, "", nil)
+		// Row-level tenant filter
+		translate := asPlaceholderFunc(c.Adapter)
+		tenantWhere, tenantArgs := tenantFilter(entityName, c.Auth, c.tenantID(r), 0, translate)
+
+		query, err := c.Builder.BuildList(entity, tenantWhere, tenantArgs)
 		if err != nil {
 			RespondError(w, http.StatusInternalServerError, "query_error", err.Error())
 			return

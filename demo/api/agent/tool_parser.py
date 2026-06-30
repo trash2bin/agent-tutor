@@ -54,13 +54,29 @@ class ToolCallParser:
         return calls
 
     def _extract_json_tool_calls(self, text_content: str) -> list[ParsedToolCall]:
-        """Extract tool calls from JSON blocks in text content."""
+        """Extract tool calls from JSON blocks or custom tags in text content."""
         calls: list[ParsedToolCall] = []
+        
+        # 1. Handle <tool_call> tags (e.g. <invoke name="foo">...)
+        tag_matches = re.findall(
+            r"<invoke\s+name=['\"]([^'\"]+)['\"]([^>]*)>", text_content
+        )
+        for name, extra in tag_matches:
+            calls.append(
+                ParsedToolCall(
+                    id=f"call_{name}_{uuid.uuid4().hex[:8]}",
+                    name=name,
+                    arguments={},
+                )
+            )
+        if calls:
+            return calls
+
         potential_jsons: list[str] = []
 
         # Try markdown JSON blocks
         md_matches = re.findall(
-            r"```(?:json)?\s*(\{.*\})\s*```", text_content, re.DOTALL
+            r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", text_content, re.DOTALL
         )
         potential_jsons.extend(md_matches)
 
@@ -70,6 +86,11 @@ class ToolCallParser:
             end_idx = text_content.rfind("}")
             if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
                 potential_jsons.append(text_content[start_idx : end_idx + 1])
+            
+            start_list_idx = text_content.find("[")
+            end_list_idx = text_content.rfind("]")
+            if start_list_idx != -1 and end_list_idx != -1 and end_list_idx > start_list_idx:
+                potential_jsons.append(text_content[start_list_idx : end_list_idx + 1])
 
         for json_str in potential_jsons:
             data = self.parse_tool_arguments(json_str)
@@ -77,26 +98,21 @@ class ToolCallParser:
                 continue
 
             extracted_items: list[dict[str, Any]] = []
-            if "tool_calls" in data and isinstance(data["tool_calls"], list):
+            if isinstance(data, list):
+                extracted_items = data
+            elif "tool_calls" in data and isinstance(data["tool_calls"], list):
                 extracted_items = data["tool_calls"]
+            elif "params" in data and isinstance(data["params"], dict):
+                extracted_items = [data["params"]]
             elif "tool_name" in data or "name" in data or "function" in data:
                 extracted_items = [data]
 
             for item in extracted_items:
-                name: str | None = item.get("tool_name") or item.get("name")
-                args: Any = item.get("arguments", {})
-
-                if (
-                    not name
-                    and "function" in item
-                    and isinstance(item["function"], dict)
-                ):
-                    name = item["function"].get("name")
-                    args = item["function"].get("arguments", args)
-
-                if not name:
-                    continue
-
+                if not isinstance(item, dict): continue
+                name: str | None = item.get("tool_name") or item.get("name") or item.get("tool")
+                if not name: continue
+                
+                args = item.get("arguments") or item.get("args") or {}
                 calls.append(
                     ParsedToolCall(
                         id=item.get("id") or f"call_{name}_{uuid.uuid4().hex[:8]}",

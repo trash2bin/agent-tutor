@@ -47,6 +47,11 @@ async def _get_proxy_headers(request: Request) -> dict[str, str]:
         "accept-encoding": request.headers.get("accept-encoding", ""),
     }
 
+    # Forward X-Tenant-ID if present in the browser request
+    tenant_id = request.headers.get("X-Tenant-ID")
+    if tenant_id:
+        headers["X-Tenant-ID"] = tenant_id
+
     # Пробрасываем correlation ID для трассировки запроса через все сервисы
     correlation_id = request.headers.get("x-correlation-id")
     if correlation_id:
@@ -244,13 +249,7 @@ async def _proxy_to_data_service(
     """
     http_client = request.app.state.http_client
     url = f"{DATA_SERVICE_URL}{data_path}"
-    correlation_id = getattr(request.state, "correlation_id", "")
-    headers = {
-        "accept": "application/json",
-        "x-correlation-id": correlation_id,
-    }
-    if settings.api_bearer_token:
-        headers["authorization"] = f"Bearer {settings.api_bearer_token}"
+    headers = await _get_proxy_headers(request)
     logger.debug("data-service proxy: %s -> %s", request.method, url)
     response = await http_client.get(url, headers=headers)
     return Response(
@@ -291,13 +290,7 @@ async def _proxy_to_rag(
     """Proxy к RAG-сервису напрямую."""
     http_client = request.app.state.http_client
     url = f"{RAG_SERVICE_URL}{rag_path}"
-    correlation_id = getattr(request.state, "correlation_id", "")
-    headers = {
-        "accept": "application/json",
-        "x-correlation-id": correlation_id,
-    }
-    if settings.api_bearer_token:
-        headers["authorization"] = f"Bearer {settings.api_bearer_token}"
+    headers = await _get_proxy_headers(request)
     if json_body is not None:
         response = await getattr(http_client, method.lower())(url, json=json_body, headers=headers)
     else:
@@ -316,6 +309,27 @@ async def proxy_rag_documents(request: Request) -> Response:
 
 
 # --- API Reverse Proxy Routes (только агент: chat, sessions, backlog) ---
+
+
+@app.api_route("/api/tenant/{tenant_id}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+async def proxy_tenant_api(request: Request, tenant_id: str, path: str):
+    """
+    Special demo route: allows specifying tenant in URL.
+    Example: /api/tenant/school-a/chat -> proxies to /api/chat with X-Tenant-ID: school-a
+    """
+    # Inject X-Tenant-ID into request headers for the proxy logic
+    request.scope["headers"].append((b"x-tenant-id", tenant_id.encode()))
+    
+    # Determine if we should proxy to data-service, rag, or api based on the path
+    if path.startswith("data/"):
+        return await _proxy_to_data_service(request, f"/{path.replace('data/', '', 1)}")
+    elif path.startswith("rag/"):
+        return await _proxy_to_rag(request, f"/{path.replace('rag/', '', 1)}")
+    else:
+        # Default to API
+        is_sse = path == "chat" and request.method == "POST"
+        # API routes are prefixed with /api, so prepend it
+        return await _proxy_to_api(request, f"/api/{path}", stream=is_sse)
 
 
 @app.get("/api/health")
@@ -347,7 +361,7 @@ async def proxy_chat(request: Request):
 
 
 # Catch-all for any other /api/* path
-@app.api_route("/api/{path:path}", methods=["*"], response_model=None)
+@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"], response_model=None)
 async def proxy_api_any(request: Request, path: str):
     """Catch-all proxy for any undefined /api/* route."""
     is_sse = path == "chat" and request.method == "POST"

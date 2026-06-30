@@ -86,6 +86,7 @@ class _Request:
     args: dict[str, Any]
     future: asyncio.Future[Any]
     generation: int
+    tenant_id: str = ""
 
 
 class MCPClient:
@@ -162,7 +163,8 @@ class MCPClient:
         """
         queue, generation = await self._ensure_worker()
         future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
-        request = _Request(op=op, args=args, future=future, generation=generation)
+        tenant_id = args.get("tenant_id", "")
+        request = _Request(op=op, args=args, future=future, generation=generation, tenant_id=tenant_id)
         try:
             await queue.put(request)
         except asyncio.CancelledError:
@@ -353,7 +355,7 @@ class MCPClient:
             )
 
     @asynccontextmanager
-    async def get_session(self):
+    async def get_session(self, tenant_id: str = ""):
         """Async context manager: возвращает _SessionProxy.
 
         Учитывает _session_users: close() ждёт обнуления перед посылкой
@@ -364,7 +366,7 @@ class MCPClient:
         async with self._lifecycle_lock:
             self._session_users += 1
         try:
-            proxy = _SessionProxy(self._request)
+            proxy = _SessionProxy(self._request, tenant_id=tenant_id)
             yield proxy
         except Exception as exc:
             logger.warning(
@@ -556,17 +558,18 @@ class MCPClient:
 class _SessionProxy:
     """Прокси над MCP-сессией: посылает запросы в очередь worker'а."""
 
-    def __init__(self, request_fn: Any) -> None:
+    def __init__(self, request_fn: Any, tenant_id: str = "") -> None:
         self._request_fn = request_fn
+        self._tenant_id = tenant_id
 
     async def list_tools(self) -> list[dict[str, Any]]:
-        return await self._request_fn("list_tools", {})
+        return await self._request_fn("list_tools", {"tenant_id": self._tenant_id})
 
     async def call_tool(
         self, name: str, arguments: dict[str, Any]
     ) -> dict[str, Any]:
         return await self._request_fn(
-            "call_tool", {"name": name, "arguments": arguments}
+            "call_tool", {"name": name, "arguments": arguments, "tenant_id": self._tenant_id}
         )
 
 
