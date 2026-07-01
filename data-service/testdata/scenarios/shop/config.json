@@ -442,45 +442,17 @@
       "description": "Get reviews for a specific products"
     }
   ],
-  "stats": {
-    "counters": [
-      {
-        "name": "categories",
-        "entity": "categories"
-      },
-      {
-        "name": "customers",
-        "entity": "customers"
-      },
-      {
-        "name": "order_items",
-        "entity": "order_items"
-      },
-      {
-        "name": "orders",
-        "entity": "orders"
-      },
-      {
-        "name": "products",
-        "entity": "products"
-      },
-      {
-        "name": "reviews",
-        "entity": "reviews"
-      }
-    ]
-  },
   "custom_queries": {
-    "order_items_by_products": {
-      "sql": "SELECT t.* FROM order_items t WHERE t.product_id = ?",
+    "order_items_by_orders": {
+      "sql": "SELECT t.* FROM order_items t WHERE t.order_id = ?",
       "params": [
         "id"
       ],
       "result_mapping": {},
       "max_rows": 100
     },
-    "order_items_by_orders": {
-      "sql": "SELECT t.* FROM order_items t WHERE t.order_id = ?",
+    "order_items_by_products": {
+      "sql": "SELECT t.* FROM order_items t WHERE t.product_id = ?",
       "params": [
         "id"
       ],
@@ -519,5 +491,33 @@
       "result_mapping": {},
       "max_rows": 100
     }
+  },
+  "stats": {
+    "counters": [
+      {
+        "name": "categories",
+        "entity": "categories"
+      },
+      {
+        "name": "customers",
+        "entity": "customers"
+      },
+      {
+        "name": "order_items",
+        "entity": "order_items"
+      },
+      {
+        "name": "orders",
+        "entity": "orders"
+      },
+      {
+        "name": "products",
+        "entity": "products"
+      },
+      {
+        "name": "reviews",
+        "entity": "reviews"
+      }
+    ]
   }
 }

@@ -34,6 +34,10 @@ uv run pytest rag/tests/            # Python-тесты RAG
 uv run pytest demo/api/tests/       # Python-тесты API
 uv run pytest demo/web/tests/       # Python-тесты WEB
 uv run pytest agent-tutor-sdk/tests/ # Python-тесты SDK
+
+# Интеграционные тесты Multi-tenancy
+./scripts/integration-multi-tenancy.sh # Базовая изоляция данных
+./scripts/test-dynamic-tools.sh        # Динамическое разрешение инструментов MCP (разные схемы БД)
 ```
 
 ### Go-сервисы (3 модуля в `go.work`)

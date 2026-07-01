@@ -6,7 +6,6 @@ import (
 	"html/template"
 	"net/http"
 
-	"github.com/agent-tutor/agent-tutor-go/config"
 	"github.com/agent-tutor/data-service/internal/openapigen"
 )
 
@@ -24,14 +23,17 @@ func swaggerHandler(w http.ResponseWriter, r *http.Request) {
 	tmpl.Execute(w, nil)
 }
 
-// NewOpenAPIHandler создаёт HTTP-хендлер для /openapi.json,
-// который генерирует спецификацию из runtime-конфига на КАЖДЫЙ запрос.
-//
-// Это значит что конфиг изменился → openapi.json сам подстроится.
-// Без рестарта.
-func NewOpenAPIHandler(cfg *config.Config, hasAdmin bool) http.HandlerFunc {
+// NewOpenAPIHandler creates an HTTP handler for /openapi.json.
+// It now uses the TenantStore to resolve the correct config based on the request.
+func NewOpenAPIHandler(ts *TenantStore, hasAdmin bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		spec := openapigen.Generate(cfg, "http://127.0.0.1:8084", "Data Service", "0.2.0", hasAdmin)
+		inst := ts.resolveTenant(r)
+		if inst == nil {
+			http.Error(w, "tenant not found", http.StatusNotFound)
+			return
+		}
+
+		spec := openapigen.Generate(inst.Config, "http://127.0.0.1:8084", "Data Service", "0.2.0", hasAdmin)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(spec)

@@ -22,7 +22,7 @@ import (
 // configPath — путь к файлу конфига (для /admin/config/rewrite).
 // adminCtx — опциональный контекст для admin API (hot reload и версионирование).
 // Если nil — admin endpoints не регистрируются.
-func NewRouterFromConfig(cfg *config.Config, db runtime.AdapterSubset, adapter runtime.AdapterSubset, introspectAdapter datasource.Adapter, configPath string, adminCtx *AdminContext) (http.Handler, error) {
+func NewRouterFromConfig(ts *TenantStore, cfg *config.Config, db runtime.AdapterSubset, adapter runtime.AdapterSubset, introspectAdapter datasource.Adapter, configPath string, adminCtx *AdminContext) (http.Handler, error) {
 	entities := runtime.ConfigToEntities(cfg.Entities)
 	customQueries := runtime.ConfigToCustomQueries(cfg.CustomQueries)
 
@@ -62,7 +62,7 @@ func NewRouterFromConfig(cfg *config.Config, db runtime.AdapterSubset, adapter r
 	// Системные эндпоинты (всегда)
 	r.Get("/docs", swaggerHandler)
 	hasAdmin := introspectAdapter != nil
-	r.Get("/openapi.json", NewOpenAPIHandler(cfg, hasAdmin))
+	r.Get("/openapi.json", NewOpenAPIHandler(ts, hasAdmin))
 
 	// MCP-манифест — единственный source of truth для mcp-gateway
 	r.Get("/mcp/manifest", handlers.MCPManifestHandler(cfg))

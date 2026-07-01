@@ -155,6 +155,29 @@ func buildRouter(mcpServer *server.MCPServer, registry *tools.Registry, cfg *con
 		r.Use(requestLogger)
 	}
 
+	// Welcome / Instructions page
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`
+			<html>
+				<body style="font-family: sans-serif; padding: 2rem; line-height: 1.6;">
+					<h1>MCP Gateway - Multi-tenant Access</h1>
+					<p>To use tools for a specific tenant, you must provide the <code>X-Tenant-ID</code> header or a <code>tenant_id</code> query parameter.</p>
+					<div style="background: #f4f4f4; padding: 1rem; border-radius: 8px; border-left: 5px solid #007bff;">
+						<strong>How to switch tenants:</strong><br>
+						1. Go to <code>data-service</code> (port 8084) and call <code>/admin/tenants</code> to get a list of available Tenant IDs.<br>
+						2. Append the ID to the URL in Swagger: <br>
+						<code>/tools/list?tenant_id=YOUR_TENANT_ID</code><br>
+						<code>/tools/call?tenant_id=YOUR_TENANT_ID</code>
+					</div>
+					<p><a href="/docs">Go to Swagger UI &rarr;</a></p>
+					<p><a href="/debug">Go to Debug Playground &rarr;</a></p>
+				</body>
+			</html>
+		`))
+	})
+
 	// Health
 	r.Get("/health", healthHandler())
 
@@ -173,9 +196,6 @@ func buildRouter(mcpServer *server.MCPServer, registry *tools.Registry, cfg *con
 		r.Get("/debug/sessions", debugSessionsHandler(sessions))
 		r.Get("/debug/config", debugConfigHandler(registry, cfg, devMode))
 		r.Get("/debug", debugPlaygroundHandler())
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/debug", http.StatusFound)
-		})
 	}
 
 	// tools/list (always available)
@@ -292,6 +312,9 @@ func toolsListHandler(mcpServer *server.MCPServer, registry *tools.Registry, cli
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		tenantID := r.Header.Get("X-Tenant-ID")
+		if tenantID == "" {
+			tenantID = r.URL.Query().Get("tenant_id")
+		}
 		
 		cfg, err := client.FetchConfigWithTenant(tenantID)
 		if err != nil {
@@ -373,6 +396,9 @@ func toolsCallHandler(mcpServer *server.MCPServer, client *httpclient.Client) ht
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		tenantID := r.Header.Get("X-Tenant-ID")
+		if tenantID == "" {
+			tenantID = r.URL.Query().Get("tenant_id")
+		}
 
 		var body struct {
 			Name      string         `json:"name"`

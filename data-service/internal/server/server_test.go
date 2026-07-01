@@ -263,7 +263,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	cfg := testConfig(t)
 	adapter := &testSQLite{db: sqlDB}
 
-	router, err := server.NewRouterFromConfig(cfg, adapter, adapter, nil, "", nil)
+	router, err := server.NewRouterFromConfig(nil, cfg, adapter, adapter, nil, "", nil)
 	if err != nil {
 		t.Fatalf("NewRouterFromConfig: %v", err)
 	}

@@ -174,12 +174,10 @@ func (b *Builder) BuildCustomQuery(cq CustomQuery, args []any) (Query, error) {
 
 // buildColumnList — внутренний helper: список квотированных колонок через запятую.
 //
-// Если Fields пуст — генерируется пустая строка. SQL будет некорректным,
-// но caller не должен вызывать builder с пустым Fields (это ошибка конфигурации,
-// валидируется в 3.2.a на этапе загрузки).
+// Если Fields пуст — возвращается "*", чтобы SQL-запрос оставался валидным.
 func buildColumnList(adapter AdapterSubset, entity Entity) string {
 	if len(entity.Fields) == 0 {
-		return ""
+		return "*"
 	}
 	// entity.Fields содержит публичные имена; в SELECT подставляются
 	// реальные колонки БД (Column) — это часть маппинга, который

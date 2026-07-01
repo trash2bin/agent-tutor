@@ -17,6 +17,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
@@ -48,6 +49,8 @@ func (SqliteAdapter) Connect(ctx context.Context, dsn string) (Conn, error) {
 		// Дефолтные прагмы для боевого и тестового использования.
 		openDSN = dsn + "?_journal_mode=WAL&_foreign_keys=on"
 	}
+
+	slog.Info("sqlite: opening connection", "dsn", openDSN)
 
 	conn, err := sql.Open("sqlite", openDSN)
 	if err != nil {

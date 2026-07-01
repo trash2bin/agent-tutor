@@ -257,6 +257,25 @@ func registerOne(mcpServer *server.MCPServer, td toolDef, client *httpclient.Cli
 // makeHandler creates a handler that delegates to data-service via HTTP.
 func makeHandler(td toolDef, client *httpclient.Client) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// 1. Extract tenantID from context (passed by mcp-go server)
+		tenantID, _ := ctx.Value(httpclient.TenantIDKey).(string)
+
+		// 2. Fetch current manifest for this tenant to resolve the endpoint
+		cfg, err := client.FetchConfigWithTenant(tenantID)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to resolve tenant config: %v", err)), nil
+		}
+
+		// 3. Dynamic endpoint resolution: find the path that corresponds to this tool name
+		endpoint := td.Endpoint
+		for _, ep := range cfg.Endpoints {
+			// We use the same logic as deriveToolName to match the tool name
+			if deriveToolName(ep) == td.Name {
+				endpoint = ep.Path
+				break
+			}
+		}
+
 		args := make(map[string]any)
 		if request.Params.Arguments != nil {
 			for k, v := range request.Params.Arguments {
@@ -264,9 +283,9 @@ func makeHandler(td toolDef, client *httpclient.Client) server.ToolHandlerFunc {
 			}
 		}
 
-		result, err := client.Call(ctx, td.Endpoint, args)
+		result, err := client.Call(ctx, endpoint, args)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("error calling %s: %v", td.Endpoint, err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("error calling %s: %v", endpoint, err)), nil
 		}
 		if result == nil {
 			return mcp.NewToolResultText("null"), nil

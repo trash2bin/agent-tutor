@@ -101,7 +101,7 @@ func (ts *TenantStore) SetDefault(ctx context.Context, id string, cfg *config.Co
 		return fmt.Errorf("default tenant already set to %q, cannot change to %q", ts.defaultID, id)
 	}
 
-	inst, err := buildTenantInstance(ctx, ts.registry, id, cfg, configPath)
+	inst, err := buildTenantInstance(ctx, ts, ts.registry, id, cfg, configPath)
 	if err != nil {
 		return fmt.Errorf("set default tenant %q: %w", id, err)
 	}
@@ -132,7 +132,7 @@ func (ts *TenantStore) AddTenant(ctx context.Context, id string, cfg *config.Con
 		return nil, fmt.Errorf("tenant %q already exists", id)
 	}
 
-	inst, err := buildTenantInstance(ctx, ts.registry, id, cfg, configPath)
+	inst, err := buildTenantInstance(ctx, ts, ts.registry, id, cfg, configPath)
 	if err != nil {
 		return nil, fmt.Errorf("add tenant %q: %w", id, err)
 	}
@@ -222,7 +222,7 @@ func (ts *TenantStore) ReloadTenant(ctx context.Context, tenantID string, config
 	}
 
 	// Build new router using existing connection
-	newRouter, err := NewRouterFromConfig(newCfg, inst.AdapterSub, inst.AdapterSub, inst.Adapter, configPath, nil)
+	newRouter, err := NewRouterFromConfig(ts, newCfg, inst.AdapterSub, inst.AdapterSub, inst.Adapter, configPath, nil)
 	if err != nil {
 		return fmt.Errorf("reload tenant %q: build router: %w", tenantID, err)
 	}
@@ -268,10 +268,16 @@ func (ts *TenantStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	inst.Router.ServeHTTP(w, r)
 }
 
-// resolveTenant extracts tenantID from request context and looks up the tenant.
-// Falls back to defaultID if no X-Tenant-ID header.
+// resolveTenant extracts tenantID from request context or query parameter, and looks up the tenant.
+// Falls back to defaultID if no X-Tenant-ID header and no 'tenant' query param.
 func (ts *TenantStore) resolveTenant(r *http.Request) *TenantInstance {
+	// 1. Try header from context (already populated by middleware)
 	tenantID, _ := r.Context().Value(tenantIDKey).(string)
+
+	// 2. Fallback to query parameter ?tenant=... (critical for Swagger UI / Browser)
+	if tenantID == "" {
+		tenantID = r.URL.Query().Get("tenant")
+	}
 
 	if tenantID == "" {
 		tenantID = ts.defaultID
@@ -393,7 +399,7 @@ func computeOverallStatus(health []TenantHealth) string {
 
 // buildTenantInstance validates config, connects to DB, and builds a router.
 // Used by both SetDefault and AddTenant.
-func buildTenantInstance(ctx context.Context, registry *datasource.Registry, id string, cfg *config.Config, configPath string) (*TenantInstance, error) {
+func buildTenantInstance(ctx context.Context, ts *TenantStore, registry *datasource.Registry, id string, cfg *config.Config, configPath string) (*TenantInstance, error) {
 	// Open DB connection
 	adapter, ok := registry.Get(string(cfg.DataSource.Driver))
 	if !ok {
@@ -413,7 +419,7 @@ func buildTenantInstance(ctx context.Context, registry *datasource.Registry, id 
 	adapterSub := &ConnAdapter{Conn: conn, Adp: adapter}
 
 	// Build router (no admin endpoints — those are on TenantStore)
-	router, err := NewRouterFromConfig(cfg, adapterSub, adapterSub, adapter, configPath, nil)
+	router, err := NewRouterFromConfig(ts, cfg, adapterSub, adapterSub, adapter, configPath, nil)
 	if err != nil {
 		conn.Close() // clean up on failure
 		return nil, fmt.Errorf("build router: %w", err)
@@ -648,7 +654,7 @@ func (ts *TenantStore) adminConfigUpdateDefaultHandler(w http.ResponseWriter, r 
 	}
 
 	// Dry-run build
-	_, err := NewRouterFromConfig(&newCfg, inst.AdapterSub, inst.AdapterSub, inst.Adapter, inst.ConfigPath, nil)
+	_, err := NewRouterFromConfig(ts, &newCfg, inst.AdapterSub, inst.AdapterSub, inst.Adapter, inst.ConfigPath, nil)
 	if err != nil {
 		handlers.RespondError(w, http.StatusBadRequest, "build_error",
 			fmt.Sprintf("router build failed: %v", err))
