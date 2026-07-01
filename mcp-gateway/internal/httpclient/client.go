@@ -52,7 +52,8 @@ func (c *Client) BaseURL() string {
 }
 
 func (c *Client) FetchConfig() (*config.Config, error) {
-	return c.FetchConfigWithTenant("")
+	tenantID := os.Getenv("BOOTSTRAP_TENANT_ID")
+	return c.FetchConfigWithTenant(tenantID)
 }
 
 func (c *Client) FetchConfigWithTenant(tenantID string) (*config.Config, error) {

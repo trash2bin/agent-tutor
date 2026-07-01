@@ -40,3 +40,4 @@ graphify-out/
 
 # Regened seed
 specs/fixtures/seed.json
+specs/test_tenants/

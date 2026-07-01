@@ -117,19 +117,23 @@ func main() {
 	// ── TenantStore: multi-tenant foundation (фаза 3.7) ──
 	store := server.NewTenantStore(registry)
 
-	// Bootstrap default tenant
+	// Build admin router (requires introspection adapter)
+	// We use the adapter from the initial config just to initialize the admin router's base capabilities
+	adapter, _ := registry.Get(string(cfg.DataSource.Driver))
+	adminRouter := store.BuildAdminRouter(adapter, absCfgPath)
+
+	// ── Hot reload: fsnotify on config-file ──
+	// Now we only reload if a specific tenant is requested or through admin API.
+	// But we can still watch the initial config file and reload it as a specific tenant 'default-bootstrap'
+	// Or simply remove this if we want strictly Admin API managed tenants.
+	// For backward compatibility with the a single-file start, let's add it as a tenant.
 	bctx, bcancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := store.SetDefault(bctx, "default", cfg, absCfgPath); err != nil {
-		slog.Error("set default tenant", "error", err)
-		os.Exit(1)
+	if _, err := store.AddTenant(bctx, "default", cfg, absCfgPath); err != nil {
+		slog.Error("bootstrap initial tenant", "error", err)
+		// We continue, but the system starts empty or with this error
 	}
 	bcancel()
 
-	// Build admin router (requires introspection adapter)
-	defaultInst, _ := store.GetTenant("default")
-	adminRouter := store.BuildAdminRouter(defaultInst.Adapter, absCfgPath)
-
-	// ── Hot reload: fsnotify на config-файл ──
 	go watchConfig(absCfgPath, func() {
 		rctx, rcancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer rcancel()

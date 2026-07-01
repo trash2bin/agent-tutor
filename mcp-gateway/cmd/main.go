@@ -204,6 +204,9 @@ func buildRouter(mcpServer *server.MCPServer, registry *tools.Registry, cfg *con
 	// tools/call (always available)
 	r.Post("/tools/call", toolsCallHandler(mcpServer, client))
 
+	// Proxy to data-service for manifest
+	r.Get("/mcp/manifest", manifestProxyHandler(client))
+
 	return r
 }
 

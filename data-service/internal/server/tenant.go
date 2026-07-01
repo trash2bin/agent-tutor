@@ -82,7 +82,6 @@ type TenantStore struct {
 
 	registry *datasource.Registry // all registered datasource.Adapter drivers
 
-	defaultID   string       // fallback tenant when X-Tenant-ID is empty
 	adminRouter http.Handler // chi sub-router for /admin/* (built once)
 }
 
@@ -92,32 +91,6 @@ func NewTenantStore(registry *datasource.Registry) *TenantStore {
 		tenants:  make(map[string]*TenantInstance),
 		registry: registry,
 	}
-}
-
-// SetDefault bootstraps the default tenant. Must be called before ServeHTTP.
-// Returns error if a default is already set with a different ID.
-func (ts *TenantStore) SetDefault(ctx context.Context, id string, cfg *config.Config, configPath string) error {
-	if ts.defaultID != "" && ts.defaultID != id {
-		return fmt.Errorf("default tenant already set to %q, cannot change to %q", ts.defaultID, id)
-	}
-
-	inst, err := buildTenantInstance(ctx, ts, ts.registry, id, cfg, configPath)
-	if err != nil {
-		return fmt.Errorf("set default tenant %q: %w", id, err)
-	}
-
-	ts.mu.Lock()
-	ts.tenants[id] = inst
-	ts.defaultID = id
-	ts.mu.Unlock()
-
-	slog.Info("tenant store: default tenant set",
-		"id", id,
-		"driver", cfg.DataSource.Driver,
-		"entities", len(cfg.Entities),
-		"endpoints", len(cfg.Endpoints),
-	)
-	return nil
 }
 
 // ── Tenant Lifecycle ──
@@ -158,12 +131,7 @@ func (ts *TenantStore) AddTenant(ctx context.Context, id string, cfg *config.Con
 }
 
 // RemoveTenant removes a tenant and closes its connection pool.
-// The default tenant cannot be removed.
 func (ts *TenantStore) RemoveTenant(ctx context.Context, id string) error {
-	if id == ts.defaultID {
-		return fmt.Errorf("cannot remove default tenant %q", id)
-	}
-
 	ts.mu.Lock()
 	inst, ok := ts.tenants[id]
 	if !ok {
@@ -261,7 +229,7 @@ func (ts *TenantStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	inst := ts.resolveTenant(r)
 	if inst == nil {
 		handlers.RespondError(w, http.StatusNotFound, "tenant_not_found",
-			"no tenant configured — set up a default tenant first")
+			"no tenant identifier provided — please use X-Tenant-ID header or ?tenant= query parameter")
 		return
 	}
 
@@ -269,7 +237,6 @@ func (ts *TenantStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveTenant extracts tenantID from request context or query parameter, and looks up the tenant.
-// Falls back to defaultID if no X-Tenant-ID header and no 'tenant' query param.
 func (ts *TenantStore) resolveTenant(r *http.Request) *TenantInstance {
 	// 1. Try header from context (already populated by middleware)
 	tenantID, _ := r.Context().Value(tenantIDKey).(string)
@@ -279,9 +246,6 @@ func (ts *TenantStore) resolveTenant(r *http.Request) *TenantInstance {
 		tenantID = r.URL.Query().Get("tenant")
 	}
 
-	if tenantID == "" {
-		tenantID = ts.defaultID
-	}
 	if tenantID == "" {
 		return nil
 	}
@@ -453,16 +417,16 @@ func (ts *TenantStore) BuildAdminRouter(adapter datasource.Adapter, configPath s
 	r.Get("/tenants/{id}", ts.adminGetTenantHandler)
 	r.Delete("/tenants/{id}", ts.adminRemoveTenantHandler)
 
-	// Config management (operates on default tenant)
-	r.Get("/config", ts.adminConfigDefaultHandler)
-	r.Post("/config", ts.adminConfigUpdateDefaultHandler)
-	r.Post("/config/reload", ts.adminConfigReloadDefaultHandler)
+	// Config management (operates on current tenant)
+	r.Get("/config", ts.adminConfigHandler)
+	r.Post("/config", ts.adminConfigUpdateHandler)
+	r.Post("/config/reload", ts.adminConfigReloadHandler)
 	r.Get("/config/versions", ts.adminConfigVersionsHandler)
-	r.Post("/config/rewrite", ts.adminRewriteDefaultHandler(adapter, configPath))
+	r.Post("/config/rewrite", ts.adminRewriteHandler(adapter, configPath))
 
-	// Schema discovery (operates on default tenant)
+	// Schema discovery (operates on current tenant)
 	if adapter != nil {
-		r.Get("/discover", ts.adminDiscoverDefaultHandler(adapter))
+		r.Get("/discover", ts.adminDiscoverHandler(adapter))
 	}
 
 	ts.adminRouter = r
@@ -569,12 +533,6 @@ func (ts *TenantStore) adminRemoveTenantHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if id == ts.defaultID {
-		handlers.RespondError(w, http.StatusForbidden, "forbidden",
-			"cannot remove the default tenant")
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
@@ -609,13 +567,11 @@ func (ts *TenantStore) adminGetTenantHandler(w http.ResponseWriter, r *http.Requ
 	handlers.RespondJSON(w, http.StatusOK, tenantResponseFromInstance(inst))
 }
 
-// ── Admin Config Handlers (operating on default tenant) ──
-
-func (ts *TenantStore) adminConfigDefaultHandler(w http.ResponseWriter, r *http.Request) {
-	inst, ok := ts.GetTenant(ts.defaultID)
-	if !ok {
-		handlers.RespondError(w, http.StatusInternalServerError, "no_default",
-			"no default tenant configured")
+func (ts *TenantStore) adminConfigHandler(w http.ResponseWriter, r *http.Request) {
+	inst := ts.resolveTenant(r)
+	if inst == nil {
+		handlers.RespondError(w, http.StatusBadRequest, "missing_tenant",
+			"please specify a tenant identifier via X-Tenant-ID header or ?tenant= query parameter")
 		return
 	}
 
@@ -623,11 +579,11 @@ func (ts *TenantStore) adminConfigDefaultHandler(w http.ResponseWriter, r *http.
 	handlers.RespondJSON(w, http.StatusOK, resp)
 }
 
-func (ts *TenantStore) adminConfigUpdateDefaultHandler(w http.ResponseWriter, r *http.Request) {
-	inst, ok := ts.GetTenant(ts.defaultID)
-	if !ok {
-		handlers.RespondError(w, http.StatusInternalServerError, "no_default",
-			"no default tenant configured")
+func (ts *TenantStore) adminConfigUpdateHandler(w http.ResponseWriter, r *http.Request) {
+	inst := ts.resolveTenant(r)
+	if inst == nil {
+		handlers.RespondError(w, http.StatusBadRequest, "missing_tenant",
+			"please specify a tenant identifier via X-Tenant-ID header or ?tenant= query parameter")
 		return
 	}
 
@@ -679,7 +635,7 @@ func (ts *TenantStore) adminConfigUpdateDefaultHandler(w http.ResponseWriter, r 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	if err := ts.ReloadTenant(ctx, ts.defaultID, inst.ConfigPath); err != nil {
+	if err := ts.ReloadTenant(ctx, inst.ID, inst.ConfigPath); err != nil {
 		handlers.RespondError(w, http.StatusInternalServerError, "reload_error",
 			fmt.Sprintf("config saved but reload failed: %v", err))
 		return
@@ -693,11 +649,18 @@ func (ts *TenantStore) adminConfigUpdateDefaultHandler(w http.ResponseWriter, r 
 	})
 }
 
-func (ts *TenantStore) adminConfigReloadDefaultHandler(w http.ResponseWriter, r *http.Request) {
+func (ts *TenantStore) adminConfigReloadHandler(w http.ResponseWriter, r *http.Request) {
+	inst := ts.resolveTenant(r)
+	if inst == nil {
+		handlers.RespondError(w, http.StatusBadRequest, "missing_tenant",
+			"please specify a tenant identifier via X-Tenant-ID header or ?tenant= query parameter")
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	if err := ts.ReloadTenant(ctx, ts.defaultID, ""); err != nil {
+	if err := ts.ReloadTenant(ctx, inst.ID, ""); err != nil {
 		handlers.RespondError(w, http.StatusInternalServerError, "reload_error", err.Error())
 		return
 	}
@@ -707,10 +670,10 @@ func (ts *TenantStore) adminConfigReloadDefaultHandler(w http.ResponseWriter, r 
 }
 
 func (ts *TenantStore) adminConfigVersionsHandler(w http.ResponseWriter, r *http.Request) {
-	inst, ok := ts.GetTenant(ts.defaultID)
-	if !ok {
-		handlers.RespondError(w, http.StatusInternalServerError, "no_default",
-			"no default tenant configured")
+	inst := ts.resolveTenant(r)
+	if inst == nil {
+		handlers.RespondError(w, http.StatusBadRequest, "missing_tenant",
+			"please specify a tenant identifier via X-Tenant-ID header or ?tenant= query parameter")
 		return
 	}
 	versionsDir := filepath.Join(filepath.Dir(inst.ConfigPath), "config_versions")
@@ -748,12 +711,12 @@ func (ts *TenantStore) adminConfigVersionsHandler(w http.ResponseWriter, r *http
 	handlers.RespondJSON(w, http.StatusOK, versions)
 }
 
-func (ts *TenantStore) adminRewriteDefaultHandler(adapter datasource.Adapter, configPath string) http.HandlerFunc {
+func (ts *TenantStore) adminRewriteHandler(adapter datasource.Adapter, configPath string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		inst, ok := ts.GetTenant(ts.defaultID)
-		if !ok {
-			handlers.RespondError(w, http.StatusInternalServerError, "no_default",
-				"no default tenant configured")
+		inst := ts.resolveTenant(r)
+		if inst == nil {
+			handlers.RespondError(w, http.StatusBadRequest, "missing_tenant",
+				"please specify a tenant identifier via X-Tenant-ID header or ?tenant= query parameter")
 			return
 		}
 
@@ -796,7 +759,7 @@ func (ts *TenantStore) adminRewriteDefaultHandler(adapter datasource.Adapter, co
 		// Reload
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		if err := ts.ReloadTenant(ctx, ts.defaultID, configPath); err != nil {
+		if err := ts.ReloadTenant(ctx, inst.ID, configPath); err != nil {
 			handlers.RespondError(w, http.StatusInternalServerError, "reload_error",
 				fmt.Sprintf("config saved but reload failed: %v", err))
 			return
@@ -812,12 +775,12 @@ func (ts *TenantStore) adminRewriteDefaultHandler(adapter datasource.Adapter, co
 	}
 }
 
-func (ts *TenantStore) adminDiscoverDefaultHandler(adapter datasource.Adapter) http.HandlerFunc {
+func (ts *TenantStore) adminDiscoverHandler(adapter datasource.Adapter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		inst, ok := ts.GetTenant(ts.defaultID)
-		if !ok {
-			handlers.RespondError(w, http.StatusInternalServerError, "no_default",
-				"no default tenant configured")
+		inst := ts.resolveTenant(r)
+		if inst == nil {
+			handlers.RespondError(w, http.StatusBadRequest, "missing_tenant",
+				"please specify a tenant identifier via X-Tenant-ID header or ?tenant= query parameter")
 			return
 		}
 
