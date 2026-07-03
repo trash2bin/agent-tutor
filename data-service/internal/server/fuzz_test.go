@@ -20,9 +20,9 @@ import (
 // FuzzEndpoints подкидывает случайные URL и проверяет что ответ < 5xx.
 // (тест не assertion — просто smoke на отсутствие panic).
 func FuzzEndpoints(f *testing.F) {
-	cfg, db := loadScenario(&testing.T{}, "../../testdata/scenarios/sqlite-testseed")
+	cfg, db := loadScenario(f, "../../testdata/scenarios/sqlite-testseed")
 	defer db.Close()
-	ts := buildTestRouter(&testing.T{}, cfg, db)
+	ts := buildTestRouter(f, cfg, db)
 	defer ts.Close()
 
 	// Seed corpus
@@ -72,9 +72,9 @@ func FuzzEndpoints(f *testing.F) {
 
 // FuzzQueryParams — случайные параметры запроса для /students и /teachers.
 func FuzzQueryParams(f *testing.F) {
-	cfg, db := loadScenario(&testing.T{}, "../../testdata/scenarios/sqlite-testseed")
+	cfg, db := loadScenario(f, "../../testdata/scenarios/sqlite-testseed")
 	defer db.Close()
-	ts := buildTestRouter(&testing.T{}, cfg, db)
+	ts := buildTestRouter(f, cfg, db)
 	defer ts.Close()
 
 	f.Add("Иванов")

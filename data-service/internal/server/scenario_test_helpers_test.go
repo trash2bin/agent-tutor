@@ -25,7 +25,7 @@ import (
 //
 // If seed.json is absent but a <name>.data.db (or data.db) file exists,
 // the helper opens that file directly (e.g. shop scenario — pre-materialized DB).
-func loadScenario(t *testing.T, dir string) (*config.Config, *sql.DB) {
+func loadScenario(t testing.TB, dir string) (*config.Config, *sql.DB) {
 	t.Helper()
 
 	// config.Load() needs specs/config.schema.json relative to CWD.
@@ -95,7 +95,7 @@ func fileExists(path string) bool {
 }
 
 // buildTestRouter creates a httptest.Server from config + *sql.DB.
-func buildTestRouter(t *testing.T, cfg *config.Config, db *sql.DB) *httptest.Server {
+func buildTestRouter(t testing.TB, cfg *config.Config, db *sql.DB) *httptest.Server {
 	t.Helper()
 	adapter := &testSQLite{db: db}
 	store := server.NewTenantStore(datasource.NewDefaultRegistry())
