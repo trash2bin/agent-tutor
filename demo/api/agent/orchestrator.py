@@ -419,14 +419,11 @@ class LLMAgent:
                 ),
             )
 
-            # Post-tool reminder + tool content: MCPClient уже подготовил и то и другое.
-            # ToolResult.reminder — system-сообщение с подсказкой для LLM.
-            # ToolResult.tool_content — чистый JSON для role="tool" message.
+            # Post-tool reminder is logged but no longer added to LLM messages 
+            # to avoid breaking strict role sequence (Mistral/Claude requirements).
             if tool_result.reminder:
-                logger.info("[ORCHESTRATOR] Adding system reminder: %s", tool_result.reminder)
-                messages.append(
-                    {"role": "system", "content": tool_result.reminder}
-                )
+                logger.info("[ORCHESTRATOR] Tool reminder (logged only): %s", tool_result.reminder)
+
             tool_message: dict[str, Any] = {
                 "role": "tool",
                 "content": tool_result.tool_content,

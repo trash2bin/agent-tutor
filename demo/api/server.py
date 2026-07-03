@@ -169,7 +169,11 @@ def _event_payload(event_type: str, data: AgentEventData) -> dict[str, Any] | No
         return {"type": "tool_call", "name": name}
     if event_type == "tool_result":
         name = data.get("name") if isinstance(data, dict) else ""
-        return {"type": "tool_result", "name": name}
+        result = data.get("result") if isinstance(data, dict) else None
+        payload: dict[str, Any] = {"type": "tool_result", "name": name}
+        if result is not None:
+            payload["result"] = result
+        return payload
     if event_type == "error":
         text = data.get("message") if isinstance(data, dict) else data
         return {"type": "error", "text": text}
