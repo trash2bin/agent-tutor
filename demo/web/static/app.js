@@ -5,6 +5,7 @@
 const apiBase = window.DEMO_API_BASE || `${window.location.protocol}//${window.location.host}`;
 
 const chatHistoryKey = "agentTutorMessages";
+const tenantStorageKey = "agentTutorTenantId";
 const storage = window.localStorage;
 
 const state = {
@@ -12,6 +13,8 @@ const state = {
   tab: null,
   filter: "",
   manifest: null,
+  tenantId: null,      // current tenant
+  tenants: [],          // available tenants
 };
 
 // SSE Debug logging
@@ -35,18 +38,34 @@ let manifestRetries = 0;
 const MANIFEST_MAX_RETRIES = 10;
 const MANIFEST_RETRY_MS = 3000; // 3 секунды между попытками
 
+// ── Tenant-aware fetch ──
+
+function fetchWithTenant(url, options = {}) {
+  const headers = options.headers || {};
+  // Only add X-Tenant-ID if we have a non-default tenant selected
+  if (state.tenantId) {
+    headers["X-Tenant-ID"] = state.tenantId;
+  }
+  return fetch(url, { ...options, headers });
+}
+
 // ── Init ──
 
 async function init() {
+  // Restore tenant from localStorage
+  const savedTenantId = readTenantId();
+
   currentSessionId = getSessionId();
   bindChat();
   showTabPlaceholder();
-  // Параллельно: health + история чата + попытка загрузить manifest
+  // Параллельно: health + история чата + tenant list + manifest
   await Promise.all([
     checkHealth(),
     restoreServerHistory(),
-    loadManifest(),
+    loadTenants(savedTenantId),
   ]);
+  // Manifest загружается после того как tenant выбран
+  await loadManifest();
 }
 
 // ── Placeholder пока manifest не пришёл ──
@@ -73,7 +92,7 @@ function showTabPlaceholder() {
 async function loadManifest() {
   while (manifestRetries < MANIFEST_MAX_RETRIES) {
     try {
-      const response = await fetch(`${apiBase}/api/manifest`);
+      const response = await fetchWithTenant(`${apiBase}/api/manifest`);
       if (response.ok) {
         state.manifest = await response.json();
         buildTabsFromManifest();
@@ -157,7 +176,99 @@ function buildTabsFromManifest() {
   }
 }
 
-// ── Переключение вкладок ──
+// ── Tenant Selector ──
+
+function readTenantId() {
+  try {
+    return storage.getItem(tenantStorageKey) || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeTenantId(id) {
+  try {
+    if (id) {
+      storage.setItem(tenantStorageKey, id);
+    } else {
+      storage.removeItem(tenantStorageKey);
+    }
+  } catch { /* ignore */ }
+}
+
+async function loadTenants(preferredTenantId) {
+  const select = $("#tenantSelect");
+  if (!select) return;
+
+  try {
+    const resp = await fetch(`${apiBase}/api/tenants`);
+    if (!resp.ok) throw new Error(`status ${resp.status}`);
+    const data = await resp.json();
+    state.tenants = data.tenants || [];
+  } catch (err) {
+    console.warn("Failed to load tenants:", err);
+    state.tenants = ["default"];
+  }
+
+  if (state.tenants.length === 0) {
+    state.tenants = ["default"];
+  }
+
+  // Determine active tenant
+  let activeTenant = preferredTenantId;
+  if (!activeTenant || !state.tenants.includes(activeTenant)) {
+    activeTenant = state.tenants[0];
+  }
+
+  // Populate select
+  select.innerHTML = state.tenants
+    .map((t) => `<option value="${escapeHtml(t)}" ${t === activeTenant ? "selected" : ""}>${escapeHtml(t)}</option>`)
+    .join("");
+
+  // Set initial tenant
+  setTenantId(activeTenant);
+
+  // Listen for changes
+  select.addEventListener("change", async () => {
+    const newTenantId = select.value;
+    if (newTenantId === state.tenantId) return;
+    await setTenantId(newTenantId);
+    // Полный перезапуск UI для нового tenant'а
+    await reloadForNewTenant();
+  });
+}
+
+function setTenantId(id) {
+  state.tenantId = id;
+  writeTenantId(id);
+  // Update select visual if populated
+  const select = $("#tenantSelect");
+  if (select && select.value !== id) {
+    select.value = id;
+  }
+}
+
+async function reloadForNewTenant() {
+  // Сброс и перезагрузка всего
+  showTabPlaceholder();
+  // Сброс manifest (загрузим заново под новым tenant)
+  state.manifest = null;
+  state.tab = null;
+  state.data = null;
+  manifestRetries = 0;
+
+  // Генерируем новую сессию для нового tenant'а
+  currentSessionId = createSessionId();
+  storage.setItem("agentTutorSessionId", currentSessionId);
+
+  // Очищаем историю чата (разные tenant'ы — разные данные)
+  writeStoredMessages([]);
+  $("#messages").innerHTML =
+    '<div class="message assistant">Спросите про студента, оценки, расписание или материалы.</div>';
+
+  // Reload manifest
+  await loadManifest();
+}
 
 function switchTab(tabKey, btn) {
   state.tab = tabKey;
@@ -177,8 +288,8 @@ async function loadData() {
 
     if (state.tab === "documents") {
       [stats, docs] = await Promise.all([
-        fetch(`${apiBase}/api/data/stats`).then((r) => (r.ok ? r.json() : null)),
-        fetch(`${apiBase}/api/rag/documents`).then((r) => (r.ok ? r.json() : null)),
+        fetchWithTenant(`${apiBase}/api/data/stats`).then((r) => (r.ok ? r.json() : null)),
+        fetchWithTenant(`${apiBase}/api/rag/documents`).then((r) => (r.ok ? r.json() : null)),
       ]);
       tabData = [];
 
@@ -193,9 +304,9 @@ async function loadData() {
       return;
     } else {
       [stats, docs, tabData] = await Promise.all([
-        fetch(`${apiBase}/api/data/stats`).then((r) => (r.ok ? r.json() : null)),
-        fetch(`${apiBase}/api/rag/documents`).then((r) => (r.ok ? r.json() : null)),
-        fetch(`${apiBase}/api/data/${state.tab}`).then((r) => (r.ok ? r.json() : null)),
+        fetchWithTenant(`${apiBase}/api/data/stats`).then((r) => (r.ok ? r.json() : null)),
+        fetchWithTenant(`${apiBase}/api/rag/documents`).then((r) => (r.ok ? r.json() : null)),
+        fetchWithTenant(`${apiBase}/api/data/${state.tab}`).then((r) => (r.ok ? r.json() : null)),
       ]);
     }
 
@@ -374,7 +485,7 @@ async function restoreServerHistory() {
   try {
     if (!currentSessionId) return;
 
-    const response = await fetch(
+    const response = await fetchWithTenant(
       `${apiBase}/api/session/history?session_id=${encodeURIComponent(currentSessionId)}`,
     );
     if (!response.ok) return;
@@ -462,7 +573,7 @@ async function streamChat(message, target) {
   target.dataset.saved = "false";
   sseLog("Stream started, message:", message.substring(0, 50));
   try {
-    const response = await fetch(`${apiBase}/api/chat`, {
+    const response = await fetchWithTenant(`${apiBase}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message, session_id: currentSessionId }),

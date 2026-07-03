@@ -47,8 +47,10 @@ async def _get_proxy_headers(request: Request) -> dict[str, str]:
         "accept-encoding": request.headers.get("accept-encoding", ""),
     }
 
-    # Forward X-Tenant-ID if present in the browser request
+    # Forward X-Tenant-ID if present in the browser request OR in request.state
     tenant_id = request.headers.get("X-Tenant-ID")
+    if not tenant_id and hasattr(request.state, "tenant_id"):
+        tenant_id = request.state.tenant_id
     if tenant_id:
         headers["X-Tenant-ID"] = tenant_id
 
@@ -317,19 +319,74 @@ async def proxy_tenant_api(request: Request, tenant_id: str, path: str):
     Special demo route: allows specifying tenant in URL.
     Example: /api/tenant/school-a/chat -> proxies to /api/chat with X-Tenant-ID: school-a
     """
-    # Inject X-Tenant-ID into request headers for the proxy logic
-    request.scope["headers"].append((b"x-tenant-id", tenant_id.encode()))
+    # Store tenant_id in request.state so proxy functions can access it
+    request.state.tenant_id = tenant_id
     
     # Determine if we should proxy to data-service, rag, or api based on the path
     if path.startswith("data/"):
         return await _proxy_to_data_service(request, f"/{path.replace('data/', '', 1)}")
     elif path.startswith("rag/"):
-        return await _proxy_to_rag(request, f"/{path.replace('rag/', '', 1)}")
+        rag_subpath = path.replace('rag/', '', 1)
+        # Special case: rag/documents -> POST /documents/list (matching /api/rag/documents behavior)
+        if rag_subpath == "documents":
+            return await _proxy_to_rag(request, "/documents/list", method="POST", json_body={})
+        else:
+            return await _proxy_to_rag(request, f"/{rag_subpath}")
     else:
         # Default to API
         is_sse = path == "chat" and request.method == "POST"
-        # API routes are prefixed with /api, so prepend it
-        return await _proxy_to_api(request, f"/api/{path}", stream=is_sse)
+        # If path already starts with 'api/', use it directly (e.g. api/health -> /health)
+        # Otherwise prepend 'api/' (e.g. chat -> /api/chat)
+        if path.startswith("api/"):
+            api_path = path.replace("api/", "", 1)
+        else:
+            api_path = f"api/{path}"
+        return await _proxy_to_api(request, f"/{api_path}", stream=is_sse)
+
+
+@app.get("/api/tenants")
+async def get_tenants(request: Request) -> Response:
+    """Return list of available tenants from data-service health endpoint.
+    
+    Falls back to [DEFAULT_TENANT_ID] if data-service returns single-tenant response.
+    Also checks DEMO_TENANTS env var (comma-separated) as explicit override.
+    """
+    import os
+
+    # Explicit override via env var
+    explicit = os.getenv("DEMO_TENANTS", "").strip()
+    if explicit:
+        import json
+        return Response(
+            content=json.dumps({"tenants": [t.strip() for t in explicit.split(",") if t.strip()]}),
+            media_type="application/json",
+        )
+
+    # Try to discover from data-service /health
+    default_tenant = os.getenv("DEFAULT_TENANT_ID", "default")
+    try:
+        http_client = request.app.state.http_client
+        url = f"{DATA_SERVICE_URL}/health"
+        ds_resp = await http_client.get(url, timeout=5.0)
+        if ds_resp.status_code == 200:
+            import json
+            data = ds_resp.json()
+            if "tenants" in data and isinstance(data["tenants"], list):
+                tenant_ids = [t["id"] for t in data["tenants"] if isinstance(t, dict) and "id" in t]
+                if tenant_ids:
+                    return Response(
+                        content=json.dumps({"tenants": tenant_ids}),
+                        media_type="application/json",
+                    )
+    except Exception:
+        logger.debug("Failed to discover tenants from data-service", exc_info=True)
+
+    # Fallback
+    import json
+    return Response(
+        content=json.dumps({"tenants": [default_tenant]}),
+        media_type="application/json",
+    )
 
 
 @app.get("/api/health")

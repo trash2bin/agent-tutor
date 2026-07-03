@@ -124,6 +124,42 @@ main {
     font-size: 13px;
 }
 
+.topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.tenant-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tenant-label {
+    color: var(--muted);
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.tenant-select {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 13px;
+    cursor: pointer;
+    outline: none;
+    min-width: 140px;
+}
+
+.tenant-select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.15);
+}
+
 .status {
     padding: 9px 12px;
     border-radius: 999px;

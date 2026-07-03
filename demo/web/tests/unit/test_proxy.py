@@ -49,7 +49,74 @@ def client():
         # respx context manager сам почистит моки
 
 
-# === DATA-SERVICE PROXY ===
+# === TENANT ROUTING PROXY ===
+
+class TestTenantRoutingProxy:
+    """Тесты для /api/tenant/{tenant_id}/{path:path} с пробросом X-Tenant-ID."""
+
+    @respx.mock
+    def test_proxy_tenant_data_routes_to_data_service(self, client):
+        """GET /api/tenant/tenant-a/data/students -> data-service /students с X-Tenant-ID."""
+        upstream_route = respx.get("http://127.0.0.1:8084/students").mock(
+            return_value=httpx.Response(200, json=[{"id": "1", "name": "Alice"}])
+        )
+        response = client.get("/api/tenant/tenant-a/data/students")
+        assert response.status_code == 200
+        assert response.json() == [{"id": "1", "name": "Alice"}]
+        # Проверяем что X-Tenant-ID пробросился в upstream
+        tenant_id_header = upstream_route.calls.last.request.headers.get("x-tenant-id")
+        assert tenant_id_header == "tenant-a"
+
+    @respx.mock
+    def test_proxy_tenant_rag_routes_to_rag_service(self, client):
+        """GET /api/tenant/tenant-b/rag/documents -> rag /documents/list с X-Tenant-ID."""
+        upstream_route = respx.post("http://127.0.0.1:8082/documents/list").mock(
+            return_value=httpx.Response(200, json={"documents": [{"id": "doc1"}]})
+        )
+        response = client.get("/api/tenant/tenant-b/rag/documents")
+        assert response.status_code == 200
+        assert "documents" in response.json()
+        tenant_id_header = upstream_route.calls.last.request.headers.get("x-tenant-id")
+        assert tenant_id_header == "tenant-b"
+
+    @respx.mock
+    def test_proxy_tenant_api_routes_to_api_service(self, client):
+        """GET /api/tenant/tenant-c/api/health -> api /health с X-Tenant-ID."""
+        upstream_route = respx.get("http://127.0.0.1:8081/health").mock(
+            return_value=httpx.Response(200, json={"status": "ok"})
+        )
+        response = client.get("/api/tenant/tenant-c/api/health")
+        assert response.status_code == 200
+        tenant_id_header = upstream_route.calls.last.request.headers.get("x-tenant-id")
+        assert tenant_id_header == "tenant-c"
+
+    @respx.mock
+    def test_proxy_tenant_chat_uses_sse(self, client):
+        """POST /api/tenant/tenant-d/chat -> api /api/chat с SSE и X-Tenant-ID."""
+        upstream_route = respx.post("http://127.0.0.1:8081/api/chat").mock(
+            return_value=httpx.Response(200, text="data: test\n\n")
+        )
+        response = client.post("/api/tenant/tenant-d/chat", json={"message": "hi"})
+        assert response.status_code == 200
+        tenant_id_header = upstream_route.calls.last.request.headers.get("x-tenant-id")
+        assert tenant_id_header == "tenant-d"
+
+    @respx.mock
+    def test_proxy_tenant_passes_correlation_id(self, client):
+        """Correlation ID пробрасывается вместе с tenant ID."""
+        upstream_route = respx.get("http://127.0.0.1:8084/students").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        response = client.get(
+            "/api/tenant/tenant-e/data/students",
+            headers={"x-correlation-id": "test-corr-123"}
+        )
+        assert response.status_code == 200
+        assert upstream_route.calls.last.request.headers.get("x-correlation-id") == "test-corr-123"
+        assert upstream_route.calls.last.request.headers.get("x-tenant-id") == "tenant-e"
+
+
+# === DATA SERVICE PROXY ===
 
 class TestDataServiceProxy:
     """Тесты для /api/data/* -> data-service:8084."""
@@ -125,6 +192,17 @@ class TestDataServiceProxy:
         )
         response = client.get("/api/data/students")
         assert response.headers["content-type"] == "application/json"
+
+    @respx.mock
+    def test_proxy_passes_tenant_id_to_data_service(self, client):
+        """X-Tenant-ID из входящего запроса пробрасывается в data-service."""
+        upstream_route = respx.get("http://127.0.0.1:8084/students").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        response = client.get("/api/data/students", headers={"X-Tenant-ID": "tenant-xyz"})
+        assert response.status_code == 200
+        tenant_id_header = upstream_route.calls.last.request.headers.get("x-tenant-id")
+        assert tenant_id_header == "tenant-xyz"
 
 
 # === MANIFEST PROXY ===
