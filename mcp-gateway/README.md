@@ -15,7 +15,7 @@ Generic MCP (Model Context Protocol) сервер на Go. Заменил Python
 
 1. **X-Tenant-ID**: Основной ключ изоляции. Передается в заголовках каждого запроса. Без этого заголовка (или `?tenant_id=`) запросы возвращают `404 Not Found`.
 2. **Bootstrappable Startup**: Поскольку `data-service` больше не имеет «дефолтного» тенанта, `mcp-gateway` использует переменную окружения `BOOTSTRAP_TENANT_ID` для первичной загрузки конфигурации при старте.
-3. **Динамический манифест**: При каждом вызове инструментов (`tools/list` или `tools/call`) шлюз запрашивает актуальный манифест конкретного тенанта у `data-service` через `/mcp/manifest`.
+3. **Динамический манифест**: При каждом MCP-запросе (`/mcp/message`) шлюз запрашивает актуальный манифест конкретного тенанта у `data-service` через `/mcp/manifest`. Манифест генерируется на лету через `configgen.GenerateMCPTools()` с русскими conversational описаниями и санитизированными именами функций.
 4. **Разрешение инструментов**: `toolsCallHandler` сопоставляет имя вызванного инструмента с путем к эндпоинту из полученного манифеста.
 5. **Проброс (Propagation)**: Заголовок `X-Tenant-ID` пробрасывается сквозь шлюз в `data-service`, обеспечивая доступ к правильной БД тенанта.
 
@@ -66,6 +66,17 @@ Generic MCP (Model Context Protocol) сервер на Go. Заменил Python
 
 Explicit тулы перезаписывают auto-generated с тем же именем.
 
+### Runtime-генерация инструментов (configgen.GenerateMCPTools)
+
+MCP-инструменты генерируются на лету через `data-service/internal/configgen/configgen.go`:
+
+- **Conversational описания** — русские фразы вроде `«Возвращает данные о студентах по уникальному идентификатору»`, понятные LLM.
+- **Санитизация имён** — из custom_query path удаляются `{` и `}`, чтобы Mistral не отклонял function names.
+- **Параметры-подсказки** — каждый параметр получает explicit описание (например `«Идентификатор записи в таблице»`).
+- **Приоритет явных тулов** — если манифест содержит `mcp_tools[]`, они используются вместо auto-generated (без дубликатов).
+- **Builtin-тулы всегда доступны** — `health` и `stats` присутствуют независимо от конфига.
+- **Генерация на каждый запрос** — `/mcp/manifest` вызывает `configgen.GenerateMCPTools()` runtime, не зависит от файлового кэша.
+
 ## Схема именования инструментов
 
 | Op в endpoint | Имя инструмента | Пример |
@@ -99,16 +110,16 @@ mcp-gateway/
 
 ## Поток вызова инструмента (Detailed)
 
-1. **Запрос**: Агент шлёт `POST /tools/call` с заголовком `X-Tenant-ID: uni-tenant`.
+1. **Запрос**: Агент шлёт JSON-RPC `tools/call` через SSE-сессию `/mcp` с заголовком `X-Tenant-ID: uni-tenant`.
 2. **Манифест**: `mcp-gateway` делает `GET /mcp/manifest` $\rightarrow$ `data-service` с тем же заголовком.
 3. **Разрешение**:
-   - Ищет инструмент в `endpoints` (по правилам именования).
-   - Если не найден $\rightarrow$ ищет в `mcp_tools`.
+   - Ищет инструмент в `mcp_tools` из манифеста.
+   - Если не найден $\rightarrow$ auto-gen из `endpoints` (по правилам именования `get_{entity}`, `find_{entity}`).
    - Если не найден $\rightarrow$ проверяет статические RAG-тулы.
 4. **Вызов**:
    - Подставляет path-параметры (`{id}`) из аргументов.
    - Выполняет `GET` к `data-service` с заголовком `X-Tenant-ID`.
-5. **Ответ**: JSON-ответ от `data-service` оборачивается в MCP-результат и возвращается агенту.
+5. **Ответ**: JSON-ответ от `data-service` оборачивается в MCP-результат и возвращается агенту через SSE.
 
 ## Запуск
 
@@ -126,8 +137,9 @@ DATA_SERVICE_URL=http://127.0.0.1:8084 go run ./cmd/
 ### 2. Регистрация тенантов (Обязательно)
 Так как шлюз теперь stateless, тенанты должны быть зарегистрированы в `data-service` перед использованием:
 ```bash
-# Используйте вспомогательный скрипт для локальной разработки
-uv run scripts/setup_tenants.py
+# Используйте agent-db CLI для регистрации тенантов
+uv run agent-db e2e --tenants default,shop    # materialize + register + проверить
+uv run agent-db tenant register sqlite-testseed   # зарегистрировать отдельно
 ```
 
 ## Dev-режим
@@ -146,10 +158,8 @@ MCP_DEV=true DATA_SERVICE_URL=http://127.0.0.1:8084 go run ./cmd/
 | Путь | Метод | Описание | Заголовок |
 |---|---|---|---|
 | `/health` | GET | Статус сервиса | - |
-| `/mcp` | GET | SSE endpoint (streamable HTTP) | `X-Tenant-ID` |
+| `/mcp` | GET | SSE endpoint (MCP streamable HTTP) | `X-Tenant-ID` |
 | `/mcp/message` | POST | JSON-RPC сообщения | `X-Tenant-ID` |
-| `/tools/list` | GET | Список инструментов тенанта | `X-Tenant-ID` |
-| `/tools/call` | POST | Вызов инструмента тенанта | `X-Tenant-ID` |
 | `/debug` | GET | MCP Playground (dev) | `X-Tenant-ID` |
 
 ## Переменные окружения
