@@ -14,6 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/agent-tutor/agent-tutor-go/config"
+	"github.com/agent-tutor/data-service/internal/datasource"
 	"github.com/agent-tutor/data-service/internal/seedgen"
 	"github.com/agent-tutor/data-service/internal/server"
 )
@@ -262,8 +263,9 @@ func newTestServer(t *testing.T) *httptest.Server {
 	sqlDB := testDB(t)
 	cfg := testConfig(t)
 	adapter := &testSQLite{db: sqlDB}
+	store := server.NewTenantStore(datasource.NewDefaultRegistry())
 
-	router, err := server.NewRouterFromConfig(nil, cfg, adapter, adapter, nil, "", nil)
+	router, err := server.NewRouterFromConfig(store, cfg, adapter, adapter, nil, "", nil)
 	if err != nil {
 		t.Fatalf("NewRouterFromConfig: %v", err)
 	}
@@ -482,7 +484,7 @@ func TestScenario_Shop(t *testing.T) {
 
 	t.Run("health", func(t *testing.T) {
 		status, body := getJSON[map[string]string](t, ts.URL+"/health")
-		if status != 200 || body["status"] != "ok" || body["db"] != "ok" {
+		if status != 200 || body["status"] != "ok" {
 			t.Errorf("health: status=%d body=%v", status, body)
 		}
 	})

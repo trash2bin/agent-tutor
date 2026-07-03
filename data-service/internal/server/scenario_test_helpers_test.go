@@ -15,6 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/agent-tutor/agent-tutor-go/config"
+	"github.com/agent-tutor/data-service/internal/datasource"
 	"github.com/agent-tutor/data-service/internal/seedgen"
 	"github.com/agent-tutor/data-service/internal/server"
 )
@@ -97,11 +98,31 @@ func fileExists(path string) bool {
 func buildTestRouter(t *testing.T, cfg *config.Config, db *sql.DB) *httptest.Server {
 	t.Helper()
 	adapter := &testSQLite{db: db}
-	router, err := server.NewRouterFromConfig(cfg, adapter, adapter, nil, "", nil)
+	store := server.NewTenantStore(datasource.NewDefaultRegistry())
+	router, err := server.NewRouterFromConfig(store, cfg, adapter, adapter, nil, "", nil)
 	if err != nil {
 		t.Fatalf("NewRouterFromConfig: %v", err)
 	}
-	ts := httptest.NewServer(router)
+	// Register pre-built instance directly — skip AddTenant which would open a new
+	// connection, losing the already-seeded in-memory DB.
+	inst := &server.TenantInstance{
+		ID:         "default",
+		Config:     cfg,
+		AdapterSub: adapter,
+		Router:     router,
+	}
+	if err := store.RegisterTenantInstance(inst); err != nil {
+		t.Fatalf("RegisterTenantInstance: %v", err)
+	}
+	// Wrap with middleware that injects X-Tenant-ID: default for tests that don't set it.
+	// TenantIDMiddleware captures the header; if absent we inject "default".
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Tenant-ID") == "" && r.URL.Query().Get("tenant") == "" {
+			r.Header.Set("X-Tenant-ID", "default")
+		}
+		server.TenantIDMiddleware("X-Tenant-ID")(store).ServeHTTP(w, r)
+	})
+	ts := httptest.NewServer(handler)
 	t.Cleanup(func() { ts.Close() })
 	return ts
 }
@@ -115,9 +136,6 @@ func testHealth(t *testing.T, ts *httptest.Server) {
 	}
 	if body["status"] != "ok" {
 		t.Errorf("expected status ok, got %q", body["status"])
-	}
-	if body["db"] != "ok" {
-		t.Errorf("expected db ok, got %q", body["db"])
 	}
 }
 

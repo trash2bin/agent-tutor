@@ -213,7 +213,9 @@ func TestScenario_BigTestseed_OpenAPISpecValid(t *testing.T) {
 	defer db.Close()
 	ts := buildTestRouter(t, cfg, db)
 
-	resp, err := http.Get(ts.URL + "/openapi.json")
+	req, _ := http.NewRequest("GET", ts.URL+"/openapi.json", nil)
+	req.Header.Set("X-Tenant-ID", "default")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET /openapi.json: %v", err)
 	}
