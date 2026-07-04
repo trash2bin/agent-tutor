@@ -86,8 +86,18 @@ func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 	if tenantHeader == "" {
 		tenantHeader = "X-Tenant-ID"
 	}
+	systemPaths := map[string]struct{}{
+		"/docs":         {},
+		"/openapi.json": {},
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+			if _, ok := systemPaths[path]; ok {
+				next.ServeHTTP(w, r)
+				return
+			}
 			tenantID := r.Header.Get(tenantHeader)
 			if tenantID == "" {
 				// Case-insensitive fallback

@@ -60,9 +60,8 @@ func NewRouterFromConfig(ts *TenantStore, cfg *config.Config, db runtime.Adapter
 	}
 
 	// Системные эндпоинты (всегда)
-	r.Get("/docs", swaggerHandler)
-	hasAdmin := introspectAdapter != nil
-	r.Get("/openapi.json", NewOpenAPIHandler(ts, hasAdmin))
+	r.Get("/docs", SwaggerHandler)
+	r.Get("/openapi.json", NewOpenAPIHandler(ts, introspectAdapter != nil))
 
 	// MCP-манифест — единственный source of truth для mcp-gateway
 	r.Get("/mcp/manifest", handlers.MCPManifestHandler(cfg))

@@ -120,6 +120,7 @@ func main() {
 	// Build admin router (requires introspection adapter)
 	// We use the adapter from the initial config just to initialize the admin router's base capabilities
 	adapter, _ := registry.Get(string(cfg.DataSource.Driver))
+	store.SetHasAdmin(adapter != nil)
 	adminRouter := store.BuildAdminRouter(adapter, absCfgPath)
 
 	// ── Hot reload: fsnotify on config-file ──
@@ -152,6 +153,9 @@ func main() {
 
 	// Mount admin endpoints separately to avoid routing conflicts
 	rootRouter.Mount("/admin", adminRouter)
+	// Mount the tenant store as the root handler — it dispatches
+	// /health, /docs, /openapi.json as system endpoints, and routes
+	// everything else through per-tenant routers.
 	rootRouter.Mount("/", store)
 
 	port := os.Getenv("PORT")

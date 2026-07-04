@@ -87,7 +87,8 @@ type TenantStore struct {
 
 	registry *datasource.Registry // all registered datasource.Adapter drivers
 
-	adminRouter http.Handler // chi sub-router for /admin/* (built once)
+	adminRouter      http.Handler // chi sub-router for /admin/* (built once)
+	hasAdmin         bool         // true when introspect adapter is available (for /openapi.json)
 }
 
 // NewTenantStore creates an empty TenantStore with the given registry.
@@ -237,9 +238,16 @@ func (ts *TenantStore) ReloadTenant(ctx context.Context, tenantID string, config
 func (ts *TenantStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// Health endpoint
-	if path == "/health" {
+	// System endpoints (no tenant required)
+	switch path {
+	case "/health":
 		ts.multiTenantHealthHandler(w, r)
+		return
+	case "/docs":
+		SwaggerHandler(w, r)
+		return
+	case "/openapi.json":
+		NewOpenAPIHandler(ts, ts.hasAdmin)(w, r)
 		return
 	}
 
@@ -860,4 +868,14 @@ func adminConfigResponseFromConfig(cfg *config.Config) adminConfigResponse {
 		MCPTools:      cfg.MCPTools,
 		Introspection: cfg.Introspection,
 	}
+}
+
+
+
+
+// SetHasAdmin sets whether an introspect adapter is available (for /openapi.json).
+func (ts *TenantStore) SetHasAdmin(hasAdmin bool) {
+	ts.mu.Lock()
+	ts.hasAdmin = hasAdmin
+	ts.mu.Unlock()
 }
