@@ -150,6 +150,7 @@ MCP_DEV=true DATA_SERVICE_URL=http://127.0.0.1:8084 go run ./cmd/
 
 Доступно:
 - `/debug` — MCP Playground: веб-интерфейс для тестирования всех инструментов (требует `X-Tenant-ID` в запросах)
+- `/config` — совместимый алиас `/debug/config` для старых клиентов и закешированного UI
 - `/debug/sessions` — активные SSE-сессии
 - `/debug/config` — текущий конфиг тенанта (фетчится из `/mcp/manifest`)
 
@@ -159,7 +160,7 @@ MCP_DEV=true DATA_SERVICE_URL=http://127.0.0.1:8084 go run ./cmd/
 |---|---|---|---|
 | `/health` | GET | Статус сервиса | - |
 | `/mcp` | GET | SSE endpoint (MCP streamable HTTP) | `X-Tenant-ID` |
-| `/mcp/message` | POST | JSON-RPC сообщения | `X-Tenant-ID` |
+| `/mcp/message` | POST | JSON-RPC сообщения; без `sessionId` возвращает прямой JSON-ответ, с `sessionId` пишет в SSE-сессию | `X-Tenant-ID` |
 | `/debug` | GET | MCP Playground (dev) | `X-Tenant-ID` |
 
 ## Переменные окружения
@@ -182,3 +183,28 @@ MCP_DEV=true DATA_SERVICE_URL=http://127.0.0.1:8084 go run ./cmd/
 | `search_documents` | `POST /search` | Семантический поиск по документам |
 | `list_documents` | `POST /documents/list` | Список документов с фильтром по дисциплине |
 | `get_rag_context` | `POST /context` | Готовый контекст для ответа LLM |
+
+---
+
+## 🔧 Troubleshooting
+
+| Симптом | Причина | Фикс |
+|---|---|---|
+| `MCP session not ready (timeout)` в e2e-mcp | data-service не запущен на 8084 | Запусти `go run ./data-service/cmd/server/ --config ./specs/config.example.json` |
+| `connection refused` на 8083 | mcp-gateway не запущен | `go run ./mcp-gateway/cmd/` |
+| Пустой `/mcp/manifest` (0 tools) | Тенант не зарегистрирован в data-service | `uv run agent-db tenant list` → `uv run agent-db register <id> <scenario>` |
+| 401 / `admin_disabled` | `ADMIN_TOKEN` mismatch | `export ADMIN_TOKEN=secret` (должен совпадать с data-service) |
+| 500 `invalid JSON-RPC` | Не тот формат запроса | POST на `/mcp/message` с `Content-Type: application/json`, тело: `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"...","arguments":{}},"id":1}` |
+
+### Быстрый smoke-тест
+```bash
+# 1. Запусти data-service (порт 8084) + mcp-gateway (порт 8083)
+# 2. Проверь манифест
+curl -s -H "X-Tenant-ID: default" http://127.0.0.1:8083/mcp/manifest | jq '.tools | length'
+# Должен вернуть > 0
+
+# 3. Прямой JSON-RPC вызов (без SSE)
+curl -s -X POST http://127.0.0.1:8083/mcp/message \
+  -H "X-Tenant-ID: default" -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_student","arguments":{}},"id":1}' | jq .
+```

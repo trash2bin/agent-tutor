@@ -208,3 +208,37 @@ go test ./data-service/... ./mcp-gateway/... -count=1
 - Нет прямого доступа к БД (только через data-service)
 - Не выполняет бизнес-логику (только проксирование)
 - Read-only проксирование в data-service (мутации через API)
+
+---
+
+## 🔧 Troubleshooting
+
+| Симптом | Причина | Фикс |
+|---|---|---|
+| `RuntimeError: Directory '.../demo/web/static' does not exist` | Запуск не из корня проекта | `cd /project/root && uv run python -m demo.web.server` |
+| 404 на `/api/manifest` для tenant | Тенант не зарегистрирован в data-service | `uv run agent-db tenant list` → `uv run agent-db register <id> <scenario>` |
+| Web не проксирует на data-service | Не тот `X-Tenant-ID` или data-service giù | Проверить логи data-service, заголовок `X-Tenant-ID` |
+| SSE chat: `Connection refused` на 8081 | demo-api не запущен | `cd demo/api && uv run python -m uvicorn server:app --port 8081` |
+| 502 Bad Gateway | Downstream сервис упал | Проверить логи соответствующего сервиса (data-service:808084, api:8081, rag:8082) |
+
+### Быстрый smoke-тест
+```bash
+# 1. Все сервисы запущены? (порты 8080-8084)
+lsof -ti:8080,8081,8083,8084
+
+# 2. Health web
+curl -s http://127.0.0.1:8080/health
+
+# 3. Proxy → data-service (нужен запущенный data-service + registered tenant)
+curl -s -H "X-Tenant-ID: default" http://127.0.0.1:8080/api/manifest | jq '.entities | length'
+# Должен вернуть > 0
+
+# 4. Proxy → demo-api (SSE chat endpoint)
+curl -s -X POST http://127.0.0.1:8080/api/chat \
+  -H "Content-Type: application/json" -H "X-Tenant-ID: default" \
+  -d '{"message":"test","session_id":"test"}' | head -c 200
+```
+
+### Логи
+- Ручное запуск: stdout/stderr терминала
+- Через `dev.sh`: `.data/logs/web.log`
