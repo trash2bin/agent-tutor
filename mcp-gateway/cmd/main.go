@@ -172,6 +172,7 @@ func buildRouter() *chi.Mux {
 	r.Get("/docs", gwserver.SwaggerHandler())
 	r.Get("/openapi.json", gwserver.OpenAPIHandler())
 	r.Get("/debug", debugPlaygroundHandler())
+	r.Get("/config", debugConfigHandler())
 	r.Get("/debug/sessions", debugSessionsHandler(sessions))
 	r.Get("/debug/config", debugConfigHandler())
 	r.Get("/mcp", sseHandler(sessions))
@@ -210,7 +211,7 @@ func sseHandler(sessions *sync.Map) http.HandlerFunc {
 			writer:   w,
 			flusher:  flusher,
 			done:     make(chan struct{}),
-			tenantID: r.Header.Get("X-Tenant-ID"),
+			tenantID: resolveTenantID(r),
 		}
 		sessions.Store(sessionID, session)
 		defer func() {
@@ -227,39 +228,45 @@ func sseHandler(sessions *sync.Map) http.HandlerFunc {
 
 func mcpPostHandler(sessions *sync.Map) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		var rawMessage json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&rawMessage); err != nil {
+			writeJSONRPCError(w, nil, 400, "Parse error")
+			return
+		}
+
 		sessionID := r.URL.Query().Get("sessionId")
-		if sessionID == "" {
-			http.Error(w, "sessionId is required", http.StatusBadRequest)
-			return
+		tenantID := resolveTenantID(r)
+		var session *sseSession
+
+		if sessionID != "" {
+			si, ok := sessions.Load(sessionID)
+			if !ok {
+				http.Error(w, "session not found", http.StatusNotFound)
+				return
+			}
+			session = si.(*sseSession)
+
+			if tenantID == "" {
+				session.mu.Lock()
+				tenantID = session.tenantID
+				session.mu.Unlock()
+			}
 		}
 
-		si, ok := sessions.Load(sessionID)
-		if !ok {
-			http.Error(w, "session not found", http.StatusNotFound)
-			return
-		}
-		session := si.(*sseSession)
-
-		tenantID := r.Header.Get("X-Tenant-ID")
-		if tenantID == "" {
-			session.mu.Lock()
-			tenantID = session.tenantID
-			session.mu.Unlock()
-		}
 		if tenantID == "" {
 			http.Error(w, "X-Tenant-ID header is required", http.StatusBadRequest)
 			return
 		}
 
-		mcpServer, err := session.ensureServerForTenant(tenantID)
+		var mcpServer *server.MCPServer
+		var err error
+		if session != nil {
+			mcpServer, err = session.ensureServerForTenant(tenantID)
+		} else {
+			mcpServer, err = createServerForTenant(tenantID)
+		}
 		if err != nil {
 			http.Error(w, "Failed to create MCP server", http.StatusInternalServerError)
-			return
-		}
-
-		var rawMessage json.RawMessage
-		if err := json.NewDecoder(r.Body).Decode(&rawMessage); err != nil {
-			writeJSONRPCError(w, nil, 400, "Parse error")
 			return
 		}
 
@@ -277,25 +284,34 @@ func mcpPostHandler(sessions *sync.Map) http.HandlerFunc {
 		// it to data-service for multi-tenant isolation.
 		ctx = context.WithValue(ctx, httpclient.TenantIDKey, tenantID)
 
-		ctx = mcpServer.WithContext(ctx, server.NotificationContext{
-			ClientID:  sessionID,
-			SessionID: sessionID,
-		})
+		if session != nil {
+			ctx = mcpServer.WithContext(ctx, server.NotificationContext{
+				ClientID:  sessionID,
+				SessionID: sessionID,
+			})
+		}
 
 		response := mcpServer.HandleMessage(ctx, rawMessage)
 		if response != nil {
-			eventData, _ := json.Marshal(response)
-			session.writeMessage(eventData)
+			if session != nil {
+				eventData, _ := json.Marshal(response)
+				session.writeMessage(eventData)
+				w.WriteHeader(http.StatusAccepted)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(response)
+			return
 		}
+
 		w.WriteHeader(http.StatusAccepted)
 	}
 }
 
 func manifestProxyHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = r.URL.Query().Get("tenant")
-	}
+	tenantID := resolveTenantID(r)
 	cfg, err := globalClient.FetchConfigWithTenant(tenantID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -317,6 +333,9 @@ func writeJSONRPCError(w http.ResponseWriter, id any, code int, message string) 
 func debugPlaygroundHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		w.Write([]byte(playgroundHTML))
 	}
 }
@@ -328,19 +347,26 @@ type sessionInfo struct {
 
 func debugSessionsHandler(sessions *sync.Map) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		tenantID := resolveTenantID(r)
 		var result []sessionInfo
 		sessions.Range(func(key, value any) bool {
 			s := value.(*sseSession)
 			s.mu.Lock()
-			tenantID := s.tenantID
+			sTenantID := s.tenantID
 			s.mu.Unlock()
-			result = append(result, sessionInfo{
-				SessionID: key.(string),
-				TenantID:  tenantID,
-			})
+			// If tenantID is empty, show all sessions; otherwise filter by tenant
+			if tenantID == "" || sTenantID == tenantID {
+				result = append(result, sessionInfo{
+					SessionID: key.(string),
+					TenantID:  sTenantID,
+				})
+			}
 			return true
 		})
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		json.NewEncoder(w).Encode(map[string]any{"sessions": result})
 	}
 }
@@ -348,6 +374,20 @@ func debugSessionsHandler(sessions *sync.Map) http.HandlerFunc {
 func debugConfigHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Reuse the same logic as manifestProxyHandler
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		manifestProxyHandler(w, r)
 	}
+}
+
+func resolveTenantID(r *http.Request) string {
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = r.URL.Query().Get("tenant")
+	}
+	if tenantID == "" {
+		tenantID = r.URL.Query().Get("tenat")
+	}
+	return tenantID
 }

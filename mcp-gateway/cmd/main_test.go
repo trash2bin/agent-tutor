@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/agent-tutor/agent-tutor-go/config"
+	"github.com/agent-tutor/mcp-gateway/internal/httpclient"
 )
 
 // ════════════════════════════════════════════════════════════════
@@ -283,6 +285,57 @@ func TestMCPMessageEndpoint(t *testing.T) {
 	}
 }
 
+func TestMCPMessageEndpoint_DirectResponseWithoutSession(t *testing.T) {
+	prevClient := globalClient
+	defer func() { globalClient = prevClient }()
+
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp/manifest" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("X-Tenant-ID"); got != "tenant-a" {
+			t.Errorf("manifest request tenant = %q, want tenant-a", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, defaultTestConfig())
+	}))
+	defer manifestServer.Close()
+
+	t.Setenv("DATA_SERVICE_URL", manifestServer.URL)
+	globalClient = httpclient.New()
+
+	r := newTestRouterFromConfig(t, defaultTestConfig())
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "test-1",
+		"method":  "tools/list",
+		"params":  map[string]any{},
+	}
+	bodyBytes, _ := json.Marshal(msg)
+
+	req := httptest.NewRequest("POST", "/mcp/message", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /mcp/message without session = %d, want 200\nbody: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v (body: %s)", err, rec.Body.String())
+	}
+	if resp["jsonrpc"] != "2.0" {
+		t.Fatalf(`jsonrpc = %v, want "2.0"`, resp["jsonrpc"])
+	}
+	if _, ok := resp["result"]; !ok {
+		t.Fatalf("response missing result: %v", resp)
+	}
+}
+
 func TestMCPMessageEndpoint_ParseError(t *testing.T) {
 	t.Skip("test written for old REST endpoints — needs rewrite for MCP SSE protocol")
 	r := newTestRouterFromConfig(t, defaultTestConfig())
@@ -309,6 +362,42 @@ func TestMCPMessageEndpoint_ParseError(t *testing.T) {
 	expectedCode := float64(-32700)
 	if code != expectedCode {
 		t.Errorf("error.code = %v, want %v", code, expectedCode)
+	}
+}
+
+func TestDebugConfigAlias(t *testing.T) {
+	prevClient := globalClient
+	defer func() { globalClient = prevClient }()
+
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp/manifest" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, defaultTestConfig())
+	}))
+	defer manifestServer.Close()
+
+	t.Setenv("DATA_SERVICE_URL", manifestServer.URL)
+	globalClient = httpclient.New()
+
+	r := newTestRouterFromConfig(t, defaultTestConfig())
+	req := httptest.NewRequest("GET", "/config", nil)
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /config = %d, want 200\nbody: %s", rec.Code, rec.Body.String())
+	}
+
+	var cfg map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("unmarshal response: %v (body: %s)", err, rec.Body.String())
+	}
+	if cfg["version"] == nil {
+		t.Fatalf("config response missing version: %v", cfg)
 	}
 }
 
@@ -357,12 +446,9 @@ func TestMCPMessageEndpoint_WithSessionID(t *testing.T) {
 	}
 }
 
-
-
 // ════════════════════════════════════════════════════════════════
 // Helper function tests
 // ════════════════════════════════════════════════════════════════
-
 
 func TestWriteJSONRPCError(t *testing.T) {
 	t.Skip("test written for old REST endpoints — needs rewrite for MCP SSE protocol")
@@ -392,7 +478,6 @@ func TestWriteJSONRPCError(t *testing.T) {
 		t.Errorf("error.message = %v, want 'Invalid Request'", errObj["message"])
 	}
 }
-
 
 func TestNotFoundRoutes(t *testing.T) {
 	r := newTestRouterFromConfig(t, defaultTestConfig())
