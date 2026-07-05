@@ -11,8 +11,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/agent-tutor/agent-tutor-go/config"
 )
 
 // ── Middleware ──
@@ -69,6 +73,122 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// BodyLimitMiddleware ограничивает размер тела запроса для POST/PUT/PATCH.
+// Если Content-Length превышает limit — возвращает 413 Request Entity Too Large.
+func BodyLimitMiddleware(limit int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ContentLength > limit {
+				slog.Warn("request body too large",
+					"method", r.Method,
+					"path", r.URL.Path,
+					"content_length", r.ContentLength,
+					"limit", limit,
+				)
+				http.Error(w, `{"error":"body_too_large","message":"Request body exceeds maximum size"}`, http.StatusRequestEntityTooLarge)
+				return
+			}
+			// Wrap body with LimitReader для потоковой защиты
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// ThrottleMiddleware ограничивает количество одновременных запросов.
+// Если превышен лимит — возвращает 503 Service Unavailable.
+func ThrottleMiddleware(maxConcurrent int) func(http.Handler) http.Handler {
+	var mu sync.Mutex
+	active := 0
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			if active >= maxConcurrent {
+				mu.Unlock()
+				w.Header().Set("Retry-After", "1")
+				http.Error(w, `{"error":"too_many_requests","message":"Server at capacity, try again later"}`, http.StatusServiceUnavailable)
+				return
+			}
+			active++
+			mu.Unlock()
+
+			defer func() {
+				mu.Lock()
+				active--
+				mu.Unlock()
+			}()
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// ── Resolver functions: env → config → default ──
+
+// resolveServerTimeout возвращает таймаут запроса в секундах.
+// Приоритет: DS_REQUEST_TIMEOUT env → cfg.Server.RequestTimeoutSeconds → 30.
+func ResolveRequestTimeout(cfg *config.Config) int {
+	return resolveIntEnv("DS_REQUEST_TIMEOUT",
+		configValue(cfg, func(c *config.Config) *int {
+			if c.Server != nil {
+				return c.Server.RequestTimeoutSeconds
+			}
+			return nil
+		}),
+		30)
+}
+
+// resolveBodyLimit возвращает лимит тела запроса в байтах.
+// Приоритет: DS_BODY_LIMIT_MB env → cfg.Server.BodyLimitMB → 10 MB.
+func ResolveBodyLimit(cfg *config.Config) int64 {
+	mb := resolveIntEnv("DS_BODY_LIMIT_MB",
+		configValue(cfg, func(c *config.Config) *int {
+			if c.Server != nil {
+				return c.Server.BodyLimitMB
+			}
+			return nil
+		}),
+		10)
+	return int64(mb) << 20
+}
+
+// resolveMaxConcurrent возвращает максимум одновременных запросов.
+// Приоритет: DS_MAX_CONCURRENT env → cfg.Server.MaxConcurrent → 100.
+func ResolveMaxConcurrent(cfg *config.Config) int {
+	return resolveIntEnv("DS_MAX_CONCURRENT",
+		configValue(cfg, func(c *config.Config) *int {
+			if c.Server != nil {
+				return c.Server.MaxConcurrent
+			}
+			return nil
+		}),
+		100)
+}
+
+// resolveIntEnv читает env-переменную, парсит как int.
+// Если не задана или не парсится — возвращает fallback.
+func resolveIntEnv(key string, fallback int, defaultVal int) int {
+	raw := os.Getenv(key)
+	if raw != "" {
+		if val, err := strconv.Atoi(raw); err == nil && val > 0 {
+			return val
+		}
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return defaultVal
+}
+
+// configValue извлекает опциональное *int из Config через getter.
+func configValue(cfg *config.Config, getter func(*config.Config) *int) int {
+	if v := getter(cfg); v != nil {
+		return *v
+	}
+	return 0
 }
 
 // ── Вспомогательные типы ──

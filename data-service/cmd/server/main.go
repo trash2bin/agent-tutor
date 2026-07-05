@@ -149,6 +149,14 @@ func main() {
 	rootRouter.Use(server.RequestIDMiddleware)
 	rootRouter.Use(server.StructuredLoggingMiddleware)
 	rootRouter.Use(chimw.RealIP)
+	// ── Server limits: env → config.json → default ──
+	requestTimeout := time.Duration(server.ResolveRequestTimeout(cfg)) * time.Second
+	bodyLimit := server.ResolveBodyLimit(cfg)
+	maxConcurrent := server.ResolveMaxConcurrent(cfg)
+
+	rootRouter.Use(chimw.Timeout(requestTimeout))
+	rootRouter.Use(server.BodyLimitMiddleware(bodyLimit))
+	rootRouter.Use(server.ThrottleMiddleware(maxConcurrent))
 	rootRouter.Use(server.TenantIDMiddleware("X-Tenant-ID"))
 
 	// Mount admin endpoints separately to avoid routing conflicts
@@ -169,7 +177,7 @@ func main() {
 		Addr:         addr,
 		Handler:      rootRouter,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: requestTimeout,
 		IdleTimeout:  120 * time.Second,
 	}
 
@@ -192,6 +200,9 @@ func main() {
 		"port", port,
 		"driver", cfg.DataSource.Driver,
 		"config", absCfgPath,
+		"request_timeout", requestTimeout,
+		"body_limit_mb", bodyLimit>>20,
+		"max_concurrent", maxConcurrent,
 	)
 
 	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {

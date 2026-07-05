@@ -309,5 +309,10 @@
         "entity": "teachers"
       }
     ]
+  },
+  "server": {
+    "request_timeout_seconds": 30,
+    "body_limit_mb": 10,
+    "max_concurrent": 100
   }
 }

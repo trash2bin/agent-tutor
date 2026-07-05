@@ -66,10 +66,12 @@ type ConnAdapter struct {
 }
 
 func (c *ConnAdapter) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	slog.Info("DB Query", "sql", query, "args", args)
+	if slog.Default().Enabled(ctx, slog.LevelDebug) {
+		slog.Debug("DB Query", "sql", query, "args", args)
+	}
 	rows, err := c.Conn.QueryContext(ctx, query, args...)
 	if err != nil {
-		slog.Error("DB Error", "error", err)
+		slog.Warn("DB Error", "error", err, "sql", query)
 	}
 	return rows, err
 }

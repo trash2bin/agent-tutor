@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/agent-tutor/agent-tutor-go/config"
 	"github.com/agent-tutor/data-service/internal/configgen"
@@ -49,6 +50,7 @@ func NewRouterFromConfig(ts *TenantStore, cfg *config.Config, db runtime.Adapter
 	r.Use(RequestIDMiddleware)
 	r.Use(StructuredLoggingMiddleware)
 	r.Use(chimw.RealIP)
+	r.Use(chimw.Timeout(time.Duration(ResolveRequestTimeout(cfg)) * time.Second))
 
 	// Multi-tenancy: X-Tenant-ID middleware (если auth настроен)
 	if cfg.Auth != nil && cfg.Auth.Strategy == config.AuthStrategyHeader {

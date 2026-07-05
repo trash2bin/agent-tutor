@@ -15,19 +15,22 @@ import (
 //
 // mcp-gateway вызывает этот эндпоинт при старте вместо того,
 // чтобы парсить config.json самостоятельно.
+//
+// Результат кэшируется — генерируем tools только один раз при старте сервиса.
 func MCPManifestHandler(cfg *config.Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Runtime-генерация MCPTools — всегда актуальны, не зависят от дискового config.json.
-		tools := cfg.MCPTools
-		if len(tools) == 0 {
-			tools = configgen.GenerateMCPTools(cfg.Endpoints)
-		}
+	// Предварительная генерация MCPTools — только один раз при старте
+	tools := cfg.MCPTools
+	if len(tools) == 0 {
+		tools = configgen.GenerateMCPTools(cfg.Endpoints)
+	}
+	manifest := map[string]any{
+		"endpoints":      cfg.Endpoints,
+		"entities":       cfg.Entities,
+		"custom_queries": cfg.CustomQueries,
+		"mcp_tools":      tools,
+	}
 
-		RespondJSON(w, http.StatusOK, map[string]any{
-			"endpoints":      cfg.Endpoints,
-			"entities":       cfg.Entities,
-			"custom_queries": cfg.CustomQueries,
-			"mcp_tools":      tools,
-		})
+	return func(w http.ResponseWriter, r *http.Request) {
+		RespondJSON(w, http.StatusOK, manifest)
 	}
 }

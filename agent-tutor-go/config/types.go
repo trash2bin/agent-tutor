@@ -186,6 +186,9 @@ type Config struct {
 
 	// Auth — multi-tenancy и row-level isolation (для фазы 3.7).
 	Auth *AuthConfig `json:"auth,omitempty"`
+
+	// Server — настройки HTTP-сервера (таймауты, лимиты). Опционально.
+	Server *ServerConfig `json:"server,omitempty"`
 }
 
 // DataSourceConfig — подключение к клиентской БД.
@@ -404,13 +407,29 @@ type RowFilter struct {
 	Where string `json:"where"`
 }
 
+// ServerConfig — настройки HTTP-сервера data-service.
+type ServerConfig struct {
+	// RequestTimeoutSeconds — таймаут обработки запроса в секундах.
+	// По умолчанию 30. Переопределяется через DS_REQUEST_TIMEOUT.
+	RequestTimeoutSeconds *int `json:"request_timeout_seconds,omitempty"`
+
+	// BodyLimitMB — максимальный размер тела запроса в MB.
+	// По умолчанию 10. Переопределяется через DS_BODY_LIMIT_MB.
+	BodyLimitMB *int `json:"body_limit_mb,omitempty"`
+
+	// MaxConcurrent — максимум одновременных запросов.
+	// По умолчанию 100. Переопределяется через DS_MAX_CONCURRENT.
+	MaxConcurrent *int `json:"max_concurrent,omitempty"`
+}
+
 // String возвращает строковое представление Config (для логирования).
 // Реализация намеренно лаконичная — детали в полях структуры.
 func (c *Config) String() string {
 	if c == nil {
 		return "<nil config>"
 	}
-	return fmt.Sprintf("Config{version=%d, driver=%s, entities=%d, endpoints=%d, custom_queries=%d, mcp_tools=%d}",
+	return fmt.Sprintf("Config{version=%d, driver=%s, entities=%d, endpoints=%d, custom_queries=%d, mcp_tools=%d, server=%v}",
 		c.Version, c.DataSource.Driver,
-		len(c.Entities), len(c.Endpoints), len(c.CustomQueries), len(c.MCPTools))
+		len(c.Entities), len(c.Endpoints), len(c.CustomQueries), len(c.MCPTools),
+		c.Server)
 }
