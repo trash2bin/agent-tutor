@@ -37,6 +37,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -118,9 +119,17 @@ func main() {
 	store := server.NewTenantStore(registry)
 
 	// Build admin router (requires introspection adapter)
-	// We use the adapter from the initial config just to initialize the admin router's base capabilities
 	adapter, _ := registry.Get(string(cfg.DataSource.Driver))
-	adminRouter := store.BuildAdminRouter(adapter, absCfgPath)
+	var atomicRouter atomic.Value
+	adminCtx := &server.AdminContext{
+		ConfigPath:   absCfgPath,
+		AtomicRouter: &atomicRouter,
+		ApprovedWriteEndpoints: make(map[string]bool),
+	}
+	if err := server.LoadApprovedTools(adminCtx); err != nil {
+		slog.Warn("load approved tools", "error", err)
+	}
+	adminRouter := store.BuildAdminRouter(adapter, absCfgPath, adminCtx, cfg)
 
 	// ── Hot reload: fsnotify on config-file ──
 	// Now we only reload if a specific tenant is requested or through admin API.
