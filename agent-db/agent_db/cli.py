@@ -564,6 +564,18 @@ def e2e_mcp():
     _run_mcp_dynamic_tool_tests()
 
 
+# ---- E2E MCP Composite (multi-tenant, no LLM) ----
+
+@cli.command()
+def e2e_mcp_composite():
+    """Composite MCP tests: one SSE session accessing multiple tenants' tools.
+
+    Verifies that mcp-gateway correctly aggregates tools from multiple tenants
+    into one composite MCP server with tenant-prefixed tool names.
+    """
+    _run_mcp_composite_tests()
+
+
 # ---- E2E Full (all tests) ----
 
 @cli.command()
@@ -575,6 +587,9 @@ def e2e_full(tenants: str):
 
     click.secho("\n═══ E2E MCP (dynamic tool resolution) ═══", fg="cyan", bold=True)
     _run_mcp_dynamic_tool_tests()
+
+    click.secho("\n═══ E2E MCP COMPOSITE (multi-tenant) ═══", fg="cyan", bold=True)
+    _run_mcp_composite_tests()
 
     click.secho("\n═══ E2E LLM (SSE chat) ═══", fg="cyan", bold=True)
     ctx = click.get_current_context()
@@ -902,6 +917,416 @@ def _run_mcp_dynamic_tool_tests():
         click.secho(f"  ✅ MCP dynamic tool resolution: ALL PASSED", fg="green", bold=True)
     else:
         click.secho(f"  ⚠️  Some MCP tests failed — review diagnostics above.", fg="yellow", bold=True)
+
+
+# ============================================================================
+# E2E MCP Composite (multi-tenant, no LLM)
+# ============================================================================
+
+def _run_mcp_composite_tests():
+    """Test MCP composite mode: one SSE session accessing tools from multiple tenants.
+
+    Requires mcp-gateway composite support (resolveTenantIDs parsing comma-separated
+    X-Tenant-ID header and creating a composite MCPServer).
+    """
+    mcp_url = "http://127.0.0.1:8083"
+    seed_path = PROJECT_ROOT / "specs" / "fixtures" / "seed.json"
+    shop_db = PROJECT_ROOT / "data-service" / "testdata" / "scenarios" / "shop" / "data.db"
+    uni_db = PROJECT_ROOT / "tenant_composite_e2e.db"
+
+    tests_total = 0
+    tests_passed = 0
+    tests_failed = 0
+
+    click.secho("\n  ┌─ MCP Composite Multi-Tenant ───────────────────────", fg="cyan", bold=True)
+    all_ok = True
+
+    # ═══════════════════════════════════════════════════
+    # SETUP
+    # ═══════════════════════════════════════════════════
+    click.echo(f"  │")
+    click.echo(f"  │  ╭── SETUP ──────────────────────────────────╮")
+
+    # Seed university DB
+    click.echo(f"  │  │ 🔨 Seeding university DB...")
+    cmd = ["go", "run", "./cmd/seed-cli/", "--seed-path", str(seed_path)]
+    result = run(cmd, cwd=PROJECT_ROOT / "data-service", env={**os.environ, "DB_PATH": str(uni_db)})
+    if result.returncode != 0:
+        click.secho(f"  │  │ ❌ seed-cli failed", fg="red")
+        _cleanup_dbs(uni_db)
+        sys.exit(1)
+    click.echo(f"  │  │ ✅ university.db created")
+
+    # Health check
+    click.echo(f"  │  │ 🔍 Checking data-service health...")
+    h = admin_headers()
+    data_base = DATA_SERVICE_URL
+    try:
+        health = requests.get(f"{data_base}/health", timeout=5)
+        click.echo(f"  │  │ ✅ data-service: {health.status_code}")
+    except Exception as e:
+        click.secho(f"  │  │ ❌ data-service unreachable: {e}", fg="red")
+        click.echo(f"  │  ╰──────────────────────────────────────────╯")
+        _cleanup_dbs(uni_db)
+        return
+
+    # Register tenants
+    click.echo(f"  │  │ 🔑 Registering tenants...")
+
+    uni_config = {
+        "data_source": {"driver": "sqlite", "dsn": str(uni_db)},
+        "entities": [{"name": "student", "table": "students", "id_column": "id",
+            "fields": [{"name": "name", "column": "name", "type": "string"}]}],
+        "endpoints": [{"method": "GET", "path": "/students", "op": "list", "entity": "student"}]
+    }
+
+    shop_config = {
+        "data_source": {"driver": "sqlite", "dsn": str(shop_db)},
+        "entities": [{"name": "product", "table": "products", "id_column": "id",
+            "fields": [{"name": "name", "column": "name", "type": "string"}]}],
+        "endpoints": [{"method": "GET", "path": "/products", "op": "list", "entity": "product"}]
+    }
+
+    for tid in ["tenant-uni", "tenant-shop"]:
+        requests.delete(f"{data_base}/admin/tenants/{tid}", headers=h)
+
+    reg_ok = True
+    for tid, cfg in [("tenant-uni", uni_config), ("tenant-shop", shop_config)]:
+        resp = requests.post(f"{data_base}/admin/tenants", json={"id": tid, "config": cfg}, headers=h)
+        if resp.status_code in (200, 201):
+            click.echo(f"  │  │   ✅ {tid}: registered")
+        else:
+            click.secho(f"  │  │   ❌ {tid}: HTTP {resp.status_code} — {resp.text[:100]}", fg="red")
+            reg_ok = False
+            all_ok = False
+
+    if not reg_ok:
+        click.secho(f"  │  │ ❌ Tenant registration failed — aborting", fg="red")
+        click.echo(f"  │  ╰──────────────────────────────────────────╯")
+        _cleanup_dbs(uni_db)
+        return
+
+    # Verify manifests
+    click.echo(f"  │  │ 📋 Verifying tenant manifests...")
+    manifest_ok = True
+    for tid in ["tenant-uni", "tenant-shop"]:
+        r = requests.get(f"{data_base}/mcp/manifest", headers={"X-Tenant-ID": tid}, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            endpoints = data.get("endpoints", [])
+            entities = data.get("entities", [])
+            ep_names = [e.get("path") + " (" + e.get("op", "?") + ")" for e in endpoints]
+            ent_names = [e.get("name") for e in entities]
+            click.echo(f"  │  │   ✅ {tid}: {len(entities)} entities [{', '.join(ent_names)}], "
+                      f"{len(endpoints)} endpoints [{', '.join(ep_names)}]")
+        else:
+            click.secho(f"  │  │   ❌ {tid}: manifest HTTP {r.status_code}", fg="red")
+            manifest_ok = False
+            all_ok = False
+
+    if not manifest_ok:
+        click.echo(f"  │  ╰──────────────────────────────────────────╯")
+        _cleanup_dbs(uni_db)
+        return
+
+    click.echo(f"  │  ╰──────────────────────────────────────────╯")
+    click.echo(f"  │")
+
+    # ═══════════════════════════════════════════════════
+    # TEST 1 — list_tools via composite session
+    # ═══════════════════════════════════════════════════
+    tests_total += 1
+    click.echo(f"  ├── 🧪 TEST 1/3: list_tools via composite session ──────")
+    click.echo(f"  │")
+    click.echo(f"  │  📝 Проверяет, что одна SSE сессия с")
+    click.echo(f"  │     X-Tenant-ID: tenant-uni,tenant-shop")
+    click.echo(f"  │     возвращает инструменты ОБОИХ tenant'ов")
+    click.echo(f"  │     с префиксом {{tenantID}}__{{toolName}}")
+    click.echo(f"  │")
+
+    composite_headers = {"X-Tenant-ID": "tenant-uni,tenant-shop", "Accept": "text/event-stream"}
+    sse_q: queue.Queue = queue.Queue()
+    ready = threading.Event()
+    endpoint_val: list[str] = [""]
+    listed_tools: list[dict] = []
+
+    def _read_sse_composite():
+        try:
+            resp = requests.get(f"{mcp_url}/mcp", headers=composite_headers, stream=True, timeout=60)
+            resp.raise_for_status()
+            seen_endpoint_event = False
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                txt = line.decode("utf-8", errors="replace")
+                if txt.startswith("event: endpoint"):
+                    seen_endpoint_event = True
+                elif txt.startswith("data: ") and seen_endpoint_event and endpoint_val[0] == "":
+                    endpoint_val[0] = txt[6:].strip()
+                    ready.set()
+                elif txt.startswith("data: "):
+                    sse_q.put(txt[6:])
+        except Exception:
+            pass
+        finally:
+            sse_q.put(None)
+
+    click.echo(f"  │  📡 Opening SSE session...")
+    t = threading.Thread(target=_read_sse_composite, daemon=True)
+    t.start()
+
+    if not ready.wait(timeout=10):
+        click.secho(f"  │  ❌ SSE session not ready (timeout)", fg="red")
+        click.echo(f"  │")
+        _cleanup_dbs(uni_db)
+        return
+
+    ep = endpoint_val[0]
+    click.echo(f"  │  ✅ SSE session established")
+    click.echo(f"  │     messageURL: {ep}")
+    click.echo(f"  │")
+
+    # List tools
+    click.echo(f"  │  🔍 Sending tools/list...")
+    list_payload = {"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": 1}
+    try:
+        r = requests.post(ep, json=list_payload,
+            headers={"X-Tenant-ID": "tenant-uni,tenant-shop", "Content-Type": "application/json"}, timeout=15)
+        click.echo(f"  │     POST status: {r.status_code}")
+    except requests.RequestException as e:
+        click.secho(f"  │  ❌ list_tools POST failed: {e}", fg="red")
+        _cleanup_dbs(uni_db)
+        return
+
+    tool_names = []
+    if r.status_code in (200, 202):
+        try:
+            data = r.json()
+            if "result" in data:
+                listed_tools = data["result"].get("tools", [])
+                tool_names = [t.get("name", "") for t in listed_tools]
+        except Exception:
+            pass
+
+    if not tool_names:
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            try:
+                msg = sse_q.get(timeout=2)
+                if msg is None:
+                    break
+                try:
+                    chunk = json.loads(msg)
+                    if "result" in chunk and chunk.get("id") == 1:
+                        listed_tools = chunk["result"].get("tools", [])
+                        tool_names = [t.get("name", "") for t in listed_tools]
+                        break
+                except json.JSONDecodeError:
+                    pass
+            except queue.Empty:
+                continue
+
+    # Classify tools by tenant
+    tenant_a_tools = [n for n in tool_names if n.startswith("tenant-uni__")]
+    tenant_b_tools = [n for n in tool_names if n.startswith("tenant-shop__")]
+    common_tools = [n for n in tool_names if "__" not in n]
+
+    click.echo(f"  │")
+    click.echo(f"  │  📋 Tools returned ({len(tool_names)} total):")
+
+    if common_tools:
+        click.echo(f"  │     ├─ Common ({len(common_tools)}): {', '.join(common_tools)}")
+    if tenant_a_tools:
+        click.echo(f"  │     ├─ tenant-uni ({len(tenant_a_tools)}): {', '.join(tenant_a_tools)}")
+    if tenant_b_tools:
+        click.echo(f"  │     └─ tenant-shop ({len(tenant_b_tools)}): {', '.join(tenant_b_tools)}")
+
+    click.echo(f"  │")
+
+    # Verify
+    has_uni = "tenant-uni__list_student" in tool_names
+    has_shop = "tenant-shop__list_product" in tool_names
+    expected_tools = ["tenant-uni__list_student", "tenant-shop__list_product"]
+
+    ok = True
+    for expected in expected_tools:
+        if expected in tool_names:
+            click.echo(f"  │  ✅ [EXPECTED] {expected} — found")
+        else:
+            click.secho(f"  │  ❌ [EXPECTED] {expected} — MISSING!", fg="red")
+            all_ok = False
+            ok = False
+
+    if ok:
+        tests_passed += 1
+    else:
+        tests_failed += 1
+    click.echo(f"  │")
+
+    # ═══════════════════════════════════════════════════
+    # TEST 2 — Call prefixed tool: tenant-uni__list_student
+    # ═══════════════════════════════════════════════════
+    tests_total += 1
+    click.echo(f"  ├── 🧪 TEST 2/3: Call tenant-uni__list_student ────────")
+    click.echo(f"  │")
+    click.echo(f"  │  📝 Проверяет, что вызов инструмента с префиксом")
+    click.echo(f"  │     tenant-uni__list_student через composite сессию")
+    click.echo(f"  │     роутится в data-service c X-Tenant-ID: tenant-uni")
+    click.echo(f"  │     и возвращает данные студентов tenant-uni")
+    click.echo(f"  │")
+
+    call_payload = {"jsonrpc": "2.0", "method": "tools/call",
+                    "params": {"name": "tenant-uni__list_student", "arguments": {}}, "id": 2}
+    try:
+        r = requests.post(ep, json=call_payload,
+            headers={"X-Tenant-ID": "tenant-uni,tenant-shop", "Content-Type": "application/json"}, timeout=15)
+        click.echo(f"  │  POST status: {r.status_code}")
+    except requests.RequestException as e:
+        click.secho(f"  │  ❌ tool call POST failed: {e}", fg="red")
+        all_ok = False
+        tests_failed += 1
+
+    call_ok = False
+    call_error = ""
+    result_data = ""
+    if r.status_code in (200, 202):
+        try:
+            data = r.json()
+            if "result" in data:
+                call_ok = True
+                result_data = json.dumps(data["result"], ensure_ascii=False, indent=2)[:300]
+            elif "error" in data:
+                call_error = str(data.get("error", ""))[:200]
+        except Exception:
+            pass
+
+    if not call_ok:
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            try:
+                msg = sse_q.get(timeout=2)
+                if msg is None:
+                    break
+                try:
+                    chunk = json.loads(msg)
+                    if "result" in chunk and chunk.get("id") == 2:
+                        call_ok = True
+                        result_data = json.dumps(chunk["result"], ensure_ascii=False, indent=2)[:300]
+                        break
+                    elif "error" in chunk and chunk.get("id") == 2:
+                        call_error = str(chunk.get("error", ""))[:200]
+                        break
+                except json.JSONDecodeError:
+                    pass
+            except queue.Empty:
+                continue
+
+    click.echo(f"  │")
+    if call_ok:
+        tests_passed += 1
+        click.echo(f"  │  ✅ tenant-uni__list_student → OK (200)")
+        click.echo(f"  │     Response preview:")
+        for line in result_data.split("\n")[:8]:
+            click.echo(f"  │       {line}")
+    else:
+        tests_failed += 1
+        all_ok = False
+        click.secho(f"  │  ❌ tenant-uni__list_student FAILED", fg="red")
+        if call_error:
+            click.secho(f"  │     Error: {call_error}", fg="red")
+    click.echo(f"  │")
+
+    # ═══════════════════════════════════════════════════
+    # TEST 3 — Call prefixed tool: tenant-shop__list_product
+    # ═══════════════════════════════════════════════════
+    tests_total += 1
+    click.echo(f"  ├── 🧪 TEST 3/3: Call tenant-shop__list_product ───────")
+    click.echo(f"  │")
+    click.echo(f"  │  📝 Проверяет, что вызов инструмента с префиксом")
+    click.echo(f"  │     tenant-shop__list_product через ту ЖЕ сессию")
+    click.echo(f"  │     роутится в data-service c X-Tenant-ID: tenant-shop")
+    click.echo(f"  │     и возвращает данные товаров tenant-shop")
+    click.echo(f"  │")
+
+    call_payload2 = {"jsonrpc": "2.0", "method": "tools/call",
+                     "params": {"name": "tenant-shop__list_product", "arguments": {}}, "id": 3}
+    try:
+        r = requests.post(ep, json=call_payload2,
+            headers={"X-Tenant-ID": "tenant-uni,tenant-shop", "Content-Type": "application/json"}, timeout=15)
+        click.echo(f"  │  POST status: {r.status_code}")
+    except requests.RequestException as e:
+        click.secho(f"  │  ❌ tool call POST failed: {e}", fg="red")
+        all_ok = False
+        tests_failed += 1
+
+    call_ok2 = False
+    call_error2 = ""
+    result_data2 = ""
+    if r.status_code in (200, 202):
+        try:
+            data = r.json()
+            if "result" in data:
+                call_ok2 = True
+                result_data2 = json.dumps(data["result"], ensure_ascii=False, indent=2)[:300]
+            elif "error" in data:
+                call_error2 = str(data.get("error", ""))[:200]
+        except Exception:
+            pass
+
+    if not call_ok2:
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            try:
+                msg = sse_q.get(timeout=2)
+                if msg is None:
+                    break
+                try:
+                    chunk = json.loads(msg)
+                    if "result" in chunk and chunk.get("id") == 3:
+                        call_ok2 = True
+                        result_data2 = json.dumps(chunk["result"], ensure_ascii=False, indent=2)[:300]
+                        break
+                    elif "error" in chunk and chunk.get("id") == 3:
+                        call_error2 = str(chunk.get("error", ""))[:200]
+                        break
+                except json.JSONDecodeError:
+                    pass
+            except queue.Empty:
+                continue
+
+    click.echo(f"  │")
+    if call_ok2:
+        tests_passed += 1
+        click.echo(f"  │  ✅ tenant-shop__list_product → OK (200)")
+        click.echo(f"  │     Response preview:")
+        for line in result_data2.split("\n")[:8]:
+            click.echo(f"  │       {line}")
+    else:
+        tests_failed += 1
+        all_ok = False
+        click.secho(f"  │  ❌ tenant-shop__list_product FAILED", fg="red")
+        if call_error2:
+            click.secho(f"  │     Error: {call_error2}", fg="red")
+    click.echo(f"  │")
+
+    _cleanup_dbs(uni_db)
+
+    # ═══════════════════════════════════════════════════
+    # SUMMARY
+    # ═══════════════════════════════════════════════════
+    click.echo(f"  └────────────────────────────────────────────────────────")
+    click.echo(f"  │")
+    click.echo(f"  │  📊 Summary: {tests_passed}/{tests_total} passed, {tests_failed} failed")
+    click.echo(f"  │")
+    if tests_passed > 0:
+        click.echo(f"  │  ✅ Test 1: Composite list_tools returns tools from both tenants")
+        click.echo(f"  │  ✅ Test 2: tenant-uni tool routed to correct data-service")
+        click.echo(f"  │  ✅ Test 3: tenant-shop tool routed to correct data-service")
+    click.echo(f"  │")
+    if all_ok:
+        click.secho(f"  ✅  MCP composite multi-tenant: ALL {tests_passed} TESTS PASSED", fg="green", bold=True)
+    else:
+        click.secho(f"  ⚠️   MCP composite multi-tenant: {tests_failed}/{tests_total} FAILED", fg="yellow", bold=True)
 
 
 def _cleanup_dbs(*db_paths: Path):

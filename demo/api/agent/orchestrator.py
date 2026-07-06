@@ -119,24 +119,24 @@ class LLMAgent:
             yield self._format_sse_event(event)
 
     async def stream_events(
-        self, user_message: str, session_id: SessionId = "default", tenant_id: str = ""
+        self, user_message: str, session_id: SessionId = "default", tenant_ids: list[str] | None = None
     ) -> AsyncIterator[AgentEvent]:
         """Stream agent events (tokens, tool calls, results, etc.)."""
         session_id = self.conversation_manager.normalize_session_id(session_id)
         logger.info(
-            "[AGENT] User message for session %s (tenant: %s): %s...",
+            "[AGENT] User message for session %s (tenants: %s): %s...",
             session_id,
-            tenant_id,
+            tenant_ids or ["(default)"],
             user_message[:100],
         )
 
         lock = self.conversation_manager.get_session_lock(session_id)
         async with lock:
-            async for event in self._run_turn(user_message, session_id, tenant_id):
+            async for event in self._run_turn(user_message, session_id, tenant_ids):
                 yield event
 
     async def _run_turn(
-        self, user_message: str, session_id: SessionId, tenant_id: str = ""
+        self, user_message: str, session_id: SessionId, tenant_ids: list[str] | None = None
     ) -> AsyncIterator[AgentEvent]:
         """Execute a single conversation turn with multiple iterations."""
         # Build initial messages (async — sync SQLite через to_thread)
@@ -150,7 +150,7 @@ class LLMAgent:
         turn_id: TurnId = backlog.turn_start(session_id, user_message)
 
         try:
-            async with self.mcp_client.get_session(tenant_id=tenant_id) as session:
+            async with self.mcp_client.get_session(tenant_ids=tenant_ids) as session:
                 tools: list[dict[str, Any]] = await self.mcp_client.list_tools(session)
                 logger.info(
                     "[AGENT] Available tools: %s",

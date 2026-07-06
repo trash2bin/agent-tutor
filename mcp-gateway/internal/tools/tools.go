@@ -22,10 +22,11 @@ import (
 
 // Registry manages auto-generated + explicit MCP tools.
 type Registry struct {
-	cfg       *config.Config
-	client    *httpclient.Client
-	ragClient *ragclient.Client
-	toolDefs  []toolDef
+	cfg        *config.Config
+	client     *httpclient.Client
+	ragClient  *ragclient.Client
+	toolDefs   []toolDef
+	tenantID   string // "" for single-tenant (no prefix), "tenant-a" for composite mode
 }
 
 // toolDef — внутреннее описание одного MCP-инструмента.
@@ -41,10 +42,21 @@ type toolDef struct {
 // If RAG is not available (nil client or health check fails), RAG tools are
 // still registered but return a friendly error message at call time.
 func NewRegistry(cfg *config.Config) *Registry {
+	return newRegistry(cfg, "")
+}
+
+// NewPrefixedRegistry creates a registry with a tenant prefix for composite multi-tenant mode.
+// Tools will be registered as "{tenantID}__{toolName}" instead of "{toolName}".
+func NewPrefixedRegistry(cfg *config.Config, tenantID string) *Registry {
+	return newRegistry(cfg, tenantID)
+}
+
+func newRegistry(cfg *config.Config, tenantID string) *Registry {
 	r := &Registry{
 		cfg:       cfg,
 		client:    httpclient.New(),
 		ragClient: ragclient.New(),
+		tenantID:  tenantID,
 	}
 	if cfg != nil {
 		r.buildTools()
@@ -132,9 +144,14 @@ func (r *Registry) buildTools() {
 }
 
 // RegisterAll registers all tools on the MCP server.
+// In composite mode (tenantID != ""), tool names are prefixed with "{tenantID}__".
 func (r *Registry) RegisterAll(mcpServer *server.MCPServer) {
 	for _, td := range r.toolDefs {
-		registerOne(mcpServer, td, r.client)
+		name := td.Name
+		if r.tenantID != "" {
+			name = r.tenantID + "__" + name
+		}
+		registerOne(mcpServer, td, r.client, name, r.tenantID)
 	}
 	r.registerRagTools(mcpServer)
 }
@@ -251,7 +268,9 @@ func (r *Registry) GetToolNames() []string {
 }
 
 // registerOne registers a single tool on the MCP server.
-func registerOne(mcpServer *server.MCPServer, td toolDef, client *httpclient.Client) {
+// name is the tool name (may be prefixed in composite mode).
+// tenantID is the tenant for this tool ("" for single-tenant mode).
+func registerOne(mcpServer *server.MCPServer, td toolDef, client *httpclient.Client, name string, tenantID string) {
 	desc := td.Description
 	if desc == "" {
 		desc = fmt.Sprintf("Call %s endpoint", td.Endpoint)
@@ -274,19 +293,24 @@ func registerOne(mcpServer *server.MCPServer, td toolDef, client *httpclient.Cli
 		}
 	}
 
-	tool := mcp.NewTool(td.Name, opts...)
-	mcpServer.AddTool(tool, makeHandler(td, client))
+	tool := mcp.NewTool(name, opts...)
+	mcpServer.AddTool(tool, makeHandler(td, client, tenantID))
 }
 
 // makeHandler creates a handler that delegates to data-service via HTTP.
-func makeHandler(td toolDef, client *httpclient.Client) server.ToolHandlerFunc {
+// In composite mode (tenantID != ""), the tenant is hard-coded into the closure.
+// In single-tenant mode (tenantID == ""), tenantID is read from request context.
+func makeHandler(td toolDef, client *httpclient.Client, tenantID string) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// 1. Extract tenantID from context (passed by mcp-go server)
-		tenantID, _ := ctx.Value(httpclient.TenantIDKey).(string)
-		slog.Info("Tool call", "tool", td.Name, "tenantID", tenantID)
+		// 1. Resolve tenantID: from closure (composite) or from context (legacy)
+		actualTenantID := tenantID
+		if actualTenantID == "" {
+			actualTenantID, _ = ctx.Value(httpclient.TenantIDKey).(string)
+		}
+		slog.Info("Tool call", "tool", td.Name, "tenantID", actualTenantID)
 
 		// 2. Fetch current manifest for this tenant to resolve the endpoint
-		cfg, err := client.FetchConfigWithTenant(tenantID)
+		cfg, err := client.FetchConfigWithTenant(actualTenantID)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to resolve tenant config: %v", err)), nil
 		}
@@ -294,7 +318,6 @@ func makeHandler(td toolDef, client *httpclient.Client) server.ToolHandlerFunc {
 		// 3. Dynamic endpoint resolution: find the path that corresponds to this tool name
 		endpoint := td.Endpoint
 		for _, ep := range cfg.Endpoints {
-			// We use the same logic as deriveToolName to match the tool name
 			if deriveToolName(ep) == td.Name {
 				endpoint = ep.Path
 				break
@@ -307,6 +330,9 @@ func makeHandler(td toolDef, client *httpclient.Client) server.ToolHandlerFunc {
 				args[k] = v
 			}
 		}
+
+		// 4. Inject tenantID into context for httpclient
+		ctx = context.WithValue(ctx, httpclient.TenantIDKey, actualTenantID)
 
 		result, err := client.Call(ctx, endpoint, args)
 		if err != nil {

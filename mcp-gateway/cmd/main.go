@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -70,27 +71,25 @@ var (
 	}()
 )
 
-const (
-// MaxSessions limits concurrent SSE sessions per process to prevent OOM
 // sseSession represents one long-lived SSE connection (opened via GET) and
-// the tenant-scoped MCP server state associated with it.
+// the (possibly composite) MCP server state associated with it.
 //
-// mu guards mcpServer, tenantID, and all writes to writer/flusher.
-// Both are mutated from mcpPostHandler (on every POST) and read from the
-)
-
-// same handler, and in principle a client could fire concurrent tool
-// calls for the same session — the Go http.ResponseWriter is not safe for
-// concurrent writes, so every write MUST go through this lock.
+// mu guards mcpServer, tenantIDs, and all writes to writer/flusher.
 type sseSession struct {
 	mu           sync.Mutex
 	writer       http.ResponseWriter
 	flusher      http.Flusher
 	done         chan struct{}
-	tenantID     string
+	tenantIDs    []string
 	mcpServer    *server.MCPServer
 	createdAt    time.Time
 	lastActivity time.Time
+}
+
+func (s *sseSession) getTenantIDs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tenantIDs
 }
 
 func (s *sseSession) updateActivity() {
@@ -106,12 +105,6 @@ func (s *sseSession) isExpired() bool {
 	return now.Sub(s.lastActivity) > SessionIdleTimeout || now.Sub(s.createdAt) > SessionMaxLifetime
 }
 
-func (s *sseSession) getTenantID() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.tenantID
-}
-
 // writeMessage safely writes a JSON-RPC "message" SSE event to this
 // session's underlying connection.
 func (s *sseSession) writeMessage(eventData []byte) {
@@ -122,27 +115,41 @@ func (s *sseSession) writeMessage(eventData []byte) {
 	s.lastActivity = time.Now()
 }
 
-// ensureServerForTenant lazily creates (or re-creates, on tenant switch)
-// the per-tenant MCP server for this session. Guarded by mu so concurrent
-// POSTs on the same session can't race on server creation.
-func (s *sseSession) ensureServerForTenant(tenantID string) (*server.MCPServer, error) {
+// ensureCompositeServer lazily creates (or re-creates, on tenant list change)
+// the (possibly composite) MCP server for this session.
+// Guarded by mu so concurrent POSTs on the same session can't race.
+func (s *sseSession) ensureCompositeServer(tenantIDs []string) (*server.MCPServer, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.mcpServer != nil && s.tenantID == tenantID {
+	// Fast path: same tenants → reuse
+	if s.mcpServer != nil && sliceEqual(s.tenantIDs, tenantIDs) {
 		s.lastActivity = time.Now()
 		return s.mcpServer, nil
 	}
 
-	slog.Info("Initializing MCP server for tenant in session", "tenantID", tenantID)
-	mcpServer, err := createServerForTenant(tenantID)
+	slog.Info("Initializing MCP server for session", "tenants", tenantIDs)
+	mcpServer, err := createCompositeServer(tenantIDs)
 	if err != nil {
 		return nil, err
 	}
 	s.mcpServer = mcpServer
-	s.tenantID = tenantID
+	s.tenantIDs = tenantIDs
 	s.lastActivity = time.Now()
 	return mcpServer, nil
+}
+
+// sliceEqual checks if two string slices have the same elements in the same order.
+func sliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func main() {
@@ -200,6 +207,8 @@ func buildHTTPServer(r http.Handler, port string) *http.Server {
 	}
 }
 
+// createServerForTenant creates a per-tenant MCP server (single-tenant, no prefix).
+// Kept for backward compatibility and internal use.
 func createServerForTenant(tenantID string) (*server.MCPServer, error) {
 	slog.Info("Fetching config for tenant", "tenantID", tenantID)
 	cfg, err := globalClient.FetchConfigWithTenant(tenantID)
@@ -215,6 +224,35 @@ func createServerForTenant(tenantID string) (*server.MCPServer, error) {
 	registry.RegisterAll(mcpServer)
 	slog.Info("MCP server ready", "tenantID", tenantID)
 	return mcpServer, nil
+}
+
+// createCompositeServer creates a composite MCP server for multiple tenants.
+// Single tenant → standard mode (no prefix, backward compat).
+// Multiple tenants → all tools registered with "{tenantID}__" prefix.
+func createCompositeServer(tenantIDs []string) (*server.MCPServer, error) {
+	// Single tenant: backward-compatible path (no prefix)
+	if len(tenantIDs) == 1 {
+		return createServerForTenant(tenantIDs[0])
+	}
+
+	slog.Info("Creating composite MCP server", "tenants", tenantIDs)
+	composite := server.NewMCPServer("agent-tutor", "1.0.0")
+
+	for _, tenantID := range tenantIDs {
+		slog.Info("Fetching config for tenant", "tenantID", tenantID)
+		cfg, err := globalClient.FetchConfigWithTenant(tenantID)
+		if err != nil {
+			slog.Error("Failed to fetch config", "tenantID", tenantID, "error", err)
+			return nil, err
+		}
+
+		slog.Info("Registering tools for tenant", "tenantID", tenantID)
+		registry := tools.NewPrefixedRegistry(cfg, tenantID)
+		registry.RegisterAll(composite)
+	}
+
+	slog.Info("Composite MCP server ready", "tenants", tenantIDs, "count", len(tenantIDs))
+	return composite, nil
 }
 
 func buildRouter() *chi.Mux {
@@ -289,7 +327,7 @@ func sseHandler(sessions *sync.Map) http.HandlerFunc {
 			writer:       w,
 			flusher:      flusher,
 			done:         make(chan struct{}),
-			tenantID:     resolveTenantID(r),
+			tenantIDs:    resolveTenantIDs(r),
 			createdAt:    now,
 			lastActivity: now,
 		}
@@ -332,7 +370,7 @@ func mcpPostHandler(sessions *sync.Map) http.HandlerFunc {
 		}
 
 		sessionID := r.URL.Query().Get("sessionId")
-		tenantID := resolveTenantID(r)
+		tenantIDs := resolveTenantIDs(r)
 		var session *sseSession
 
 		if sessionID != "" {
@@ -343,12 +381,12 @@ func mcpPostHandler(sessions *sync.Map) http.HandlerFunc {
 			}
 			session = si.(*sseSession)
 
-			if tenantID == "" {
-				tenantID = session.getTenantID()
+			if len(tenantIDs) == 0 {
+				tenantIDs = session.getTenantIDs()
 			}
 		}
 
-		if tenantID == "" {
+		if len(tenantIDs) == 0 {
 			http.Error(w, "X-Tenant-ID header is required", http.StatusBadRequest)
 			return
 		}
@@ -356,9 +394,9 @@ func mcpPostHandler(sessions *sync.Map) http.HandlerFunc {
 		var mcpServer *server.MCPServer
 		var err error
 		if session != nil {
-			mcpServer, err = session.ensureServerForTenant(tenantID)
+			mcpServer, err = session.ensureCompositeServer(tenantIDs)
 		} else {
-			mcpServer, err = createServerForTenant(tenantID)
+			mcpServer, err = createCompositeServer(tenantIDs)
 		}
 		if err != nil {
 			http.Error(w, "Failed to create MCP server", http.StatusInternalServerError)
@@ -374,10 +412,9 @@ func mcpPostHandler(sessions *sync.Map) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), postHandlerTimeout)
 		defer cancel()
 
-		// Inject tenantID into context so tool handlers in tools.go
-		// can read it via ctx.Value(httpclient.TenantIDKey) and pass
-		// it to data-service for multi-tenant isolation.
-		ctx = context.WithValue(ctx, httpclient.TenantIDKey, tenantID)
+		// Inject primary tenantID into context for backward compat with
+		// single-tenant tool handlers (composite handlers use their own closure).
+		ctx = context.WithValue(ctx, httpclient.TenantIDKey, tenantIDs[0])
 
 		if session != nil {
 			ctx = mcpServer.WithContext(ctx, server.NotificationContext{
@@ -406,7 +443,12 @@ func mcpPostHandler(sessions *sync.Map) http.HandlerFunc {
 }
 
 func manifestProxyHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := resolveTenantID(r)
+	tenantIDs := resolveTenantIDs(r)
+	// Use the first tenant for manifest (backward compat)
+	tenantID := ""
+	if len(tenantIDs) > 0 {
+		tenantID = tenantIDs[0]
+	}
 	cfg, err := globalClient.FetchConfigWithTenant(tenantID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -436,22 +478,22 @@ func debugPlaygroundHandler() http.HandlerFunc {
 }
 
 type sessionInfo struct {
-	SessionID string `json:"session_id"`
-	TenantID  string `json:"tenant_id"`
+	SessionID string   `json:"session_id"`
+	TenantIDs []string `json:"tenant_ids"`
 }
 
 func debugSessionsHandler(sessions *sync.Map) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := resolveTenantID(r)
+		tenantIDs := resolveTenantIDs(r)
 		var result []sessionInfo
 		sessions.Range(func(key, value any) bool {
 			s := value.(*sseSession)
-			sTenantID := s.getTenantID()
-			// If tenantID is empty, show all sessions; otherwise filter by tenant
-			if tenantID == "" || sTenantID == tenantID {
+			sTenantIDs := s.getTenantIDs()
+			// If no tenant filter, show all sessions; otherwise filter by tenant
+			if len(tenantIDs) == 0 || sliceContainsAny(sTenantIDs, tenantIDs) {
 				result = append(result, sessionInfo{
 					SessionID: key.(string),
-					TenantID:  sTenantID,
+					TenantIDs: sTenantIDs,
 				})
 			}
 			return true
@@ -464,6 +506,18 @@ func debugSessionsHandler(sessions *sync.Map) http.HandlerFunc {
 	}
 }
 
+// sliceContainsAny returns true if a contains any element from b.
+func sliceContainsAny(a, b []string) bool {
+	for _, va := range a {
+		for _, vb := range b {
+			if va == vb {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func debugConfigHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Reuse the same logic as manifestProxyHandler
@@ -474,7 +528,9 @@ func debugConfigHandler() http.HandlerFunc {
 	}
 }
 
-func resolveTenantID(r *http.Request) string {
+// resolveTenantIDs parses X-Tenant-ID header as a comma-separated list.
+// Returns a slice (never nil). Supports backward compat with single tenant.
+func resolveTenantIDs(r *http.Request) []string {
 	tenantID := r.Header.Get("X-Tenant-ID")
 	if tenantID == "" {
 		tenantID = r.URL.Query().Get("tenant")
@@ -482,5 +538,14 @@ func resolveTenantID(r *http.Request) string {
 	if tenantID == "" {
 		tenantID = r.URL.Query().Get("tenat")
 	}
-	return tenantID
+
+	parts := strings.Split(tenantID, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }

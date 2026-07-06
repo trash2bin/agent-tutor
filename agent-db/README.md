@@ -30,7 +30,12 @@ agent-db seed load university
 agent-db test e2e --tenants university,shop
 agent-db test isolation --tenants university,shop
 agent-db test dynamic-tools --tenant university
+agent-db test composite-tools                   # 🆕 composite multi-tenant MCP тест
 agent-db test all
+
+# E2E CLI commands (click commands)
+uv run agent-db e2e-mcp                         # per-tenant MCP тесты (3 теста, backward compat)
+uv run agent-db e2e-mcp-composite               # 🆕 composite multi-tenant MCP тесты (3 теста)
 ```
 
 ## Architecture

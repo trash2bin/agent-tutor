@@ -94,21 +94,16 @@ class MCPClient:
 
     # -- connection lifecycle -------------------------------------------------
 
-    async def _open_connection(self, tenant_id: str) -> _TenantConnection:
-        """Perform the actual MCP handshake for a tenant.
+    async def _open_connection(self, tenant_ids: list[str] | None = None) -> _TenantConnection:
+        """Perform the actual MCP handshake for a tenant or list of tenants.
 
-        `settings.mcp_service_url` must point at the Gateway's SSE-opening
-        GET endpoint (e.g. "https://mcp-gateway.internal/mcp" — /sse and /
-        also work per the Go router, but keep it consistent with whatever
-        the Gateway's messageURL construction expects downstream).
-
-        `sse_read_timeout` is set generously: this is the persistent GET
-        connection that stays open for the lifetime of the tenant session
-        and carries every tool-call *response* as an `event: message`.
+        When multiple tenant_ids are provided, they are comma-joined into the
+        X-Tenant-ID header, which triggers composite mode on mcp-gateway.
         """
-        headers = {"X-Tenant-ID": tenant_id} if tenant_id else {}
+        tenant_key = ",".join(tenant_ids) if tenant_ids else ""
+        headers = {"X-Tenant-ID": tenant_key} if tenant_key else {}
 
-        logger.info("[MCP] Opening SSE session for tenant=%s", tenant_id)
+        logger.info("[MCP] Opening SSE session for tenants=%s", tenant_key or "(default)")
         http_ctx = sse_client(
             settings.mcp_service_url,
             headers=headers,
@@ -118,7 +113,7 @@ class MCPClient:
         try:
             read_stream, write_stream = await http_ctx.__aenter__()
         except Exception:
-            logger.exception("[MCP] Failed to open transport for tenant=%s", tenant_id)
+            logger.exception("[MCP] Failed to open transport for tenants=%s", tenant_key or "(default)")
             raise
 
         session_ctx = ClientSession(read_stream, write_stream)
@@ -126,65 +121,66 @@ class MCPClient:
             session = await session_ctx.__aenter__()
             await session.initialize()
         except Exception:
-            logger.exception("[MCP] Failed to initialize session for tenant=%s", tenant_id)
+            logger.exception("[MCP] Failed to initialize session for tenants=%s", tenant_key or "(default)")
             with contextlib.suppress(Exception):
                 await http_ctx.__aexit__(None, None, None)
             raise
 
-        logger.info("[MCP] Session ready for tenant=%s", tenant_id)
+        logger.info("[MCP] Session ready for tenants=%s", tenant_key or "(default)")
         return _TenantConnection(
-            tenant_id=tenant_id,
+            tenant_id=tenant_key,
             session=session,
             http_ctx=http_ctx,
             session_ctx=session_ctx,
         )
 
-    async def _get_connection(self, tenant_id: str) -> _TenantConnection:
+    async def _get_connection(self, tenant_ids: list[str] | None = None) -> _TenantConnection:
+        tenant_key = ",".join(tenant_ids) if tenant_ids else ""
         async with self._registry_lock:
-            conn = self._connections.get(tenant_id)
+            conn = self._connections.get(tenant_key)
             if conn is not None:
                 return conn
-            conn = await self._open_connection(tenant_id)
-            self._connections[tenant_id] = conn
+            conn = await self._open_connection(tenant_ids)
+            self._connections[tenant_key] = conn
             return conn
 
-    async def _reconnect(self, tenant_id: str) -> _TenantConnection:
+    async def _reconnect(self, tenant_ids: list[str] | None = None) -> _TenantConnection:
+        tenant_key = ",".join(tenant_ids) if tenant_ids else ""
         async with self._registry_lock:
-            old = self._connections.pop(tenant_id, None)
+            old = self._connections.pop(tenant_key, None)
         if old is not None:
             await old.close()
-        conn = await self._open_connection(tenant_id)
+        conn = await self._open_connection(tenant_ids)
         async with self._registry_lock:
-            self._connections[tenant_id] = conn
+            self._connections[tenant_key] = conn
         return conn
 
     # -- public API -------------------------------------------------------------
 
     @contextlib.asynccontextmanager
-    async def get_session(self, tenant_id: str = ""):
-        """Async context manager providing a session proxy for a specific tenant."""
-        proxy = _SessionProxy(self, tenant_id=tenant_id)
+    async def get_session(self, tenant_ids: list[str] | None = None):
+        """Async context manager providing a session proxy for specific tenant(s)."""
+        proxy = _SessionProxy(self, tenant_ids=tenant_ids or [])
         try:
             yield proxy
         finally:
             pass
 
     async def list_tools(self, session: "_SessionProxy") -> list[dict[str, Any]]:
-        """List available MCP tools for the tenant over the live session."""
-        conn = await self._get_connection(session.tenant_id)
+        """List available MCP tools for the tenant(s) over the live session."""
+        conn = await self._get_connection(session.tenant_ids)
         try:
             async with conn.call_lock:
                 result = await conn.session.list_tools()
         except Exception as exc:
             if "Tool not found" in str(exc):
-                logger.warning("[MCP] list_tools encountered Tool not found for tenant=%s, not reconnecting", session.tenant_id)
-                # If list_tools fails with "Tool not found", we return an empty tool list.
+                logger.warning("[MCP] list_tools encountered Tool not found for tenants=%s, not reconnecting", session.tenant_ids)
                 return []
             
             logger.warning(
-                "[MCP] list_tools failed for tenant=%s, reconnecting", session.tenant_id
+                "[MCP] list_tools failed for tenants=%s, reconnecting", session.tenant_ids
             )
-            conn = await self._reconnect(session.tenant_id)
+            conn = await self._reconnect(session.tenant_ids)
             async with conn.call_lock:
                 result = await conn.session.list_tools()
 
@@ -209,14 +205,14 @@ class MCPClient:
         version (unwrapping JSON, building reminders) so downstream prompting
         logic doesn't need to change.
         """
-        conn = await self._get_connection(session.tenant_id)
+        conn = await self._get_connection(session.tenant_ids)
         try:
             async with conn.call_lock:
-                logger.info("[MCP] Calling tool %s for tenant=%s with args=%s", name, session.tenant_id, arguments)
+                logger.info("[MCP] Calling tool %s for tenants=%s with args=%s", name, session.tenant_ids, arguments)
                 result = await conn.session.call_tool(name, arguments)
         except Exception as exc:
             if "Tool not found" in str(exc):
-                logger.warning("[MCP] Tool %s not found for tenant=%s, not reconnecting", name, session.tenant_id)
+                logger.warning("[MCP] Tool %s not found for tenants=%s, not reconnecting", name, session.tenant_ids)
                 return ToolResult(
                     tool_content=json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False),
                     reminder=f"Инструмент {name} не найден.",
@@ -224,18 +220,18 @@ class MCPClient:
                     error=str(exc),
                 )
             logger.warning(
-                "[MCP] call_tool %s failed for tenant=%s, reconnecting: %s",
+                "[MCP] call_tool %s failed for tenants=%s, reconnecting: %s",
                 name,
-                session.tenant_id,
+                session.tenant_ids,
                 exc,
             )
             try:
-                conn = await self._reconnect(session.tenant_id)
+                conn = await self._reconnect(session.tenant_ids)
                 async with conn.call_lock:
                     result = await conn.session.call_tool(name, arguments)
             except Exception as exc2:
                 logger.exception(
-                    "[MCP] call_tool %s failed after reconnect, tenant=%s", name, session.tenant_id
+                    "[MCP] call_tool %s failed after reconnect, tenants=%s", name, session.tenant_ids
                 )
                 return ToolResult(
                     tool_content=json.dumps({"ok": False, "error": str(exc2)}, ensure_ascii=False),
@@ -307,11 +303,11 @@ class MCPClient:
 
 
 class _SessionProxy:
-    """Simple proxy that carries the tenant_id context."""
+    """Simple proxy that carries the tenant_ids context."""
 
-    def __init__(self, client: MCPClient, tenant_id: str = "") -> None:
+    def __init__(self, client: MCPClient, tenant_ids: list[str] | None = None) -> None:
         self.client = client
-        self.tenant_id = tenant_id
+        self.tenant_ids = tenant_ids or []
 
     async def list_tools(self) -> list[dict[str, Any]]:
         return await self.client.list_tools(self)

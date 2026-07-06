@@ -19,7 +19,166 @@ Generic MCP (Model Context Protocol) сервер на Go. Заменил Python
 4. **Разрешение инструментов**: `toolsCallHandler` сопоставляет имя вызванного инструмента с путем к эндпоинту из полученного манифеста.
 5. **Проброс (Propagation)**: Заголовок `X-Tenant-ID` пробрасывается сквозь шлюз в `data-service`, обеспечивая доступ к правильной БД тенанта.
 
-## Два режима генерации инструментов
+## Composite Multi-Tenant Mode
+
+`mcp-gateway` поддерживает **composite multi-tenant режим**: одна SSE сессия обслуживает несколько tenant'ов одновременно с префиксацией инструментов.
+
+Режим включается автоматически, когда заголовок `X-Tenant-ID` содержит несколько tenant'ов через запятую:
+
+```
+X-Tenant-ID: tenant-a               → legacy: инструменты без префикса (как было)
+X-Tenant-ID: tenant-a,tenant-b      → composite: инструменты с префиксом tenant-a__, tenant-b__
+```
+
+### Как это работает
+
+#### 1. Парсинг tenant'ов
+
+Функция `resolveTenantIDs()` в `cmd/main.go` парсит заголовок `X-Tenant-ID` как comma-separated список:
+
+```go
+// "tenant-a,tenant-b" → ["tenant-a", "tenant-b"]
+func resolveTenantIDs(r *http.Request) []string {
+    parts := strings.Split(r.Header.Get("X-Tenant-ID"), ",")
+    ...
+}
+```
+
+#### 2. Composite сервер
+
+Функция `createCompositeServer()` в `cmd/main.go`:
+
+- **1 tenant**: создаёт обычный MCPServer (без префикса, legacy path → backward compat)
+- **N tenant'ов**: создаёт composite MCPServer, запрашивает конфиги всех tenant'ов у data-service и регистрирует все инструменты с префиксом `{tenantID}__`
+
+```go
+func createCompositeServer(tenantIDs []string) (*server.MCPServer, error) {
+    if len(tenantIDs) == 1 {
+        return createServerForTenant(tenantIDs[0]) // legacy
+    }
+    composite := server.NewMCPServer("agent-tutor", "1.0.0")
+    for _, tenantID := range tenantIDs {
+        cfg := globalClient.FetchConfigWithTenant(tenantID)
+        registry := tools.NewPrefixedRegistry(cfg, tenantID) // префикс
+        registry.RegisterAll(composite)
+    }
+    return composite, nil
+}
+```
+
+#### 3. Prefixed Registry
+
+Функция `NewPrefixedRegistry(cfg, tenantID)` в `internal/tools/tools.go`:
+
+- Создаёт реестр как обычно, но каждый инструмент получает префикс `{tenantID}__`
+- `RegisterAll()` регистрирует все инструменты на composite MCPServer с префиксом
+
+```go
+func (r *Registry) RegisterAll(mcpServer *server.MCPServer) {
+    for _, td := range r.toolDefs {
+        name := td.Name
+        if r.tenantID != "" {
+            name = r.tenantID + "__" + name  // ← префикс
+        }
+        registerOne(mcpServer, td, r.client, name, r.tenantID)
+    }
+}
+```
+
+#### 4. Routing handler
+
+Функция `makeHandler()` получает tenantID **через замыкание (closure)**, а не из контекста запроса:
+
+```go
+func makeHandler(td toolDef, client *httpclient.Client, tenantID string) server.ToolHandlerFunc {
+    return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+        actualTenantID := tenantID  // из closure — нельзя подменить через заголовок
+        if actualTenantID == "" {
+            actualTenantID = ctx.Value(httpclient.TenantIDKey).(string) // legacy
+        }
+        // → data-service с X-Tenant-ID: actualTenantID
+    }
+}
+```
+
+#### 5. Кэширование на SSE сессии
+
+`ensureCompositeServer()` на сессии кэширует созданный composite сервер:
+
+```go
+func (s *sseSession) ensureCompositeServer(tenantIDs []string) (*server.MCPServer, error) {
+    if s.mcpServer != nil && sliceEqual(s.tenantIDs, tenantIDs) {
+        return s.mcpServer, nil  // reuse: те же tenant'ы
+    }
+    mcpServer, err := createCompositeServer(tenantIDs) // create
+    s.mcpServer = mcpServer
+    s.tenantIDs = tenantIDs
+    return mcpServer, nil
+}
+```
+
+### Пример data flow
+
+```
+User → "сравни успеваемость tenant-a и tenant-b"
+  │
+  ▼ api-service (tenant_ids = ["school-a", "school-b"])
+  │
+  ▼ mcp-client → sse_client(headers={"X-Tenant-ID": "school-a,school-b"})
+  │
+  ▼ mcp-gateway GET /mcp (X-Tenant-ID: school-a,school-b)
+  │   └── session.tenantIDs = ["school-a", "school-b"]
+  │
+  ▼ POST /mcp/message (tools/list)
+  │   └── ensureCompositeServer(["school-a","school-b"])
+  │        └── createCompositeServer(...)
+  │             ├── school-a__list_students
+  │             ├── school-a__get_grades
+  │             ├── school-b__list_students
+  │             └── school-b__get_grades
+  │
+  ▼ Агент → tenant-a__list_students
+  │   └── makeHandler(..., tenantID="school-a")  // closure
+  │        └── data-service (X-Tenant-ID: school-a)
+  │
+  ▼ Агент → tenant-b__list_students
+  │   └── makeHandler(..., tenantID="school-b")  // closure
+  │        └── data-service (X-Tenant-ID: school-b)
+```
+
+### Security: изоляция между tenant'ами
+
+Composite режим гарантирует **строгую изоляцию** данных между tenant'ами:
+
+1. **TenantID зашит в closure хендлера**: Инструмент `tenant-a__list_students` всегда вызывает data-service с `X-Tenant-ID: tenant-a`. Даже если клиент изменит заголовок в POST-запросе — хендлер проигнорирует его.
+
+2. **Инструменты недоступны без tenant'а**: Сессия открывается только с конкретным списком tenant'ов. Инструменты tenant-c недоступны, если tenant-c не был указан при открытии SSE.
+
+3. **Per-tenant кэш**: Инструменты каждого tenant'а загружаются только из его манифеста — никакого пересечения.
+
+4. **Обратная совместимость**: 
+   - `X-Tenant-ID: tenant-a` → legacy mode (без префикса, как работало всегда)
+   - `X-Tenant-ID: tenant-a,tenant-b` → composite mode (с префиксом)
+   - Старые клиенты и тесты (`e2e-mcp`, `e2e-data`) продолжают работать без изменений
+
+### Переменные окружения
+
+Composite режим не требует дополнительных переменных окружения. Единственный источник конфигурации — заголовок `X-Tenant-ID`.
+
+### Тестирование
+
+```bash
+# Старый тест (per-tenant, backward compat)
+uv run agent-db e2e-mcp
+
+# Новый composite тест (multi-tenant, одна сессия)
+uv run agent-db e2e-mcp-composite
+
+# Полный набор
+uv run agent-db e2e-full
+```
+
+## Генерация инструментов
 
 Инструменты определяются в конфиге тенанта в `data-service`.
 
