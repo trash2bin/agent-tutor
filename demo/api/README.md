@@ -17,10 +17,16 @@
 |---|---|---|
 | `/health` | GET | Статус сервиса |
 | `/api/chat` | POST | SSE-стрим чата с агентом (требует `X-Tenant-ID`) |
+| `/api/chat/{name}` | POST | SSE-чат с именованным агентом (tenant_ids из Agent Store) |
 | `/api/sessions` | GET | Список сессий |
 | `/api/sessions/{id}` | GET | История конкретной сессии |
 | `/api/backlog` | GET | Список бэклогов |
 | `/api/backlog/{id}` | GET | Детали бэклога |
+| `/api/agents` | POST | Создать агента (Agent Store) |
+| `/api/agents` | GET | Список агентов |
+| `/api/agents/{name}` | GET | Получить агента |
+| `/api/agents/{name}` | PUT | Обновить agentes.update_agent Обновить агента |
+| `/api/agents/{name}` | DELETE | Удалить агента |
 
 ## Переменные окружения
 
@@ -28,7 +34,10 @@
 
 | Переменная | Дефолт | Описание |
 |---|---|---|
+| `DEMO_API_HOST` | `127.0.0.1` | Хост API сервера |
 | `DEMO_API_PORT` | `8081` | Порт API |
+| `DEMO_WEB_HOST` | `127.0.0.1` | Хост Web сервера |
+| `DEMO_WEB_PORT` | `8080` | Порт Web |
 | `MCP_SERVICE_URL` | `http://127.0.0.1:8083/mcp` | URL mcp-gateway |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | URL Ollama (LLM) |
 | `OLLAMA_MODEL` | `qwen2.5:0.5b` | Модель Ollama |
@@ -36,8 +45,18 @@
 | `MISTRAL_MODEL` | `mistral/mistral-small` | Модель Mistral |
 | `DEMO_SESSION_DB_PATH` | `./demo_sessions.sqlite` | Путь к БД сессий |
 | `BACKLOG_DIR` | `./backlog` | Директория бэклогов |
+| `BACKLOG_RETENTION_DAYS` | `30` | Дней хранения бэклогов |
 | `DEMO_HISTORY_TURNS` | `8` | Кол-во ходов в контексте |
-| `ENABLE_THINK` | `true` | Включить thinking mode |
+| `DEMO_HISTORY_CONTENT_CHARS` | `6000` | Макс. символов в истории |
+| `DEMO_REQUEST_TIMEOUT` | `600` | Таймаут запросов к LLM (сек) |
+| `PYTHON_EXECUTABLE` | `python3` | Python для subprocess |
+| `ENABLE_THINK` | `true` | Thinking mode |
+| `DEMO_DEBUG` | `false` | Debug логирование |
+| `AGENT_TEMPERATURE` | `0.5` | Температура генерации |
+| `AGENT_MAX_ITERATIONS` | `5` | Макс. итераций тулов за ход |
+| `AGENT_MAX_TOKENS_THINKING` | `4096` | Макс. токенов thinking |
+| `AGENT_MAX_EMPTY_ROUNDS` | `3` | Макс. пустых раундов thinking |
+| `AGENT_MAX_TURN_TOKENS` | `8000` | Макс. токенов за ход (контекст) |
 
 ## Запуск
 

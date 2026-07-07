@@ -134,6 +134,9 @@ services:
       - AGENT_MAX_TOKENS_THINKING=${AGENT_MAX_TOKENS_THINKING:-4096}
       - AGENT_MAX_EMPTY_ROUNDS=${AGENT_MAX_EMPTY_ROUNDS:-3}
       - BACKLOG_RETENTION_DAYS=${BACKLOG_RETENTION_DAYS:-30}
+      - CHAT_RATE_LIMIT=${CHAT_RATE_LIMIT:-30/minute}
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-*}
+      - DEMO_DEBUG=${DEMO_DEBUG:-false}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8081/health"]
       <<: *hc-curl
@@ -156,6 +159,11 @@ services:
       - API_BEARER_TOKEN=${API_BEARER_TOKEN:-}
       - DEMO_API_HOST=api
       - DEMO_API_PORT=8081
+      - DATA_SERVICE_URL=http://data-service:8084
+      - RAG_SERVICE_URL=http://rag:8082
+      - WEB_PROXY_TIMEOUT=${WEB_PROXY_TIMEOUT:-30.0}
+      - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-default}
+      - DEMO_TENANTS=${DEMO_TENANTS:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/"]
       <<: *hc-curl

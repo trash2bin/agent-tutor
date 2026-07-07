@@ -15,24 +15,33 @@
 
 | Путь | Метод | Описание |
 |---|---|---|
-| `/health` | GET | Статус сервиса |
+| `/health` | GET | Статус сервиса (SQLite + ChromaDB + embedding model) |
 | `/search` | POST | Семантический поиск |
 | `/context` | POST | Готовый контекст для LLM |
 | `/documents/list` | POST | Список документов с фильтром |
-| `/documents/import` | POST | Импорт документа/директории |
-| `/documents/{id}` | DELETE | Удаление документа |
+| `/documents/import` | POST | Импорт документа/директории по пути |
+| `/documents/upload` | POST | Загрузка файла (multipart/form-data) + импорт |
+| `/documents/delete` | POST | Идемпотентное удаление документа по ID или пути |
 
 ## Переменные окружения
 
 | Переменная | Дефолт | Описание |
 |---|---|---|
+| `RAG_HOST` | `127.0.0.1` | Хост для бинда HTTP сервера |
 | `RAG_PORT` | `8082` | Порт |
+| `RAG_HTTP_TIMEOUT` | `60` | Таймаут HTTP-запросов к RAG (секунды) |
 | `CHROMA_PERSIST_DIR` | `./chroma_db` | Директория ChromaDB |
-| `EMBEDDING_MODEL` | `intfloat/multilingual-e5-small` | Модель эмбеддингов |
-| `EMBEDDING_DEVICE` | `cpu` | `cpu` / `cuda` / `mps` |
-| `CHUNK_SIZE` | `512` | Размер чанка |
-| `CHUNK_OVERLAP` | `50` | Перекрытие чанков |
-| `MAX_CHUNKS_PER_QUERY` | `10` | Лимит чанков в поиске |
+| `CHROMA_COLLECTION` | `documents` | Имя коллекции ChromaDB |
+| `RAG_EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Модель эмбеддингов |
+| `RAG_EMBEDDING_BATCH_SIZE` | `64` | Batch size для эмбеддингов |
+| `RAG_DEVICE` | `cpu` | `cpu` / `cuda` / `mps` |
+| `RAG_LOCAL_FILES_ONLY` | `0` | Только локальные файлы модели (не скачивать) |
+| `RAG_CHUNKER_TYPE` | `semantic` | Стратегия чанкинга: semantic, recursive, sentence |
+| `RAG_CHUNK_SIZE` | `512` | Размер чанка |
+| `RAG_CHUNK_OVERLAP` | `80` | Перекрытие чанков |
+| `RAG_PAGE_OVERLAP_TOKENS` | `50` | Перекрытие между страницами (токены) |
+| `RAG_CONTEXT_MAX_TOKENS` | `8000` | Макс. токенов в собранном контексте |
+| `RAG_DB_PATH` | — | Путь к SQLite БД метаданных (по умолчанию рядом с chroma_db) |
 
 ## Запуск
 

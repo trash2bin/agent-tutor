@@ -160,7 +160,7 @@ async def _proxy_to_api(
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Create HTTP client for API proxying
-    http_client = httpx.AsyncClient(timeout=30.0)
+    http_client = httpx.AsyncClient(timeout=settings.web_proxy_timeout)
     app.state.http_client = http_client
 
     # Startup
@@ -185,9 +185,12 @@ app = FastAPI(
 )
 
 # CORS middleware
+# allow_origins from env: comma-separated, or "*" for all (dev only)
+cors_origins_raw = settings.web_origin
+cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()] or ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.web_origin],
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -233,10 +236,7 @@ async def health() -> dict[str, Any]:
 
 # --- Data-service reverse proxy (read-only обзор для web UI) ---
 
-DATA_SERVICE_URL = f"http://{settings.api_host.replace('api', 'data-service')}:8084"
-# Параметр api_host='api' в docker-compose — web ходит к api через DEMO_API_HOST.
-# Для data-service: тот же hostname с заменой api→data-service.
-# В docker-compose оба сервиса в одной сети, поэтому web видит data-service напрямую.
+DATA_SERVICE_URL = settings.data_service_url
 
 
 async def _proxy_to_data_service(
@@ -280,7 +280,7 @@ async def proxy_data_entity(request: Request, entity_name: str) -> Response:
 
 # --- RAG reverse proxy (документы для web UI) ---
 
-RAG_SERVICE_URL = f"http://{settings.api_host.replace('api', 'rag')}:8082"
+RAG_SERVICE_URL = settings.rag_service_url
 
 
 async def _proxy_to_rag(
@@ -351,19 +351,18 @@ async def get_tenants(request: Request) -> Response:
     Falls back to [DEFAULT_TENANT_ID] if data-service returns single-tenant response.
     Also checks DEMO_TENANTS env var (comma-separated) as explicit override.
     """
-    import os
+    import json
 
-    # Explicit override via env var
-    explicit = os.getenv("DEMO_TENANTS", "").strip()
+    # Explicit override via env var (via settings)
+    explicit = settings.demo_tenants.strip()
     if explicit:
-        import json
         return Response(
             content=json.dumps({"tenants": [t.strip() for t in explicit.split(",") if t.strip()]}),
             media_type="application/json",
         )
 
     # Try to discover from data-service /health
-    default_tenant = os.getenv("DEFAULT_TENANT_ID", "default")
+    default_tenant = settings.default_tenant_id
     try:
         http_client = request.app.state.http_client
         url = f"{DATA_SERVICE_URL}/health"

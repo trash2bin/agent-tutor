@@ -13,9 +13,9 @@ import (
 
 func main() {
 	addr := flag.String("addr", envOrDefault("LISTEN_ADDR", ":8085"), "Listen address")
-	dataSvcURL := flag.String("data-service", envOrDefault("DATA_SERVICE_URL", "http://localhost:8084"), "Data service base URL")
-	ragSvcURL := flag.String("rag-service", envOrDefault("RAG_SERVICE_URL", "http://localhost:8082"), "RAG service base URL")
-	apiSvcURL := flag.String("api-service", envOrDefault("API_SERVICE_URL", "http://localhost:8081"), "API service base URL")
+	dataSvcURL := flag.String("data-service", envOrDefault("DATA_SERVICE_URL", "http://127.0.0.1:8084"), "Data service base URL")
+	ragSvcURL := flag.String("rag-service", envOrDefault("RAG_SERVICE_URL", "http://127.0.0.1:8082"), "RAG service base URL")
+	apiSvcURL := flag.String("api-service", envOrDefault("API_SERVICE_URL", "http://127.0.0.1:8081"), "API service base URL")
 	adminToken := flag.String("admin-token", os.Getenv("ADMIN_TOKEN"), "Admin auth token")
 	flag.Parse()
 

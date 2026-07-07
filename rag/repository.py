@@ -74,11 +74,21 @@ class DocumentRepository:
         self._connection = connection
         self.config = config
         self._adapter = adapter or (lambda s: s)
-        # RLock для thread-safe доступа к self.conn из thread pool FastAPI.
+        # Lock для thread-safe доступа к self.conn из thread pool FastAPI.
         # SQLite не thread-safe даже с check_same_thread=False — драйвер
-        # кэширует состояние курсора thread-local. RLock сериализует все
-        # операции через одно соединение.
-        self._lock = threading.RLock()
+        # кэширует состояние курсора thread-local.
+        # Для PostgreSQL (psycopg2/asyncpg) lock не нужен — драйвер thread-safe.
+        # Детектим драйвер: SQLite → RLock, остальное → DummyLock (no-op).
+        conn_module = getattr(connection, '__module__', '')
+        is_sqlite = 'sqlite3' in conn_module or 'apsw' in conn_module
+        if is_sqlite:
+            self._lock = threading.RLock()
+        else:
+            # Для pg и других thread-safe драйверов — no-op lock
+            class _DummyLock:
+                def __enter__(self) -> _DummyLock: return self
+                def __exit__(self, *_: object) -> None: return None
+            self._lock = _DummyLock()
 
     @property
     def conn(self) -> Any:

@@ -32,7 +32,15 @@ var globalClient *httpclient.Client
 // old http.Server.WriteTimeout, which used to apply to the *entire*
 // lifetime of the associated GET /mcp SSE connection and silently killed
 // every session after 30s of being open. See buildHTTPServer for the fix.
-const postHandlerTimeout = 25 * time.Second
+// Can be overridden with MCP_POST_HANDLER_TIMEOUT environment variable (seconds).
+var postHandlerTimeout = func() time.Duration {
+	if v := os.Getenv("MCP_POST_HANDLER_TIMEOUT"); v != "" {
+		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
+			return time.Duration(sec) * time.Second
+		}
+	}
+	return 25 * time.Second
+}()
 
 // Session management constants
 // Can be overridden with environment variables
@@ -197,12 +205,28 @@ func main() {
 // ReadHeaderTimeout below still protects against slow/stalled request
 // headers (slowloris-style attacks) without touching long-lived SSE
 // writes.
+//
+// Can be overridden with env vars:
+//   MCP_READ_HEADER_TIMEOUT (seconds, default 10)
+//   MCP_IDLE_TIMEOUT (seconds, default 120)
 func buildHTTPServer(r http.Handler, port string) *http.Server {
+	readHeaderTimeout := 10 * time.Second
+	if v := os.Getenv("MCP_READ_HEADER_TIMEOUT"); v != "" {
+		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
+			readHeaderTimeout = time.Duration(sec) * time.Second
+		}
+	}
+	idleTimeout := 120 * time.Second
+	if v := os.Getenv("MCP_IDLE_TIMEOUT"); v != "" {
+		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
+			idleTimeout = time.Duration(sec) * time.Second
+		}
+	}
 	return &http.Server{
 		Addr:              ":" + port,
 		Handler:           r,
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
 		// WriteTimeout intentionally omitted — see doc comment above.
 	}
 }

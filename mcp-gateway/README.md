@@ -328,13 +328,17 @@ MCP_DEV=true DATA_SERVICE_URL=http://127.0.0.1:8084 go run ./cmd/
 |---|---|---|
 | `BOOTSTRAP_TENANT_ID` | — | ID тенанта для первичной загрузки конфига при старте (обязателен в strict mode) |
 | `DATA_SERVICE_URL` | `http://127.0.0.1:8084` | Базовый URL data-service |
-| `DATA_SERVICE_TIMEOUT` | `30` | Таймаут HTTP-запроса в секундах |
+| `DATA_SERVICE_TIMEOUT` | `30` | Таймаут HTTP-запроса к data-service в секундах |
 | `RAG_SERVICE_URL` | `http://127.0.0.1:8082` | Базовый URL RAG-сервиса |
+| `RAG_HTTP_TIMEOUT` | `30` | Таймаут HTTP-запроса к RAG в секундах |
 | `MCP_PORT` | `8083` | Порт HTTP |
 | `MCP_DEV` | — | Включает debug endpoints + логирование |
 | `MCP_MAX_SESSIONS` | 1000 | Максимальное количество одновременных SSE-подключений (защита от OOM) |
 | `MCP_SESSION_IDLE_TIMEOUT` | 5m | Таймаут простоя после которого SSE-соединение закрывается (например: "5m", "30s") |
 | `MCP_SESSION_MAX_LIFETIME` | 30m | Максимальное время жизни SSE-подключения независимо от активности (например: "30m", "1h") |
+| `MCP_POST_HANDLER_TIMEOUT` | 25 | Таймаут для одного JSON-RPC запроса/ответа в POST /mcp/message (секунды) |
+| `MCP_READ_HEADER_TIMEOUT` | 10 | Read header timeout для HTTP сервера (секунды) — защита от slowloris |
+| `MCP_IDLE_TIMEOUT` | 120 | Idle timeout для HTTP сервера (секунды) — макс. время keep-alive соединений |
 
 ## RAG-инструменты (статическая регистрация)
 

@@ -142,9 +142,15 @@ func (b *Builder) BuildList(entity Entity, whereClause string, args []any) (Quer
 // Если длина args не совпадает с длиной cq.Params — возвращает ошибку
 // QueryError. Это защита от рассинхрона caller-side.
 //
-// Caller обязан сам обеспечить whitelist операций (только SELECT,
-// без ';' и т.д.) — builder не валидирует cq.SQL.
+// Валидация: cq.SQL ДОЛЖЕН начинаться с SELECT (case-insensitive) —
+// это whitelist-защита от destructive SQL в custom_query админом.
 func (b *Builder) BuildCustomQuery(cq CustomQuery, args []any) (Query, error) {
+	if !looksLikeSelect(cq.SQL) {
+		return Query{}, &QueryError{
+			Op:     "BuildCustomQuery",
+			Reason: "custom query must be a SELECT statement, got: " + summarizeSQL(cq.SQL),
+		}
+	}
 	if len(args) != len(cq.Params) {
 		return Query{}, &QueryError{
 			Op:     "BuildCustomQuery",
@@ -232,6 +238,27 @@ func itoa(n int) string {
 		buf[i] = '-'
 	}
 	return string(buf[i:])
+}
+
+// looksLikeSelect — проверяет что SQL начинается с SELECT (case-insensitive).
+// Пропускает начальные пробелы и переводы строк.
+func looksLikeSelect(sql string) bool {
+	trimmed := strings.TrimSpace(sql)
+	if len(trimmed) < 6 {
+		return false
+	}
+	prefix := strings.ToLower(trimmed[:6])
+	return prefix == "select"
+}
+
+// summarizeSQL — обрезает SQL до первых N символов для сообщения об ошибке.
+func summarizeSQL(sql string) string {
+	const maxLen = 60
+	s := strings.TrimSpace(sql)
+	if len(s) > maxLen {
+		s = s[:maxLen] + "..."
+	}
+	return `"` + s + `"`
 }
 
 // quote — локальный strconv.Quote для сообщений об ошибках.

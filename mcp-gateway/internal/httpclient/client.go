@@ -17,9 +17,6 @@ import (
 type contextKey string
 const TenantIDKey contextKey = "x-tenant-id"
 
-const defaultBaseURL = "http://127.0.0.1:8084"
-const defaultTimeout = 30 * time.Second
-
 type Client struct {
 	baseURL string
 	http    *http.Client
@@ -28,11 +25,11 @@ type Client struct {
 func New() *Client {
 	base := os.Getenv("DATA_SERVICE_URL")
 	if base == "" {
-		base = defaultBaseURL
+		base = "http://127.0.0.1:8084"
 	}
 	base = strings.TrimRight(base, "/")
 
-	timeout := defaultTimeout
+	timeout := 30 * time.Second
 	if t := os.Getenv("DATA_SERVICE_TIMEOUT"); t != "" {
 		if sec, err := strconv.Atoi(t); err == nil && sec > 0 {
 			timeout = time.Duration(sec) * time.Second

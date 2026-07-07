@@ -15,6 +15,10 @@ import uvicorn
 from fastapi import FastAPI, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from demo.api.agent.orchestrator import LLMAgent
 from demo.api.agent.types import AgentEventData
@@ -240,10 +244,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Rate limiter
+# Default: 30 requests per minute per IP (configurable via CHAT_RATE_LIMIT env)
+rate_limit = os.environ.get("CHAT_RATE_LIMIT", "30/minute")
+limiter = Limiter(key_func=get_remote_address, default_limits=[rate_limit])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 # CORS middleware
+# allow_origins from env: comma-separated, or "*" for all (dev only)
+cors_origins_raw = os.environ.get("CORS_ALLOW_ORIGINS", "*")
+cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()] or ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
@@ -292,6 +307,7 @@ async def health_endpoint():
     summary="Стриминг чата",
     description="Основной эндпоинт для общения с агентом. Возвращает поток SSE событий.",
 )
+@limiter.limit(rate_limit)
 async def chat_endpoint(request: Request) -> StreamingResponse:
     return await chat_handler(request)
 
@@ -468,6 +484,7 @@ async def chat_agent_handler(request: Request, name: str) -> StreamingResponse:
     summary="Чат с агентом по имени",
     description="Стриминг чата с конкретным агентом. Tenant IDs берутся из конфига агента.",
 )
+@limiter.limit(rate_limit)
 async def chat_by_agent_endpoint(name: str, request: Request) -> StreamingResponse:
     return await chat_agent_handler(request, name)
 

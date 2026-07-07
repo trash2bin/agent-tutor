@@ -4,7 +4,9 @@ version = "0.2.0"
 readme = "README.md"
 description = "AI assistant for the university help site - workspace root"
 requires-python = ">=3.12, <3.14"
-dependencies = []
+dependencies = [
+    "slowapi>=0.1.10",
+]
 
 # ── Workspace ─────────────────────────────────────────────────────────
 [tool.uv.sources]

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestNew_DefaultValues(t *testing.T) {
@@ -14,11 +15,11 @@ func TestNew_DefaultValues(t *testing.T) {
 	os.Unsetenv("DATA_SERVICE_TIMEOUT")
 
 	c := New()
-	if c.baseURL != defaultBaseURL {
-		t.Errorf("baseURL = %q, want %q", c.baseURL, defaultBaseURL)
+	if c.baseURL != "http://127.0.0.1:8084" {
+		t.Errorf("baseURL = %q, want %q", c.baseURL, "http://127.0.0.1:8084")
 	}
-	if c.http.Timeout != defaultTimeout {
-		t.Errorf("Timeout = %v, want %v", c.http.Timeout, defaultTimeout)
+	if c.http.Timeout != 30*time.Second {
+		t.Errorf("Timeout = %v, want %v", c.http.Timeout, 30*time.Second)
 	}
 }
 
@@ -49,8 +50,8 @@ func TestNew_CustomTimeout(t *testing.T) {
 func TestNew_InvalidTimeoutFallsBack(t *testing.T) {
 	t.Setenv("DATA_SERVICE_TIMEOUT", "not-a-number")
 	c := New()
-	if c.http.Timeout != defaultTimeout {
-		t.Errorf("Timeout = %v, want default %v", c.http.Timeout, defaultTimeout)
+	if c.http.Timeout != 30*time.Second {
+		t.Errorf("Timeout = %v, want default %v", c.http.Timeout, 30*time.Second)
 	}
 }
 

@@ -141,6 +141,11 @@ async def _get_proxy_headers(request):
 | `DEMO_WEB_PORT` | `8080` | Порт web сервиса |
 | `WEB_ORIGIN` | `*` | CORS origin |
 | `API_BEARER_TOKEN` | — | Опциональный bearer token для API |
+| `DATA_SERVICE_URL` | `http://127.0.0.1:8084` | Базовый URL data-service (прямой прокси) |
+| `RAG_SERVICE_URL` | `http://127.0.0.1:8082` | Базовый URL RAG-сервиса (прямой прокси) |
+| `DEFAULT_TENANT_ID` | `default` | Fallback tenant ID для UI селектора |
+| `DEMO_TENANTS` | — | Comma-separated список tenant IDs для явного отображения в UI |
+| `WEB_PROXY_TIMEOUT` | `30.0` | Таймаут HTTP-клиента для проксирования (секунды) |
 
 ### Docker Compose
 
