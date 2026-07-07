@@ -1,34 +1,29 @@
 module github.com/agent-tutor/data-service
 
-go 1.24.0
+go 1.26.4
 
 require (
 	github.com/agent-tutor/agent-tutor-go v0.0.0-00010101000000-000000000000
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-chi/chi/v5 v5.2.1
-	github.com/invopop/jsonschema v0.14.0
 	github.com/jackc/pgx/v5 v5.7.6
-	github.com/xeipuuv/gojsonschema v1.2.0
 	modernc.org/sqlite v1.37.1
 )
 
 replace github.com/agent-tutor/agent-tutor-go => ../agent-tutor-go
 
 require (
-	github.com/bahlo/generic-list-go v0.2.0 // indirect
-	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
-	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/xeipuuv/gojsonpointer v0.0.0-20180127040702-4e3ac2762d5f // indirect
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
-	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
+	github.com/xeipuuv/gojsonschema v1.2.0 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/sync v0.17.0 // indirect

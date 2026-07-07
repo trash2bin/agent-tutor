@@ -95,7 +95,7 @@ func main() {
 		slog.Error("connect to database", "error", err)
 		os.Exit(1)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Загружаем seed
 	absPath, err := filepath.Abs(*seedPath)

@@ -36,8 +36,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -161,8 +161,8 @@ func main() {
 	adapter, _ := registry.Get(string(cfg.DataSource.Driver))
 	var atomicRouter atomic.Value
 	adminCtx := &server.AdminContext{
-		ConfigPath:   absCfgPath,
-		AtomicRouter: &atomicRouter,
+		ConfigPath:             absCfgPath,
+		AtomicRouter:           &atomicRouter,
 		ApprovedWriteEndpoints: make(map[string]bool),
 	}
 	if err := server.LoadApprovedTools(adminCtx); err != nil {
@@ -328,8 +328,7 @@ func runDiscover() error {
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
-	defer conn.Close()
-
+	defer func() { _ = conn.Close() }()
 
 	schema, err := adapter.Introspect(context.Background(), conn)
 	if err != nil {
@@ -374,7 +373,7 @@ func watchConfig(configPath string, onReload func()) {
 	const debounceMs = 500 * time.Millisecond
 
 	go func() {
-		defer watcher.Close()
+		defer func() { _ = watcher.Close() }()
 		for {
 			select {
 			case event, ok := <-watcher.Events:
@@ -408,5 +407,3 @@ func watchConfig(configPath string, onReload func()) {
 		}
 	}()
 }
-
-
