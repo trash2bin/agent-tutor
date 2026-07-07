@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from demo.settings import PROJECT_ROOT, settings
 
-logger = logging.getLogger("demo.api.sessions")
+logger = logging.getLogger("api_service.sessions")
 
 
 def _create_sqlite_connection(db_path: str | Path) -> sqlite3.Connection:

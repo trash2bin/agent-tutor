@@ -1,5 +1,5 @@
 [project]
-name = "demo-api"
+name = "api-service"
 version = "0.1.0"
 requires-python = ">=3.12, <3.14"
 dependencies = [
@@ -19,11 +19,11 @@ pg = [
 ]
 
 [project.scripts]
-agent-chat-api = "demo.api:main"
+agent-chat-api = "api_service:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["."]
+packages = ["src/api_service"]

@@ -110,7 +110,7 @@ mcp-gateway/        MCP server (Go, :8083)
 admin-dashboard/    Admin UI (Go + Alpine.js, :8085)
 rag/                RAG service (Python, :8082)
 agent-tutor-sdk/    Shared Pydantic models + HTTP clients
-demo/api/           Agent orchestrator + API (FastAPI, :8081)
+api-service/src/api_service/           Agent orchestrator + API (FastAPI, :8081)
 demo/web/           Web UI + reverse-proxy (FastAPI, :8080)
 specs/              OpenAPI specs + JSON Schema config
 scripts/            dev.sh -- run all services

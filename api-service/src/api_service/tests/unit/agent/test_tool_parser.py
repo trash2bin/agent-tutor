@@ -1,6 +1,6 @@
 import pytest
-from demo.api.agent.tool_parser import ToolCallParser
-from demo.api.agent.types import ParsedToolCall
+from api_service.agent.tool_parser import ToolCallParser
+from api_service.agent.types import ParsedToolCall
 
 
 @pytest.fixture

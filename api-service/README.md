@@ -72,7 +72,7 @@ uv run --package demo-api python -m uvicorn demo.api.server:app --port 8081
 ## Тестирование
 
 ```bash
-uv run pytest demo/api/tests/ -v
+uv run pytest api-service/src/api_service/tests/ -v
 # 10 тестов MCP-клиента/оркестратора — skip (ожидают новый MCP SDK протокол)
 ```
 

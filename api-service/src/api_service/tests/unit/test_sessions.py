@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from demo.api.sessions import SessionStore
+from api_service.sessions import SessionStore
 
 
 @pytest.fixture

@@ -12,7 +12,7 @@ import pytest
 import respx
 from httpx import Response
 
-from demo.api.agent.mcp_client import MCPClient, ToolResult
+from api_service.agent.mcp_client import MCPClient, ToolResult
 from demo.settings import settings
 
 @pytest.fixture

@@ -243,10 +243,10 @@ async def _proxy_to_data_service(
     request: Request,
     data_path: str,
 ) -> Response:
-    """Proxy GET request to data-service напрямую (минуя demo/api).
+    """Proxy GET request to data-service напрямую (минуя api-service).
 
     data-service — единственный владелец БД. Web не должен идти к data-service
-    через demo/api, потому что это лишний hop и demo/api не должен заниматься
+    через api-service, потому что это лишний hop и api-service не должен заниматься
     трансляцией данных (его ответственность — агент).
     """
     http_client = request.app.state.http_client

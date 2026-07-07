@@ -59,7 +59,7 @@ class DemoSettings:
             "MCP_SERVICE_URL", "http://127.0.0.1:8083/mcp"
         )
 
-        # Direct service URLs (for web proxy bypassing demo/api)
+        # Direct service URLs (for web proxy bypassing api-service)
         self.data_service_url: str = os.environ.get(
             "DATA_SERVICE_URL", "http://127.0.0.1:8084"
         )

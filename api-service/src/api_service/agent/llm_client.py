@@ -13,7 +13,7 @@ from litellm.types.utils import ModelResponse
 
 from demo.settings import settings
 
-logger = logging.getLogger("demo.api.agent.llm_client")
+logger = logging.getLogger("api_service.agent.llm_client")
 
 
 @dataclass(slots=True)

@@ -1,4 +1,4 @@
-"""Тесты для rate limiter (slowapi) в demo/api/server.py.
+"""Тесты для rate limiter (slowapi) в api-service/src/api_service/server.py.
 
 Проверяет что CHAT_RATE_LIMIT env читается корректно и применяется
 к конструктору Limiter и декораторам @limiter.limit().
@@ -17,7 +17,7 @@ class TestRateLimiterInit:
 
     def test_rate_limit_default(self):
         """Без env — дефолтный лимит."""
-        from demo.api.server import rate_limit
+        from api_service.server import rate_limit
 
         assert rate_limit == "30/minute"
 
@@ -27,10 +27,10 @@ class TestRateLimiterInit:
             # reload module чтобы переинициализировалась module-level rate_limit
             import importlib
 
-            import demo.api.server
-            importlib.reload(demo.api.server)
+            import api_service.server
+            importlib.reload(api_service.server)
 
-            from demo.api.server import rate_limit
+            from api_service.server import rate_limit
 
             assert rate_limit == "100/minute"
 
@@ -43,10 +43,10 @@ class TestRateLimiterAppInit:
         with patch.dict(os.environ, {"CHAT_RATE_LIMIT": "50/minute"}):
             import importlib
 
-            import demo.api.server
-            importlib.reload(demo.api.server)
+            import api_service.server
+            importlib.reload(api_service.server)
 
-            from demo.api.server import app
+            from api_service.server import app
 
             # Проверяем что limiter есть и default_limits применён
             assert hasattr(app.state, "limiter")
@@ -57,10 +57,10 @@ class TestRateLimiterAppInit:
         with patch.dict(os.environ, {}, clear=True):
             import importlib
 
-            import demo.api.server
-            importlib.reload(demo.api.server)
+            import api_service.server
+            importlib.reload(api_service.server)
 
-            from demo.api.server import app, rate_limit
+            from api_service.server import app, rate_limit
 
             assert rate_limit == "30/minute"
             assert hasattr(app.state, "limiter")

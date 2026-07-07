@@ -1,7 +1,7 @@
 // Браузер ходит на demo/web (:8080), который проксирует:
 //   /api/data/*       -> data-service:8084
 //   /api/rag/documents -> rag:8082
-//   /api/{chat,backlog,session/history} -> demo/api:8081 (агент)
+//   /api/{chat,backlog,session/history} -> api-service:8081 (агент)
 const apiBase = window.DEMO_API_BASE || `${window.location.protocol}//${window.location.host}`;
 
 const chatHistoryKey = "agentTutorMessages";

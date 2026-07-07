@@ -7,7 +7,7 @@ FastAPI reverse-proxy для multi-tenant архитектуры agent-tutor.
 `demo-web` — тонкий reverse-proxy, который:
 - Обслуживает статический фронтенд (HTML/JS/CSS)
 - Проксирует API-запросы к `demo-api:8081` (агент, чат, сессии)
-- Проксирует данные напрямую в `data-service:8084` (обход demo/api для снижения latency)
+- Проксирует данные напрямую в `data-service:8084` (обход api-service для снижения latency)
 - Проксирует RAG-запросы в `rag:8082` (документы)
 - Пробрасывает `X-Tenant-ID` для multi-tenancy изоляции
 
@@ -57,7 +57,7 @@ Browser → /api/tenant/school-a/data/students
 ### RAG Service
 - `GET /api/rag/documents` — список документов
 
-### API Service (через demo/api)
+### API Service (через api-service)
 - `GET /api/health` — health-check API
 - `GET /api/backlog` — модель бэклога
 - `GET /api/session/history` — история сессий
@@ -202,7 +202,7 @@ go test ./data-service/... ./mcp-gateway/... -count=1
 
 ## Ключевые особенности
 
-1. **Stateless** — не хранит состояние сессий локально (кроме кэша в SQLite через demo/api)
+1. **Stateless** — не хранит состояние сессий локально (кроме кэша в SQLite через api-service)
 2. **Multi-tenant aware** — корректно пробрасывает X-Tenant-ID во все downstream сервисы
 3. **SSE proxy** — поддерживает streaming для chat endpoint
 4. **Correlation ID** — пробрасывает x-correlation-id для трейсинга
@@ -223,7 +223,7 @@ go test ./data-service/... ./mcp-gateway/... -count=1
 | `RuntimeError: Directory '.../demo/web/static' does not exist` | Запуск не из корня проекта | `cd /project/root && uv run python -m demo.web.server` |
 | 404 на `/api/manifest` для tenant | Тенант не зарегистрирован в data-service | `uv run agent-db tenant list` → `uv run agent-db register <id> <scenario>` |
 | Web не проксирует на data-service | Не тот `X-Tenant-ID` или data-service giù | Проверить логи data-service, заголовок `X-Tenant-ID` |
-| SSE chat: `Connection refused` на 8081 | demo-api не запущен | `cd demo/api && uv run python -m uvicorn server:app --port 8081` |
+| SSE chat: `Connection refused` на 8081 | api-service не запущен | `cd api-service && uv run python -m api_service.server --port 8081` |
 | 502 Bad Gateway | Downstream сервис упал | Проверить логи соответствующего сервиса (data-service:808084, api:8081, rag:8082) |
 
 ### Быстрый smoke-тест

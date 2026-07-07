@@ -7,9 +7,9 @@ import logging
 from typing import Any, cast
 
 from .types import SessionId, TurnMessages
-from demo.api.sessions import session_store
+from api_service.sessions import session_store
 
-logger = logging.getLogger("demo.api.agent.conversation")
+logger = logging.getLogger("api_service.agent.conversation")
 
 
 class ConversationManager:

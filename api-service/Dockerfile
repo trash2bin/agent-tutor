@@ -9,10 +9,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY agent-tutor-sdk agent-tutor-sdk/
-COPY demo/api/pyproject.toml demo/api/
-RUN uv sync --frozen --no-install-project --package demo-api --no-dev
+COPY api-service/pyproject.toml api-service/
+RUN uv sync --frozen --no-install-project --package api-service --no-dev
 COPY . .
-RUN uv sync --frozen --package demo-api --no-dev
+RUN uv sync --frozen --package api-service --no-dev
 
 FROM python:3.12-slim
 
@@ -24,6 +24,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=builder --chown=app:app /app/api-service /app/api-service
 COPY --from=builder --chown=app:app /app/demo /app/demo
 COPY --from=builder --chown=app:app /app/agent-tutor-sdk /app/agent-tutor-sdk
 
@@ -41,4 +42,4 @@ WORKDIR /app
 
 EXPOSE 8081
 
-CMD ["python", "-m", "demo.api.server"]
+CMD ["python", "-m", "api_service.server"]

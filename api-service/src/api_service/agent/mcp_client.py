@@ -45,7 +45,7 @@ from mcp.client.sse import sse_client
 
 from demo.settings import settings
 
-logger = logging.getLogger("demo.api.agent.mcp_client")
+logger = logging.getLogger("api_service.agent.mcp_client")
 
 
 @dataclass(slots=True)

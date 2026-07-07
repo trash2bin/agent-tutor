@@ -13,13 +13,13 @@ SPEC_PATH = Path("specs") / "api.openapi.yaml"
 
 def test_openapi_spec_matches_generated():
     """Проверяет, что specs/api.openapi.yaml соответствует тому,
-    что генерирует FastAPI из кода demo/api/server.py.
+    что генерирует FastAPI из кода api-service/src/api_service/server.py.
 
     Если тест упал — значит API изменился, но spec не обновлён.
     Обнови spec командой из specs/README.md.
     """
     # Импортируем app без запуска сервиса
-    from demo.api.server import app
+    from api_service.server import app
 
     # Генерируем свежую схему
     generated_raw = app.openapi()

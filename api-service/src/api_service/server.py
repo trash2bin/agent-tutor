@@ -20,12 +20,12 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from demo.api.agent.orchestrator import LLMAgent
-from demo.api.agent.types import AgentEventData
-from demo.api.backlog import backlog
-from demo.api.sessions import session_store
+from api_service.agent.orchestrator import LLMAgent
+from api_service.agent.types import AgentEventData
+from api_service.backlog import backlog
+from api_service.sessions import session_store
 from demo.settings import settings
-from demo.api.http_models import (
+from api_service.http_models import (
     BacklogDetailResponse,
     BacklogEvent,
     BacklogListResponse,
@@ -39,18 +39,18 @@ from demo.api.http_models import (
     AgentResponse,
     AgentListResponse,
 )
-from demo.api.agent_store import AgentStore
+from api_service.agent_store import AgentStore
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger("demo.api.server")
+logger = logging.getLogger("api_service.server")
 
 # Enable debug logging for agent if DEMO_DEBUG is set
 if os.environ.get("DEMO_DEBUG", "").lower() in ("1", "true", "yes"):
-    logging.getLogger("demo.api.agent").setLevel(logging.DEBUG)
+    logging.getLogger("api_service.agent").setLevel(logging.DEBUG)
     logging.getLogger("mcp").setLevel(logging.DEBUG)
     print("[DEMO] Debug logging enabled for agent and MCP")
 
@@ -499,7 +499,7 @@ def main() -> None:
         logger.warning("Backlog cleanup failed: %s", exc)
 
     uvicorn.run(
-        "demo.api.server:app",
+        "api_service.server:app",
         host=settings.api_host,
         port=settings.api_port,
         reload=False,

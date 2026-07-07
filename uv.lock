@@ -16,7 +16,7 @@ resolution-markers = [
 members = [
     "agent-tutor-sdk",
     "agent-tutor-workspace",
-    "demo-api",
+    "api-service",
     "demo-web",
     "rag",
 ]
@@ -64,7 +64,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "demo-api", extra = ["pg"] },
+    { name = "api-service", extra = ["pg"] },
     { name = "freezegun" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -81,7 +81,7 @@ requires-dist = [{ name = "slowapi", specifier = ">=0.1.10" }]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "demo-api", extras = ["pg"], editable = "demo/api" },
+    { name = "api-service", extras = ["pg"], editable = "api-service" },
     { name = "freezegun", specifier = ">=1.5.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
@@ -203,6 +203,40 @@ sdist = { url = "https://files.pythonhosted.org/packages/19/14/2c5dd9f512b66549a
 wheels = [
     { url = "https://files.pythonhosted.org/packages/da/42/e921fccf5015463e32a3cf6ee7f980a6ed0f395ceeaa45060b61d86486c2/anyio-4.13.0-py3-none-any.whl", hash = "sha256:08b310f9e24a9594186fd75b4f73f4a4152069e3853f1ed8bfbf58369f4ad708", size = 114353, upload-time = "2026-03-24T12:59:08.246Z" },
 ]
+
+[[package]]
+name = "api-service"
+version = "0.1.0"
+source = { editable = "api-service" }
+dependencies = [
+    { name = "agent-tutor-sdk" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "litellm" },
+    { name = "mcp" },
+    { name = "pydantic" },
+    { name = "starlette" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+pg = [
+    { name = "psycopg2-binary" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agent-tutor-sdk", editable = "agent-tutor-sdk" },
+    { name = "fastapi", specifier = ">=0.137.2" },
+    { name = "httpx", specifier = ">=0.28.0" },
+    { name = "litellm", specifier = ">=1.86.2" },
+    { name = "mcp", specifier = ">=1.0.0" },
+    { name = "psycopg2-binary", marker = "extra == 'pg'", specifier = ">=2.9.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "starlette", specifier = ">=0.50.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.38.0" },
+]
+provides-extras = ["pg"]
 
 [[package]]
 name = "attrs"
@@ -661,40 +695,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/0f/d5/c66da9b79e5bdb124
 wheels = [
     { url = "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61", size = 25604, upload-time = "2021-03-08T10:59:24.45Z" },
 ]
-
-[[package]]
-name = "demo-api"
-version = "0.1.0"
-source = { editable = "demo/api" }
-dependencies = [
-    { name = "agent-tutor-sdk" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "litellm" },
-    { name = "mcp" },
-    { name = "pydantic" },
-    { name = "starlette" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-pg = [
-    { name = "psycopg2-binary" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "agent-tutor-sdk", editable = "agent-tutor-sdk" },
-    { name = "fastapi", specifier = ">=0.137.2" },
-    { name = "httpx", specifier = ">=0.28.0" },
-    { name = "litellm", specifier = ">=1.86.2" },
-    { name = "mcp", specifier = ">=1.0.0" },
-    { name = "psycopg2-binary", marker = "extra == 'pg'", specifier = ">=2.9.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "starlette", specifier = ">=0.50.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.38.0" },
-]
-provides-extras = ["pg"]
 
 [[package]]
 name = "demo-web"

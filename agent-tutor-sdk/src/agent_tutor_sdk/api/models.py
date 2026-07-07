@@ -1,7 +1,7 @@
 """HTTP DTO for the Agent API service.
 
 These models define the HTTP contract between the Web frontend and the
-Agent API service (``demo/api/server.py``). They are used both by FastAPI
+Agent API service (``api-service/src/api_service/server.py``). They are used both by FastAPI
 (for automatic OpenAPI generation) and by external consumers.
 
 Internal agent types (TypedDicts) live in ``demo.api.agent.types`` —

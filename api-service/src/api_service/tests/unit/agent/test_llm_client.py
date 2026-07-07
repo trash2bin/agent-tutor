@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from demo.api.agent.llm_client import LLMClient
+from api_service.agent.llm_client import LLMClient
 
 
 @pytest.mark.asyncio

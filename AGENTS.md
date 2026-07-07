@@ -13,7 +13,7 @@
 `User Request` $\rightarrow$ `demo-web` (проксирует `X-Tenant-ID`) $\rightarrow$ `demo-api` (формирует Persona агента и системный промпт) $\rightarrow$ `mcp-gateway` (динамически запрашивает манифест инструментов из data-service для конкретного TenantID) $\rightarrow$ `data-service` (роутит запрос в конкретную БД клиента через `TenantStore` $\rightarrow$ generic query builder $\rightarrow$ SQL $\rightarrow$ DB).
 
 Путь запроса в **composite multi-tenant режиме** (один агент — N tenant'ов):
-`User Request` $\rightarrow$ `demo-web` (проксирует `X-Tenant-ID` как comma-separated список: `tenant-a,tenant-b`) $\rightarrow$ `demo-api/server.py` (парсит в `tenant_ids: list[str]`) $\rightarrow$ `demo-api/agent/orchestrator.py` (передаёт `tenant_ids` в MCPClient) $\rightarrow$ `demo-api/agent/mcp_client.py` (открывает одну SSE сессию с `X-Tenant-ID: tenant-a,tenant-b`, получает инструменты от всех tenant'ов) $\rightarrow$ `mcp-gateway` (`resolveTenantIDs()` → если один tenant: legacy MCPServer без префикса; если N > 1: `createCompositeServer([]string)` с префиксом `{tenantID}__` для каждого инструмента) $\rightarrow$ каждый вызов инструмента направляется хендлером с замыканием tenantID в data-service с соответствующим `X-Tenant-ID: {tenantID}` $\rightarrow$ `TenantStore` → generic query builder → SQL → DB.
+`User Request` $\rightarrow$ `demo-web` (проксирует `X-Tenant-ID` как comma-separated список: `tenant-a,tenant-b`) $\rightarrow$ `api-service/src/api_service/server.py` (парсит в `tenant_ids: list[str]`) $\rightarrow$ `api-service/src/api_service/agent/orchestrator.py` (передаёт `tenant_ids` в MCPClient) $\rightarrow$ `api-service/src/api_service/agent/mcp_client.py` (открывает одну SSE сессию с `X-Tenant-ID: tenant-a,tenant-b`, получает инструменты от всех tenant'ов) $\rightarrow$ `mcp-gateway` (`resolveTenantIDs()` → если один tenant: legacy MCPServer без префикса; если N > 1: `createCompositeServer([]string)` с префиксом `{tenantID}__` для каждого инструмента) $\rightarrow$ каждый вызов инструмента направляется хендлером с замыканием tenantID в data-service с соответствующим `X-Tenant-ID: {tenantID}` $\rightarrow$ `TenantStore` → generic query builder → SQL → DB.
 
 ---
 
@@ -26,7 +26,7 @@
 | **MCP-gateway** (Go) | `:8083` | MCP сервер (SSE/JSON-RPC). Динамическая генерация инструментов из data-service. | [README](mcp-gateway/README.md) |
 | **Admin Dashboard** (Go) | `:8085` | Веб-интерфейс для администрирования: tenant CRUD, конфиги, тулы, RAG, агенты. Alpine.js UI. | [README](admin-dashboard/README.md) |
 | **RAG** (Python) | `:8082` | Поиск по документам (ChromaDB), чанкинг, эмбеддинги, multipart document upload. | [README](rag/README.md) |
-| **API** (Python) | `:8081` | Оркестратор агента, LiteLLM, Agent Store (CRUD), rate limiter, управление сессиями и бэклогом. | [AGENT_WORKFLOW](demo/api/agent/AGENT_WORKFLOW.md) |
+| **API** (Python) | `:8081` | Оркестратор агента, LiteLLM, Agent Store (CRUD), rate limiter, управление сессиями и бэклогом. | [AGENT_WORKFLOW](api-service/README.md) |
 | **Web** (Python) | `:8080` | UI-интерфейс + reverse-proxy. Проксирует `X-Tenant-ID` и поддерживает tenant routing. | [README](demo/web/README.md) |
 | **SDK** (Python) | — | Общие Pydantic-модели и клиенты для сервисов. | [pyproject.toml](agent-tutor-sdk/pyproject.toml) |
 
@@ -35,7 +35,7 @@
 - **Стратегия**: [doc/FINAL_TASK.md](doc/FINAL_TASK.md) — план к pre-final версии и критерий готовности.
 - **Конфигурация**: [.env.example](.env.example) — все 180+ переменных окружения.
 - **API-контракты и config schema**: [specs/README.md](specs/README.md) — OpenAPI specs, JSON Schema валидация конфига data-service.
-- **Agent Store**: [demo/api/agent_store.py](demo/api/agent_store.py) — SQLite-регистр агентов с CRUD API.
+- **Agent Store**: [api-service/src/api_service/agent_store.py](api-service/src/api_service/agent_store.py) — SQLite-регистр агентов с CRUD API.
 
 ### 🌐 Web Service — Multi-Tenancy Architecture
 
@@ -112,7 +112,7 @@ uv run agent-db e2e-full               # полный e2e пайплайн
 ### 1. Python Unit/Integration тесты
 ```bash
 uv run pytest rag/tests/                   # RAG (индексация, поиск, pipeline, repository)
-uv run pytest demo/api/tests/              # API (OpenAPI spec, backlog, sessions, rate limiter)
+uv run pytest api-service/src/api_service/tests/              # API (OpenAPI spec, backlog, sessions, rate limiter)
 uv run pytest demo/web/tests/              # Web (26 proxy + 4 url mapping тестов)
 uv run pytest demo/tests/                  # Settings (18 тестов конфигурации из env)
 uv run pytest agent-tutor-sdk/tests/       # SDK модели и seedgen
@@ -177,7 +177,7 @@ specs/
 ├── config.schema.json        # JSON Schema — runtime-валидация конфига data-service
 ├── config.example.json       # Пример конфига (SQLite, тесты/dev)
 ├── config.postgres.json      # Пример конфига (PostgreSQL, production)
-├── api.openapi.yaml          # OpenAPI demo/api — автогенерация из FastAPI
+├── api.openapi.yaml — автогенерация из FastAPI
 ├── rag.openapi.yaml          # OpenAPI rag — автогенерация из FastAPI
 └── ...
 ```
@@ -186,7 +186,7 @@ specs/
 - `config.schema.json` — загружается при старте data-service, без него сервер **не стартанёт**. Меняешь → обнови примеры → `go test`.
 - `api.openapi.yaml` / `rag.openapi.yaml` — **слепки** автогенерации FastAPI. Первичен код. Тесты ловят рассинхрон:
   ```bash
-  uv run pytest demo/api/tests/unit/test_openapi_api.py
+  uv run pytest api-service/src/api_service/tests/unit/test_openapi_api.py
   uv run pytest rag/tests/unit/test_openapi_spec.py
   ```
 

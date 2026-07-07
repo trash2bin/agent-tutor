@@ -11,7 +11,7 @@ specs/
 ├── config.schema.md           # Человеко-читаемое руководство к схеме
 ├── config.example.json        # Пример конфига SQLite (для тестов, dev-запуска)
 ├── config.postgres.json       # Пример конфига PostgreSQL (production-шаблон)
-├── api.openapi.yaml           # OpenAPI demo/api сервера (порт 8081)
+├── api.openapi.yaml           # OpenAPI api-service сервера (порт 8081)
 ├── rag.openapi.yaml           # OpenAPI rag-сервиса (порт 8082)
 ├── fixtures/                  # seed.json для data-service --seed (.gitignore)
 └── README.md
@@ -58,7 +58,7 @@ FastAPI-код → app.openapi() → YAML spec → git commit
 
 ```bash
 # Тесты проверяют что код и spec совпадают (без запуска сервисов):
-uv run pytest demo/api/tests/unit/test_openapi_api.py  -v
+uv run pytest api-service/src/api_service/tests/unit/test_openapi_api.py  -v  # OpenAPI контракт api-service (см. api-service/README.md)
 uv run pytest rag/tests/unit/test_openapi_spec.py      -v
 ```
 

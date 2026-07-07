@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, cast
 
-from demo.api.backlog import backlog
+from api_service.backlog import backlog
 from demo.settings import settings
 
 from .conversation import ConversationManager
@@ -31,7 +31,7 @@ from .types import (
     TurnMessages,
 )
 
-logger = logging.getLogger("demo.api.agent.orchestrator")
+logger = logging.getLogger("api_service.agent.orchestrator")
 
 
 # System prompt for the agent

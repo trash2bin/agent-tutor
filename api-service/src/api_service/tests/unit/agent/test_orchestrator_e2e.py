@@ -71,7 +71,7 @@ class FakeMCPClient:
         self.calls: list[dict[str, Any]] = []
 
     async def call_tool(self, session, name: str, arguments: dict[str, Any]):
-        from demo.api.agent.mcp_client import ToolResult
+        from api_service.agent.mcp_client import ToolResult
 
         self.calls.append({"name": name, "arguments": arguments})
         wrapper = {"ok": True, "data": self.tool_data}

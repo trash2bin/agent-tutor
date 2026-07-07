@@ -3,7 +3,7 @@
 
 def main() -> None:
     """Run the demo API server."""
-    from demo.api.server import main as server_main
+    from api_service.server import main as server_main
 
     server_main()
 

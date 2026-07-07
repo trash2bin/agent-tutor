@@ -16,7 +16,7 @@ from typing import Any
 
 from demo.settings import settings
 
-logger = logging.getLogger("demo.api.backlog")
+logger = logging.getLogger("api_service.backlog")
 
 
 class ModelBacklog:

@@ -10,7 +10,7 @@ from typing import Any
 
 from .types import ParsedToolCall, ToolCall
 
-logger = logging.getLogger("demo.api.agent.tool_parser")
+logger = logging.getLogger("api_service.agent.tool_parser")
 
 
 class ToolCallParser:

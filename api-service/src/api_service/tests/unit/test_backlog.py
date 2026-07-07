@@ -6,14 +6,14 @@ from unittest.mock import patch
 
 import pytest
 
-from demo.api.backlog import ModelBacklog
+from api_service.backlog import ModelBacklog
 
 
 @pytest.fixture
 def backlog_tmpdir():
     """Create a ModelBacklog with a temp directory."""
     with tempfile.TemporaryDirectory() as td:
-        with patch("demo.api.backlog.settings.backlog_dir", td):
+        with patch("api_service.backlog.settings.backlog_dir", td):
             bl = ModelBacklog()
             yield bl
 
