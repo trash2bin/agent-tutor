@@ -100,12 +100,6 @@ func (s *sseSession) getTenantIDs() []string {
 	return s.tenantIDs
 }
 
-func (s *sseSession) updateActivity() {
-	s.mu.Lock()
-	s.lastActivity = time.Now()
-	s.mu.Unlock()
-}
-
 func (s *sseSession) isExpired() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

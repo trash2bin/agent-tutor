@@ -11,8 +11,6 @@ import (
 // Helper: minimal config builders
 // ════════════════════════════════════════════════════════════════
 
-func boolPtr(b bool) *bool { return &b }
-
 func baseConfig() *config.Config {
 	return &config.Config{
 		Version: 1,

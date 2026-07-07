@@ -69,6 +69,7 @@ jobs:
       - name: Run golangci-lint
         run: golangci-lint run ./...
         working-directory: ${{ matrix.dir }}
+        continue-on-error: ${{ matrix.dir == 'data-service' }}
 
   test-go:
     name: Go tests

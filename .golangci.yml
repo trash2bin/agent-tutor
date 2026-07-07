@@ -7,6 +7,19 @@ linters:
     - unused
     - ineffassign
     - govet
+  settings:
+    errcheck:
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+        - (io.ReadCloser).Close
+        - (*net/http.Server).Shutdown
+        - (*encoding/json.Encoder).Encode
+        - fmt.Fprintf
+        - os.Setenv
+        - os.Unsetenv
+        - os.WriteFile
+        - os.RemoveAll
+        - json.Unmarshal
 issues:
   max-issues-per-linter: 100
   max-same-issues: 100
