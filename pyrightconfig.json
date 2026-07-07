@@ -1,0 +1,20 @@
+{
+  "include": ["api-service/src"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "standard",
+  "reportMissingImports": true,
+  "reportGeneralTypeIssues": true,
+  "reportReturnType": true,
+  "reportArgumentType": true,
+  "reportAttributeAccessIssue": true,
+  "reportInvalidTypeForm": true,
+  "reportIncompatibleVariableOverride": true,
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.data",
+    "**/.venv",
+    "**/graphify-out"
+  ]
+}

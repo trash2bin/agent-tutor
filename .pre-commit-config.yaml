@@ -1,0 +1,46 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.0
+    hooks:
+      - id: ruff
+        args: [--fix, --target-version, py313]
+        files: ^api-service/
+      - id: ruff-format
+        files: ^api-service/
+
+  - repo: local
+    hooks:
+      - id: pyright
+        name: Pyright type check
+        entry: bash -c 'pyright api-service/src/api_service/agent/'
+        language: system
+        types: [python]
+        pass_filenames: false
+        exclude: ^api-service/src/api_service/tests/
+
+  - repo: local
+    hooks:
+      - id: go-vet-data
+        name: go vet (data-service)
+        entry: bash -c 'cd data-service && go vet ./...'
+        language: system
+        types: [go]
+        pass_filenames: false
+
+  - repo: local
+    hooks:
+      - id: go-vet-mcp
+        name: go vet (mcp-gateway)
+        entry: bash -c 'cd mcp-gateway && go vet ./...'
+        language: system
+        types: [go]
+        pass_filenames: false
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
