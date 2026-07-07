@@ -16,7 +16,8 @@ from pathlib import Path
 import click
 import requests
 
-from agent_db.core import PROJECT_ROOT, SCENARIOS_DIR, DATA_SERVICE_URL, ADMIN_TOKEN
+from agent_db.core import PROJECT_ROOT, SCENARIOS_DIR, DATA_SERVICE_URL, ADMIN_TOKEN as _ADMIN_TOKEN
+import agent_db.core as _core
 
 
 # ============================================================================
@@ -29,7 +30,21 @@ def run(cmd: list[str], cwd: Path | None = None, env: dict | None = None) -> sub
 
 
 def admin_headers() -> dict:
-    return {"Authorization": f"Bearer {ADMIN_TOKEN}", "Content-Type": "application/json"}
+    """Build auth headers for data-service admin API.
+
+    Requires ADMIN_TOKEN from env (or --admin-token option).
+    Prints a loud warning if token is missing to avoid silent 401s.
+    """
+    token = _core.ADMIN_TOKEN
+    if not token:
+        click.secho(
+            "  ❌ ADMIN_TOKEN not set — admin API calls will get 401.\n"
+            "     Set it:  export ADMIN_TOKEN=secret\n"
+            "     Or pass:  --admin-token secret\n"
+            "     (значение должно совпадать с ADMIN_TOKEN в .env / data-service)",
+            fg="red", bold=True, err=True,
+        )
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
 def get_scenario_config(scenario: str) -> dict:
@@ -51,9 +66,14 @@ def get_scenario_names() -> list[str]:
 # ============================================================================
 
 @click.group()
-def cli():
+@click.option("--admin-token", "--token", envvar="ADMIN_TOKEN",
+              help="Bearer token for data-service admin API (или export ADMIN_TOKEN=...)")
+@click.pass_context
+def cli(ctx, admin_token: str):
     """agent-db: Centralized DB/seed/tenant/e2e management."""
-    pass
+    if admin_token:
+        _core.ADMIN_TOKEN = admin_token
+    ctx.ensure_object(dict)
 
 
 # ---- Materialize ----

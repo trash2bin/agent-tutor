@@ -19,7 +19,4 @@ else:
 
 SCENARIOS_DIR = PROJECT_ROOT / "data-service" / "testdata" / "scenarios"
 DATA_SERVICE_URL = "http://127.0.0.1:8084"
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
-if not ADMIN_TOKEN:
-    import logging
-    logging.warning("ADMIN_TOKEN environment variable not set; admin API calls will fail")
+ADMIN_TOKEN: str | None = os.getenv("ADMIN_TOKEN")
