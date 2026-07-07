@@ -40,7 +40,6 @@ from api_service.http_models import (
     AgentResponse,
     AgentListResponse,
 )
-from pathlib import Path
 from api_service.agent_store import AgentStore
 
 # Configure logging
@@ -68,7 +67,10 @@ def get_agent_store() -> AgentStore:
     if _agent_store is None:
         with _agent_lock:
             if _agent_store is None:
-                db_path = os.environ.get("AGENT_DB_PATH", str(Path(settings.session_db_path).parent / "agents.sqlite"))
+                db_path = os.environ.get(
+                    "AGENT_DB_PATH",
+                    str(Path(settings.session_db_path).parent / "agents.sqlite"),
+                )
                 _agent_store = AgentStore(db_path)
                 logger.info("Agent store initialized at %s", db_path)
     return _agent_store
@@ -144,7 +146,11 @@ async def chat_handler(request: Request) -> StreamingResponse:
     message = chat_req.message
     session_id = chat_req.session_id
     tenant_header = request.headers.get("X-Tenant-ID", "")
-    tenant_ids = [t.strip() for t in tenant_header.split(",") if t.strip()] if tenant_header else None
+    tenant_ids = (
+        [t.strip() for t in tenant_header.split(",") if t.strip()]
+        if tenant_header
+        else None
+    )
 
     if not message:
         return StreamingResponse(
@@ -282,7 +288,9 @@ if EMBED_DIR.is_dir():
     app.mount("/embed", StaticFiles(directory=str(EMBED_DIR)), name="embed")
     logger.info("Embed widget mounted at /embed from %s", EMBED_DIR)
 else:
-    logger.warning("Embed directory not found at %s, /embed will be unavailable", EMBED_DIR)
+    logger.warning(
+        "Embed directory not found at %s, /embed will be unavailable", EMBED_DIR
+    )
 
 
 # --- Correlation ID middleware ---
@@ -361,12 +369,15 @@ async def backlog_detail_endpoint(
     summary="История сессии",
     description="Возвращает историю сообщений для указанной сессии.",
 )
-async def session_history_endpoint(session_id: str = Query("default"), agent_name: str = Query(None)):
+async def session_history_endpoint(
+    session_id: str = Query("default"), agent_name: str = Query(None)
+):
     effective = f"agent:{agent_name}:{session_id}" if agent_name else session_id
     return await get_session_history(effective)
 
 
 # ── Agent CRUD ──
+
 
 @app.post(
     "/api/agents",
@@ -388,6 +399,7 @@ async def create_agent_endpoint(req: AgentCreateRequest) -> AgentResponse:
         return AgentResponse(**result)
     except ValueError as exc:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=409, detail=str(exc))
 
 
@@ -410,6 +422,7 @@ async def list_agents_endpoint() -> AgentListResponse:
 )
 async def get_agent_endpoint(name: str) -> AgentResponse:
     from fastapi import HTTPException
+
     agent = await asyncio.to_thread(get_agent_store().get_agent, name)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
@@ -424,6 +437,7 @@ async def get_agent_endpoint(name: str) -> AgentResponse:
 )
 async def update_agent_endpoint(name: str, req: AgentUpdateRequest) -> AgentResponse:
     from fastapi import HTTPException
+
     result = await asyncio.to_thread(
         get_agent_store().update_agent,
         name=name,
@@ -445,6 +459,7 @@ async def update_agent_endpoint(name: str, req: AgentUpdateRequest) -> AgentResp
 async def agent_widget_config_endpoint(name: str) -> dict:
     """Get widget configuration for an agent. Used by embed.js."""
     from fastapi import HTTPException
+
     agent = await asyncio.to_thread(get_agent_store().get_agent, name)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
@@ -465,6 +480,7 @@ async def agent_widget_config_endpoint(name: str) -> dict:
 )
 async def delete_agent_endpoint(name: str):
     from fastapi import HTTPException
+
     deleted = await asyncio.to_thread(get_agent_store().delete_agent, name)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
@@ -472,6 +488,7 @@ async def delete_agent_endpoint(name: str):
 
 
 # ── Chat by agent name ──
+
 
 async def chat_agent_handler(request: Request, name: str) -> StreamingResponse:
     """Chat with a specific agent (resolves tenant_ids from agent store)."""
@@ -518,8 +535,11 @@ async def chat_agent_handler(request: Request, name: str) -> StreamingResponse:
     async def events():
         try:
             async for event in get_agent().stream_events(
-                message, session_id=effective_session_id, tenant_ids=tenant_ids,
-                llm_config=llm_config, system_prompt=system_prompt
+                message,
+                session_id=effective_session_id,
+                tenant_ids=tenant_ids,
+                llm_config=llm_config,
+                system_prompt=system_prompt,
             ):
                 payload = _event_payload(event.type, event.data)
                 if payload is not None:

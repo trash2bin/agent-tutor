@@ -61,7 +61,9 @@ class TestDemoSettingsFromEnv:
     def test_data_service_url_override(self):
         from demo.settings import DemoSettings
 
-        with patch.dict(os.environ, {"DATA_SERVICE_URL": "http://data-svc.custom:9090"}):
+        with patch.dict(
+            os.environ, {"DATA_SERVICE_URL": "http://data-svc.custom:9090"}
+        ):
             s = DemoSettings()
             assert s.data_service_url == "http://data-svc.custom:9090"
 
@@ -81,8 +83,8 @@ class TestDemoSettingsFromEnv:
             assert s.web_proxy_timeout == 60.5
 
     def test_web_proxy_timeout_invalid_falls_back(self):
-        """Невалидный float не падает — падает int()/float(). 
-        Но мы пишем осмысленно: если значение кривое — пусть падает, 
+        """Невалидный float не падает — падает int()/float().
+        Но мы пишем осмысленно: если значение кривое — пусть падает,
         чтобы админ увидел ошибку при старте.
         """
         from demo.settings import DemoSettings
@@ -175,6 +177,8 @@ class TestDemoSettingsQuoting:
         """URL с паролем не урл-энкодится."""
         from demo.settings import DemoSettings
 
-        with patch.dict(os.environ, {"DATA_SERVICE_URL": "http://user:pass@custom:8084"}):
+        with patch.dict(
+            os.environ, {"DATA_SERVICE_URL": "http://user:pass@custom:8084"}
+        ):
             s = DemoSettings()
             assert s.data_service_url == "http://user:pass@custom:8084"

@@ -51,6 +51,7 @@ def client():
 
 # === TENANT ROUTING PROXY ===
 
+
 class TestTenantRoutingProxy:
     """Тесты для /api/tenant/{tenant_id}/{path:path} с пробросом X-Tenant-ID."""
 
@@ -109,14 +110,20 @@ class TestTenantRoutingProxy:
         )
         response = client.get(
             "/api/tenant/tenant-e/data/students",
-            headers={"x-correlation-id": "test-corr-123"}
+            headers={"x-correlation-id": "test-corr-123"},
         )
         assert response.status_code == 200
-        assert upstream_route.calls.last.request.headers.get("x-correlation-id") == "test-corr-123"
-        assert upstream_route.calls.last.request.headers.get("x-tenant-id") == "tenant-e"
+        assert (
+            upstream_route.calls.last.request.headers.get("x-correlation-id")
+            == "test-corr-123"
+        )
+        assert (
+            upstream_route.calls.last.request.headers.get("x-tenant-id") == "tenant-e"
+        )
 
 
 # === DATA SERVICE PROXY ===
+
 
 class TestDataServiceProxy:
     """Тесты для /api/data/* -> data-service:8084."""
@@ -132,13 +139,16 @@ class TestDataServiceProxy:
         assert response.json() == {"students": 42, "teachers": 15}
 
     @respx.mock
-    @pytest.mark.parametrize("entity_key,upstream_path", [
-        ("students", "/students"),
-        ("teachers", "/teachers"),
-        ("disciplines", "/disciplines"),
-        ("schedule", "/schedule"),
-        ("grades", "/grades"),
-    ])
+    @pytest.mark.parametrize(
+        "entity_key,upstream_path",
+        [
+            ("students", "/students"),
+            ("teachers", "/teachers"),
+            ("disciplines", "/disciplines"),
+            ("schedule", "/schedule"),
+            ("grades", "/grades"),
+        ],
+    )
     def test_proxy_generic_data_collection(self, client, entity_key, upstream_path):
         """Generic /api/data/{entity} proshens correct upstream path."""
         respx.get(f"http://127.0.0.1:8084{upstream_path}").mock(
@@ -154,10 +164,15 @@ class TestDataServiceProxy:
         upstream_route = respx.get("http://127.0.0.1:8084/students").mock(
             return_value=httpx.Response(200, json=[])
         )
-        response = client.get("/api/data/students", headers={"x-correlation-id": "test-corr-id"})
+        response = client.get(
+            "/api/data/students", headers={"x-correlation-id": "test-corr-id"}
+        )
         assert response.status_code == 200
         # Проверяем что header был передан upstream
-        assert upstream_route.calls.last.request.headers.get("x-correlation-id") == "test-corr-id"
+        assert (
+            upstream_route.calls.last.request.headers.get("x-correlation-id")
+            == "test-corr-id"
+        )
 
     @respx.mock
     def test_proxy_upstream_5xx_passes_through(self, client):
@@ -199,13 +214,16 @@ class TestDataServiceProxy:
         upstream_route = respx.get("http://127.0.0.1:8084/students").mock(
             return_value=httpx.Response(200, json=[])
         )
-        response = client.get("/api/data/students", headers={"X-Tenant-ID": "tenant-xyz"})
+        response = client.get(
+            "/api/data/students", headers={"X-Tenant-ID": "tenant-xyz"}
+        )
         assert response.status_code == 200
         tenant_id_header = upstream_route.calls.last.request.headers.get("x-tenant-id")
         assert tenant_id_header == "tenant-xyz"
 
 
 # === MANIFEST PROXY ===
+
 
 class TestManifestProxy:
     """Тест /api/manifest -> data-service /mcp/manifest."""
@@ -215,7 +233,14 @@ class TestManifestProxy:
         """GET /api/manifest проксирует на data-service GET /mcp/manifest."""
         manifest = {
             "entities": [{"name": "student", "fields": []}],
-            "endpoints": [{"method": "GET", "path": "/students", "entity": "student", "op": "list"}],
+            "endpoints": [
+                {
+                    "method": "GET",
+                    "path": "/students",
+                    "entity": "student",
+                    "op": "list",
+                }
+            ],
             "custom_queries": {},
             "mcp_tools": [],
         }
@@ -238,6 +263,7 @@ class TestManifestProxy:
 
 # === RAG PROXY ===
 
+
 class TestRagProxy:
     """Тесты для /api/rag/documents -> rag:8082."""
 
@@ -245,7 +271,9 @@ class TestRagProxy:
     def test_proxy_rag_documents_uses_post(self, client):
         """GET /api/rag/documents -> POST rag:8082/documents/list."""
         upstream_route = respx.post("http://127.0.0.1:8082/documents/list").mock(
-            return_value=httpx.Response(200, json={"documents": [{"id": "doc1", "title": "T1"}]})
+            return_value=httpx.Response(
+                200, json={"documents": [{"id": "doc1", "title": "T1"}]}
+            )
         )
         response = client.get("/api/rag/documents")
         assert response.status_code == 200
@@ -278,6 +306,7 @@ class TestRagProxy:
 
 
 # === BEARER TOKEN PROPAGATION ===
+
 
 class TestBearerTokenPropagation:
     """Если api_bearer_token настроен — он пробрасывается в upstream."""
@@ -318,6 +347,7 @@ class TestBearerTokenPropagation:
 
 # === HEALTH ENDPOINT ===
 
+
 class TestHealthEndpoint:
     """Health-check самого demo/web."""
 
@@ -333,6 +363,7 @@ class TestHealthEndpoint:
 
 # === STATIC ===
 
+
 class TestStaticServing:
     """demo/web отдаёт статические файлы (HTML, CSS, JS)."""
 
@@ -343,4 +374,7 @@ class TestStaticServing:
         # Должен вернуть HTML
         assert "text/html" in response.headers["content-type"]
         # Проверяем что в HTML есть что-то от app
-        assert b"<html" in response.content.lower() or b"<!doctype" in response.content.lower()
+        assert (
+            b"<html" in response.content.lower()
+            or b"<!doctype" in response.content.lower()
+        )

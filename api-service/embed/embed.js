@@ -506,7 +506,7 @@
       messagesEl.innerHTML = '';
       restoreHistory();
     };
-    
+
     // Sync with already-selected agent on page load (too early for app.js sync)
     try {
       var storedAgent = window.localStorage.getItem('agentTutorAgentId');

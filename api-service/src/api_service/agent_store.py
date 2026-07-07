@@ -52,7 +52,7 @@ class AgentStore:
                 conn.commit()
 
                 # Backward-compat migration: add columns if upgrading from old schema
-                for col in ('widget_config', 'llm_config'):
+                for col in ("widget_config", "llm_config"):
                     try:
                         conn.execute(f"ALTER TABLE agents ADD COLUMN {col} TEXT")
                     except sqlite3.OperationalError:
@@ -80,14 +80,21 @@ class AgentStore:
             try:
                 row = conn.execute(
                     "SELECT name, description, tenant_ids, widget_config, llm_config, created_at, updated_at "
-                    "FROM agents WHERE name = ?", (name,)
+                    "FROM agents WHERE name = ?",
+                    (name,),
                 ).fetchone()
                 return self._row_to_dict(row) if row else None
             finally:
                 conn.close()
 
-    def create_agent(self, name: str, description: str = "", tenant_ids: list[str] | None = None,
-                     widget_config: dict | None = None, llm_config: dict | None = None) -> dict[str, Any]:
+    def create_agent(
+        self,
+        name: str,
+        description: str = "",
+        tenant_ids: list[str] | None = None,
+        widget_config: dict | None = None,
+        llm_config: dict | None = None,
+    ) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         tenant_ids_json = json.dumps(tenant_ids or [], ensure_ascii=False)
         widget_config_json = _json_or_none(widget_config)
@@ -98,7 +105,15 @@ class AgentStore:
                 conn.execute(
                     "INSERT INTO agents (name, description, tenant_ids, widget_config, llm_config, created_at, updated_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (name, description, tenant_ids_json, widget_config_json, llm_config_json, now, now),
+                    (
+                        name,
+                        description,
+                        tenant_ids_json,
+                        widget_config_json,
+                        llm_config_json,
+                        now,
+                        now,
+                    ),
                 )
                 conn.commit()
                 return {
@@ -115,34 +130,65 @@ class AgentStore:
             finally:
                 conn.close()
 
-    def update_agent(self, name: str, description: str | None = None, tenant_ids: list[str] | None = None,
-                     widget_config: dict | None = None, llm_config: dict | None = None) -> dict[str, Any] | None:
+    def update_agent(
+        self,
+        name: str,
+        description: str | None = None,
+        tenant_ids: list[str] | None = None,
+        widget_config: dict | None = None,
+        llm_config: dict | None = None,
+    ) -> dict[str, Any] | None:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             conn = self._conn()
             try:
                 existing = conn.execute(
                     "SELECT name, description, tenant_ids, widget_config, llm_config, created_at, updated_at "
-                    "FROM agents WHERE name = ?", (name,)
+                    "FROM agents WHERE name = ?",
+                    (name,),
                 ).fetchone()
                 if not existing:
                     return None
 
-                new_description = description if description is not None else existing["description"]
-                new_tenant_ids = json.dumps(tenant_ids if tenant_ids is not None else json.loads(existing["tenant_ids"]), ensure_ascii=False)
-                new_widget_config = widget_config if widget_config is not None else existing["widget_config"]
-                new_llm_config = llm_config if llm_config is not None else existing["llm_config"]
+                new_description = (
+                    description if description is not None else existing["description"]
+                )
+                new_tenant_ids = json.dumps(
+                    tenant_ids
+                    if tenant_ids is not None
+                    else json.loads(existing["tenant_ids"]),
+                    ensure_ascii=False,
+                )
+                new_widget_config = (
+                    widget_config
+                    if widget_config is not None
+                    else existing["widget_config"]
+                )
+                new_llm_config = (
+                    llm_config if llm_config is not None else existing["llm_config"]
+                )
 
                 new_widget_config_json = _json_or_none(_unpack_json(new_widget_config))
                 new_llm_config_json = _json_or_none(_unpack_json(new_llm_config))
 
                 conn.execute(
                     "UPDATE agents SET description = ?, tenant_ids = ?, widget_config = ?, llm_config = ?, updated_at = ? WHERE name = ?",
-                    (new_description, new_tenant_ids, new_widget_config_json, new_llm_config_json, now, name),
+                    (
+                        new_description,
+                        new_tenant_ids,
+                        new_widget_config_json,
+                        new_llm_config_json,
+                        now,
+                        name,
+                    ),
                 )
                 conn.commit()
 
-                new_tenant_ids_list = tenant_ids if tenant_ids is not None else json.loads(existing["tenant_ids"])
+                new_tenant_ids_list = (
+                    tenant_ids
+                    if tenant_ids is not None
+                    else json.loads(existing["tenant_ids"])
+                )
                 return {
                     "name": name,
                     "description": new_description,
@@ -190,7 +236,7 @@ def _json_or_none(val: Any) -> str | None:
     if isinstance(val, str):
         return val  # already serialized
     s = json.dumps(val, ensure_ascii=False)
-    return s if s != 'null' else None
+    return s if s != "null" else None
 
 
 def _unpack_json(val: Any) -> Any:

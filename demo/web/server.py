@@ -257,7 +257,9 @@ async def _proxy_to_data_service(
     return Response(
         content=response.content,
         status_code=response.status_code,
-        headers={"Content-Type": response.headers.get("Content-Type", "application/json")},
+        headers={
+            "Content-Type": response.headers.get("Content-Type", "application/json")
+        },
     )
 
 
@@ -294,13 +296,17 @@ async def _proxy_to_rag(
     url = f"{RAG_SERVICE_URL}{rag_path}"
     headers = await _get_proxy_headers(request)
     if json_body is not None:
-        response = await getattr(http_client, method.lower())(url, json=json_body, headers=headers)
+        response = await getattr(http_client, method.lower())(
+            url, json=json_body, headers=headers
+        )
     else:
         response = await getattr(http_client, method.lower())(url, headers=headers)
     return Response(
         content=response.content,
         status_code=response.status_code,
-        headers={"Content-Type": response.headers.get("Content-Type", "application/json")},
+        headers={
+            "Content-Type": response.headers.get("Content-Type", "application/json")
+        },
     )
 
 
@@ -313,7 +319,10 @@ async def proxy_rag_documents(request: Request) -> Response:
 # --- API Reverse Proxy Routes (только агент: chat, sessions, backlog) ---
 
 
-@app.api_route("/api/tenant/{tenant_id}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+@app.api_route(
+    "/api/tenant/{tenant_id}/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+)
 async def proxy_tenant_api(request: Request, tenant_id: str, path: str):
     """
     Special demo route: allows specifying tenant in URL.
@@ -321,15 +330,17 @@ async def proxy_tenant_api(request: Request, tenant_id: str, path: str):
     """
     # Store tenant_id in request.state so proxy functions can access it
     request.state.tenant_id = tenant_id
-    
+
     # Determine if we should proxy to data-service, rag, or api based on the path
     if path.startswith("data/"):
         return await _proxy_to_data_service(request, f"/{path.replace('data/', '', 1)}")
     elif path.startswith("rag/"):
-        rag_subpath = path.replace('rag/', '', 1)
+        rag_subpath = path.replace("rag/", "", 1)
         # Special case: rag/documents -> POST /documents/list (matching /api/rag/documents behavior)
         if rag_subpath == "documents":
-            return await _proxy_to_rag(request, "/documents/list", method="POST", json_body={})
+            return await _proxy_to_rag(
+                request, "/documents/list", method="POST", json_body={}
+            )
         else:
             return await _proxy_to_rag(request, f"/{rag_subpath}")
     else:
@@ -347,7 +358,7 @@ async def proxy_tenant_api(request: Request, tenant_id: str, path: str):
 @app.get("/api/tenants")
 async def get_tenants(request: Request) -> Response:
     """Return list of available tenants from data-service health endpoint.
-    
+
     Falls back to [DEFAULT_TENANT_ID] if data-service returns single-tenant response.
     Also checks DEMO_TENANTS env var (comma-separated) as explicit override.
     """
@@ -357,7 +368,9 @@ async def get_tenants(request: Request) -> Response:
     explicit = settings.demo_tenants.strip()
     if explicit:
         return Response(
-            content=json.dumps({"tenants": [t.strip() for t in explicit.split(",") if t.strip()]}),
+            content=json.dumps(
+                {"tenants": [t.strip() for t in explicit.split(",") if t.strip()]}
+            ),
             media_type="application/json",
         )
 
@@ -369,9 +382,14 @@ async def get_tenants(request: Request) -> Response:
         ds_resp = await http_client.get(url, timeout=5.0)
         if ds_resp.status_code == 200:
             import json
+
             data = ds_resp.json()
             if "tenants" in data and isinstance(data["tenants"], list):
-                tenant_ids = [t["id"] for t in data["tenants"] if isinstance(t, dict) and "id" in t]
+                tenant_ids = [
+                    t["id"]
+                    for t in data["tenants"]
+                    if isinstance(t, dict) and "id" in t
+                ]
                 if tenant_ids:
                     return Response(
                         content=json.dumps({"tenants": tenant_ids}),
@@ -382,6 +400,7 @@ async def get_tenants(request: Request) -> Response:
 
     # Fallback
     import json
+
     return Response(
         content=json.dumps({"tenants": [default_tenant]}),
         media_type="application/json",
@@ -435,7 +454,11 @@ async def proxy_embed(request: Request, embed_path: str):
 
 
 # Catch-all for any other /api/* path
-@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"], response_model=None)
+@app.api_route(
+    "/api/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    response_model=None,
+)
 async def proxy_api_any(request: Request, path: str):
     """Catch-all proxy for any undefined /api/* route."""
     is_sse = path == "chat" and request.method == "POST"

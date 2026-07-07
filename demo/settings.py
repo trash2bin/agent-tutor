@@ -27,9 +27,13 @@ class DemoSettings:
         self.ollama_model: str = os.environ.get("OLLAMA_MODEL", "qwen2.5:0.5b")
 
         self.mistral_api_key: str | None = os.environ.get("MISTRAL_API_KEY")
-        self.mistral_model: str = os.environ.get("MISTRAL_MODEL", "mistral/mistral-small")
+        self.mistral_model: str = os.environ.get(
+            "MISTRAL_MODEL", "mistral/mistral-small"
+        )
 
-        self.request_timeout: float = float(os.environ.get("DEMO_REQUEST_TIMEOUT", 120 * 5))
+        self.request_timeout: float = float(
+            os.environ.get("DEMO_REQUEST_TIMEOUT", 120 * 5)
+        )
         self.python_executable: str = os.environ.get(
             "PYTHON_EXECUTABLE", sys.executable or "python3"
         )
@@ -51,8 +55,12 @@ class DemoSettings:
         self.demo_tenants: str = os.environ.get("DEMO_TENANTS", "")
 
         # Model backlog (full interaction tracing)
-        self.backlog_dir: str = os.environ.get("BACKLOG_DIR", str(PROJECT_ROOT / "backlog"))
-        self.backlog_retention_days: int = int(os.environ.get("BACKLOG_RETENTION_DAYS", "30"))
+        self.backlog_dir: str = os.environ.get(
+            "BACKLOG_DIR", str(PROJECT_ROOT / "backlog")
+        )
+        self.backlog_retention_days: int = int(
+            os.environ.get("BACKLOG_RETENTION_DAYS", "30")
+        )
 
         # MCP service URL for HTTP transport
         self.mcp_service_url: str = os.environ.get(
@@ -68,15 +76,23 @@ class DemoSettings:
         )
 
         # Web proxy HTTP client timeout (seconds)
-        self.web_proxy_timeout: float = float(os.environ.get("WEB_PROXY_TIMEOUT", "30.0"))
+        self.web_proxy_timeout: float = float(
+            os.environ.get("WEB_PROXY_TIMEOUT", "30.0")
+        )
 
         # Model parameters
-        self.agent_temperature: float = float(os.environ.get("AGENT_TEMPERATURE", "0.5"))
-        self.agent_max_iterations: int = int(os.environ.get("AGENT_MAX_ITERATIONS", "5"))
+        self.agent_temperature: float = float(
+            os.environ.get("AGENT_TEMPERATURE", "0.5")
+        )
+        self.agent_max_iterations: int = int(
+            os.environ.get("AGENT_MAX_ITERATIONS", "5")
+        )
         self.agent_max_tokens_thinking: int = int(
             os.environ.get("AGENT_MAX_TOKENS_THINKING", "4096")
         )
-        self.agent_max_empty_rounds: int = int(os.environ.get("AGENT_MAX_EMPTY_ROUNDS", "3"))
+        self.agent_max_empty_rounds: int = int(
+            os.environ.get("AGENT_MAX_EMPTY_ROUNDS", "3")
+        )
         self.agent_max_turn_tokens: int = int(
             os.environ.get("AGENT_MAX_TURN_TOKENS", "8000")
         )
