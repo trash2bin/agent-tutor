@@ -118,10 +118,29 @@ class LLMAgent:
         async for event in self.stream_events(user_message, session_id=session_id):
             yield self._format_sse_event(event)
 
+    def create_per_request_llm(self, llm_config: dict | None = None) -> LLMClient:
+        """Create a per-request LLM client from per-agent config.
+        
+        This allows each request to use a different model/provider
+        without recreating the entire orchestrator.
+        """
+        if llm_config:
+            return create_client(llm_config)
+        return self.llm_client
+
     async def stream_events(
-        self, user_message: str, session_id: SessionId = "default", tenant_ids: list[str] | None = None
+        self, user_message: str, session_id: SessionId = "default", tenant_ids: list[str] | None = None,
+        llm_config: dict | None = None, system_prompt: str | None = None
     ) -> AsyncIterator[AgentEvent]:
-        """Stream agent events (tokens, tool calls, results, etc.)."""
+        """Stream agent events (tokens, tool calls, results, etc.).
+        
+        Args:
+            user_message: User's message text
+            session_id: Session identifier
+            tenant_ids: Optional list of tenant IDs
+            llm_config: Optional per-agent LLM config (provider, model, api_key, etc.)
+            system_prompt: Optional per-agent system prompt override
+        """
         session_id = self.conversation_manager.normalize_session_id(session_id)
         logger.info(
             "[AGENT] User message for session %s (tenants: %s): %s...",
@@ -130,18 +149,24 @@ class LLMAgent:
             user_message[:100],
         )
 
+        # Use per-request LLM client if per-agent config provided
+        request_llm = self.create_per_request_llm(llm_config) if llm_config else self.llm_client
+
         lock = self.conversation_manager.get_session_lock(session_id)
         async with lock:
-            async for event in self._run_turn(user_message, session_id, tenant_ids):
+            async for event in self._run_turn(user_message, session_id, tenant_ids, request_llm=request_llm, system_prompt=system_prompt):
                 yield event
 
     async def _run_turn(
-        self, user_message: str, session_id: SessionId, tenant_ids: list[str] | None = None
+        self, user_message: str, session_id: SessionId, tenant_ids: list[str] | None = None,
+        request_llm: LLMClient | None = None, system_prompt: str | None = None
     ) -> AsyncIterator[AgentEvent]:
         """Execute a single conversation turn with multiple iterations."""
+        # Use per-request LLM if provided
+        llm = request_llm or self.llm_client
         # Build initial messages (async — sync SQLite через to_thread)
         messages: list[dict[str, Any]] = await self._build_messages_raw(
-            user_message, session_id
+            user_message, session_id, system_prompt=system_prompt
         )
         turn_messages: list[dict[str, Any]] = [
             {"role": "user", "content": user_message}
@@ -523,17 +548,23 @@ class LLMAgent:
         )
 
     async def _build_messages_raw(
-        self, user_message: str, session_id: SessionId
+        self, user_message: str, session_id: SessionId, system_prompt: str | None = None
     ) -> list[dict[str, Any]]:
         """Build the raw messages list for the LLM.
 
         History fetch идёт через asyncio.to_thread — sync SQLite не блокирует event loop.
+        
+        Args:
+            user_message: User's message text
+            session_id: Session identifier
+            system_prompt: Optional per-agent system prompt (overrides global)
         """
         history: list[dict[str, Any]] = await self.conversation_manager.aget_history_messages(
             session_id
         )
+        prompt = system_prompt if system_prompt else SYSTEM_PROMPT
         return [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": prompt},
             *history,
             {"role": "user", "content": user_message},
         ]

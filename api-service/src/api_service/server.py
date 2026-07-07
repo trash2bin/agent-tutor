@@ -15,6 +15,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -39,6 +40,7 @@ from api_service.http_models import (
     AgentResponse,
     AgentListResponse,
 )
+from pathlib import Path
 from api_service.agent_store import AgentStore
 
 # Configure logging
@@ -263,6 +265,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount embed widget static files
+EMBED_DIR = Path(__file__).parent.parent.parent / "embed"
+if EMBED_DIR.is_dir():
+    app.mount("/embed", StaticFiles(directory=str(EMBED_DIR)), name="embed")
+    logger.info("Embed widget mounted at /embed from %s", EMBED_DIR)
+else:
+    logger.warning("Embed directory not found: %s", EMBED_DIR)
+
+# Mount embeddable widget static files
+EMBED_DIR = Path(__file__).resolve().parent.parent.parent / "embed"
+embed_override = os.environ.get("EMBED_DIR")
+if embed_override:
+    EMBED_DIR = Path(embed_override)
+if EMBED_DIR.is_dir():
+    app.mount("/embed", StaticFiles(directory=str(EMBED_DIR)), name="embed")
+    logger.info("Embed widget mounted at /embed from %s", EMBED_DIR)
+else:
+    logger.warning("Embed directory not found at %s, /embed will be unavailable", EMBED_DIR)
+
 
 # --- Correlation ID middleware ---
 @app.middleware("http")
@@ -361,6 +382,8 @@ async def create_agent_endpoint(req: AgentCreateRequest) -> AgentResponse:
             name=req.name,
             description=req.description,
             tenant_ids=req.tenant_ids,
+            widget_config=req.widget_config.model_dump() if req.widget_config else None,
+            llm_config=req.llm_config.model_dump() if req.llm_config else None,
         )
         return AgentResponse(**result)
     except ValueError as exc:
@@ -406,10 +429,32 @@ async def update_agent_endpoint(name: str, req: AgentUpdateRequest) -> AgentResp
         name=name,
         description=req.description,
         tenant_ids=req.tenant_ids,
+        widget_config=req.widget_config.model_dump() if req.widget_config else None,
+        llm_config=req.llm_config.model_dump() if req.llm_config else None,
     )
     if not result:
         raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
     return AgentResponse(**result)
+
+
+@app.get(
+    "/api/agents/{name}/widget-config",
+    summary="Конфиг виджета для агента",
+    description="Возвращает настройки embed-виджета для указанного агента.",
+)
+async def agent_widget_config_endpoint(name: str) -> dict:
+    """Get widget configuration for an agent. Used by embed.js."""
+    from fastapi import HTTPException
+    agent = await asyncio.to_thread(get_agent_store().get_agent, name)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
+    cfg = agent.get("widget_config") or {}
+    return {
+        "title": cfg.get("title", "Ассистент"),
+        "greeting": cfg.get("greeting", "Чем могу помочь?"),
+        "accent_color": cfg.get("accent_color", "#0f766e"),
+        "position": cfg.get("position", "right"),
+    }
 
 
 @app.delete(
@@ -449,7 +494,13 @@ async def chat_agent_handler(request: Request, name: str) -> StreamingResponse:
 
     message = chat_req.message
     session_id = chat_req.session_id
-    tenant_ids = agent.get("tenant_ids") if agent.get("tenant_ids") else None
+    tenant_ids_raw = agent.get("tenant_ids")
+    # empty list → no tenant restriction (default tenant is fine)
+    # None (key missing) → also no restriction
+    # ["shop"] → scope to shop tenant only
+    tenant_ids = tenant_ids_raw if tenant_ids_raw else None
+    llm_config = agent.get("llm_config")
+    system_prompt = llm_config.get("system_prompt") if llm_config else None
 
     if not message:
         return StreamingResponse(
@@ -467,7 +518,8 @@ async def chat_agent_handler(request: Request, name: str) -> StreamingResponse:
     async def events():
         try:
             async for event in get_agent().stream_events(
-                message, session_id=effective_session_id, tenant_ids=tenant_ids
+                message, session_id=effective_session_id, tenant_ids=tenant_ids,
+                llm_config=llm_config, system_prompt=system_prompt
             ):
                 payload = _event_payload(event.type, event.data)
                 if payload is not None:

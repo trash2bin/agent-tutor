@@ -25,8 +25,150 @@
 | `/api/agents` | POST | Создать агента (Agent Store) |
 | `/api/agents` | GET | Список агентов |
 | `/api/agents/{name}` | GET | Получить агента |
-| `/api/agents/{name}` | PUT | Обновить agentes.update_agent Обновить агента |
+| `/api/agents/{name}` | PUT | Обновить агента (widget_config, llm_config) |
 | `/api/agents/{name}` | DELETE | Удалить агента |
+| `/api/agents/{name}/widget-config` | GET | Конфиг виджета для агента (используется embed.js) |
+| `/embed/embed.js` | GET | JS-файл embed-виджета (Shadow DOM, стриминг) |
+| `/embed/embed.css` | GET | CSS стили виджета |
+
+## Per-Agent LLM Config
+
+Каждый агент может иметь свою LLM-конфигурацию (`llm_config`), которая переопределяет глобальные настройки окружения.
+
+### Поля llm_config
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `provider` | `str` | Провайдер: `ollama`, `mistral`, `openai`, `anthropic` |
+| `api_key` | `str` | API-ключ (устанавливается в env-переменную для LiteLLM) |
+| `model` | `str` | Имя модели (например `qwen2.5:0.5b`, `gpt-4`, `mistral-small`) |
+| `api_base` | `str` | Кастомный API base URL (опционально) |
+| `temperature` | `float` | Температура генерации (0–2) |
+| `max_tokens` | `int` | Максимум токенов в ответе |
+| `system_prompt` | `str` | Кастомный системный промпт (переопределяет глобальный) |
+
+### Приоритет выбора LLM
+
+1. **Per-agent `llm_config`** — если передан, используется он
+2. **Mistral API** — если `MISTRAL_API_KEY` установлен глобально
+3. **Ollama** — дефолтный fallback
+
+### Примеры создания агента
+
+**Ollama (локально):**
+```bash
+curl -X POST http://localhost:8081/api/agents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "local-assistant",
+    "tenant_ids": ["default"],
+    "llm_config": {
+      "provider": "ollama",
+      "model": "qwen2.5:7b",
+      "temperature": 0.3
+    }
+  }'
+```
+
+**Mistral API:**
+```bash
+curl -X POST http://localhost:8081/api/agents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "mistral-agent",
+    "tenant_ids": ["default"],
+    "llm_config": {
+      "provider": "mistral",
+      "model": "mistral-small",
+      "api_key": "your-mistral-key"
+    }
+  }'
+```
+
+**OpenAI:**
+```bash
+curl -X POST http://localhost:8081/api/agents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "openai-agent",
+    "tenant_ids": ["default"],
+    "llm_config": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "api_key": "sk-..."
+    }
+  }'
+```
+
+> ⚠️ API-ключи устанавливаются в `os.environ` при старте запроса и **не сохраняются между запросами**. При каждом новом вызове чата ключ снова загружается из хранилища агента.
+
+## Embed Widget
+
+Виджет — это готовый JS-компонент для встраивания чата на любой сайт. Работает в Shadow DOM — никакие стили сайта не влияют на виджет, и наоборот.
+
+### Как вставить на сайт
+
+```html
+<script src="https://your-server.com/embed/embed.js"
+        data-agent="support-agent"
+        data-title="Поддержка"
+        data-greeting="Чем могу помочь?"
+        data-accent="#0f766e"
+        data-position="right">
+</script>
+```
+
+### Data-атрибуты
+
+| Атрибут | Обязательный | Дефолт | Описание |
+|---|---|---|---|
+| `data-agent` | ✅ | — | Имя агента из Agent Store |
+| `data-api-base` | ❌ | `window.location.origin` | Базовый URL API |
+| `data-title` | ❌ | "Ассистент" | Заголовок виджета |
+| `data-greeting` | ❌ | "Чем могу помочь?" | Приветственное сообщение |
+| `data-accent` | ❌ | `#0f766e` | Акцентный цвет |
+| `data-position` | ❌ | `right` | Положение: `right` / `left` |
+
+### Автозагрузка конфига из API
+
+Если агент создан с `widget_config`, виджет при старте загружает настройки через:
+```
+GET /api/agents/{name}/widget-config
+```
+
+Эти настройки переопределяют data-атрибуты в HTML. Пример создания агента с полным конфигом виджета:
+
+```bash
+curl -X POST http://localhost:8081/api/agents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "support-agent",
+    "description": "Агент поддержки",
+    "tenant_ids": ["customer-a"],
+    "widget_config": {
+      "title": "Техподдержка",
+      "greeting": "Здравствуйте! Чем помочь?",
+      "accent_color": "#2563eb",
+      "position": "left"
+    },
+    "llm_config": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "api_key": "sk-...",
+      "system_prompt": "Ты вежливый сотрудник поддержки. Отвечай кратко и по делу."
+    }
+  }'
+```
+
+### Что умеет виджет
+
+- **Shadow DOM** — полная изоляция от CSS сайта
+- **SSE стриминг** — ответы приходят по токену
+- **Markdown** — таблицы, списки, **bold**, `code`
+- **sessionStorage** — история сессии сохраняется при перезагрузке
+- **Enter** — отправить, **Shift+Enter** — новая строка
+- **Tool call индикатор** — 🔧 показывает какие инструменты вызывает
+- **Адаптивность** — на мобильных на весь экран
 
 ## Переменные окружения
 

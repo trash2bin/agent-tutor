@@ -1,6 +1,151 @@
+import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from api_service.agent.llm_client import LLMClient
+from api_service.agent.llm_client import LLMClient, create_client
+
+
+# ── Fixtures ──
+
+
+@pytest.fixture
+def mock_settings():
+    """Mock global settings to avoid env dependencies."""
+    with patch("api_service.agent.llm_client.settings") as ms:
+        ms.mistral_api_key = None
+        ms.mistral_model = "mistral/mistral-small"
+        ms.ollama_model = "qwen2.5:0.5b"
+        ms.ollama_url = "http://127.0.0.1:11434"
+        ms.agent_temperature = 0.5
+        ms.agent_max_tokens_thinking = 4096
+        ms.request_timeout = 600.0
+        ms.think_mode = True
+        yield ms
+
+
+# ── Tests for create_client ──
+
+
+def test_create_client_with_ollama_config(mock_settings):
+    """create_client with ollama llm_config should produce correct LLMClient."""
+    llm_config = {
+        "provider": "ollama",
+        "model": "qwen2.5:0.5b",
+        "api_base": "http://127.0.0.1:11434",
+        "temperature": 0.3,
+    }
+    client = create_client(llm_config)
+    assert isinstance(client, LLMClient)
+    assert client.model == "ollama_chat/qwen2.5:0.5b"
+    assert client.api_base == "http://127.0.0.1:11434"
+    assert client.temperature == 0.3
+
+
+def test_create_client_with_ollama_custom_base(mock_settings):
+    """create_client with custom api_base should use it."""
+    llm_config = {
+        "provider": "ollama",
+        "model": "qwen2.5:0.5b",
+        "api_base": "http://ollama.internal:11434",
+    }
+    client = create_client(llm_config)
+    assert client.api_base == "http://ollama.internal:11434"
+
+
+def test_create_client_with_mistral_config(mock_settings):
+    """create_client with mistral llm_config should produce correct LLMClient."""
+    llm_config = {
+        "provider": "mistral",
+        "model": "mistral-small",
+        "api_key": "sk-test-123",
+    }
+    client = create_client(llm_config)
+    assert isinstance(client, LLMClient)
+    assert client.model == "mistral/mistral-small"
+    assert client.api_base is None  # LiteLLM handles Mistral's default
+
+
+def test_create_client_with_openai_config(mock_settings):
+    """create_client with openai llm_config should set env var and prefix model."""
+    llm_config = {
+        "provider": "openai",
+        "model": "gpt-4",
+        "api_key": "sk-test-openai-456",
+    }
+    # Clean env before test
+    old_key = os.environ.pop("OPENAI_API_KEY", None)
+    try:
+        client = create_client(llm_config)
+        assert isinstance(client, LLMClient)
+        assert client.model == "openai/gpt-4"
+        assert os.environ.get("OPENAI_API_KEY") == "sk-test-openai-456"
+    finally:
+        # Restore
+        if old_key:
+            os.environ["OPENAI_API_KEY"] = old_key
+        else:
+            os.environ.pop("OPENAI_API_KEY", None)
+
+
+def test_create_client_no_config(mock_settings):
+    """create_client without llm_config should fall back to global settings."""
+    client = create_client()
+    assert isinstance(client, LLMClient)
+    assert client.model == "ollama_chat/qwen2.5:0.5b"
+    assert client.api_base == "http://127.0.0.1:11434"
+    assert client.temperature == 0.5  # from mock_settings defaults
+
+
+def test_create_client_no_config_fallback_mistral(mock_settings):
+    """create_client without llm_config should use Mistral when API key is set."""
+    mock_settings.mistral_api_key = "sk-mistral-global"
+    client = create_client()
+    assert client.model == "mistral/mistral-small"
+    assert client.api_base is None
+
+
+def test_create_client_with_anthropic_config(mock_settings):
+    """create_client with anthropic llm_config should set env var."""
+    llm_config = {
+        "provider": "anthropic",
+        "model": "claude-3-haiku-20240307",
+        "api_key": "sk-ant-test",
+    }
+    old_key = os.environ.pop("ANTHROPIC_API_KEY", None)
+    try:
+        client = create_client(llm_config)
+        assert isinstance(client, LLMClient)
+        assert client.model == "claude-3-haiku-20240307"
+        assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-test"
+    finally:
+        if old_key:
+            os.environ["ANTHROPIC_API_KEY"] = old_key
+        else:
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def test_create_client_config_model_fallback(mock_settings):
+    """create_client should fall back to settings.ollama_model when model is not in config."""
+    llm_config = {
+        "provider": "ollama",
+        # no model key — should fallback to mock_settings.ollama_model
+    }
+    client = create_client(llm_config)
+    assert client.model == "ollama_chat/qwen2.5:0.5b"
+
+
+def test_create_client_config_max_tokens(mock_settings):
+    """create_client should use max_tokens from config."""
+    llm_config = {
+        "provider": "ollama",
+        "model": "qwen2.5:0.5b",
+        "max_tokens": 2048,
+    }
+    client = create_client(llm_config)
+    assert client.max_tokens_thinking == 2048
+    assert client.model == "ollama_chat/qwen2.5:0.5b"
+
+
+# ── Existing stream completion test ──
 
 
 @pytest.mark.asyncio

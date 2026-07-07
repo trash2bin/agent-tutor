@@ -104,6 +104,33 @@ class SessionHistoryResponse(BaseModel):
 # === Agent Management ===
 
 
+# === Widget & LLM Config Models ===
+
+
+class WidgetConfig(BaseModel):
+    """Embed widget display configuration for an agent."""
+
+    title: str = Field(default="Ассистент", description="Widget header title")
+    greeting: str = Field(default="Чем могу помочь?", description="Greeting message in chat")
+    accent_color: str = Field(default="#0f766e", description="Accent color (hex)")
+    position: str = Field(default="right", description="Widget position: right | left")
+
+
+class LLMConfig(BaseModel):
+    """Per-agent LLM configuration. All fields optional — falls back to global defaults when null."""
+
+    provider: str | None = Field(default=None, description="LLM provider: ollama, mistral, openai, anthropic")
+    api_key: str | None = Field(default=None, description="API key for the provider")
+    model: str | None = Field(default=None, description="Model name (e.g. qwen2.5:0.5b or mistral/mistral-small)")
+    api_base: str | None = Field(default=None, description="Base URL for the API")
+    system_prompt: str | None = Field(default=None, description="System prompt (overrides global)")
+    temperature: float | None = Field(default=None, ge=0, le=2, description="Model temperature")
+    max_tokens: int | None = Field(default=None, ge=1, description="Maximum tokens in response")
+
+
+# === Agent Management ===
+
+
 class AgentCreateRequest(BaseModel):
     """Request to create a new agent."""
 
@@ -117,6 +144,12 @@ class AgentCreateRequest(BaseModel):
     tenant_ids: list[str] = Field(
         default_factory=list, description="Tenant IDs for this agent"
     )
+    widget_config: WidgetConfig | None = Field(
+        default=None, description="Embed widget display configuration"
+    )
+    llm_config: LLMConfig | None = Field(
+        default=None, description="Per-agent LLM overrides"
+    )
 
 
 class AgentUpdateRequest(BaseModel):
@@ -128,6 +161,12 @@ class AgentUpdateRequest(BaseModel):
     tenant_ids: list[str] | None = Field(
         default=None, description="Tenant IDs for this agent"
     )
+    widget_config: WidgetConfig | None = Field(
+        default=None, description="Embed widget display configuration"
+    )
+    llm_config: LLMConfig | None = Field(
+        default=None, description="Per-agent LLM overrides"
+    )
 
 
 class AgentResponse(BaseModel):
@@ -137,6 +176,12 @@ class AgentResponse(BaseModel):
     description: str = Field(default="", description="Human-readable description")
     tenant_ids: list[str] = Field(
         default_factory=list, description="Tenant IDs"
+    )
+    widget_config: WidgetConfig | None = Field(
+        default=None, description="Embed widget display configuration"
+    )
+    llm_config: LLMConfig | None = Field(
+        default=None, description="Per-agent LLM overrides"
     )
     created_at: str = Field(..., description="ISO timestamp")
     updated_at: str = Field(..., description="ISO timestamp")

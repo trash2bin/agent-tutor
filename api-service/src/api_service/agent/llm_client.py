@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
@@ -222,22 +223,66 @@ class LLMClient:
         return self._last_final_message
 
 
-def create_client() -> LLMClient:
+def create_client(llm_config: dict | None = None) -> LLMClient:
     """
-    Factory function to create LLM client based on environment settings.
+    Factory function to create LLM client based on environment or per-agent settings.
 
     Priority order:
-    1. Mistral API (if MISTRAL_API_KEY is set)
-    2. Ollama (default fallback)
+    1. Per-agent llm_config (if provided)
+    2. Mistral API (if MISTRAL_API_KEY is set globally)
+    3. Ollama (default fallback)
 
-    For Mistral:
-    - export MISTRAL_API_KEY="your-key"
-    - export MISTRAL_MODEL="mistral/mistral-small"  # optional
-
-    For Ollama:
-    - export OLLAMA_URL="http://127.0.0.1:11434"  # optional
-    - export OLLAMA_MODEL="qwen2.5:0.5b"  # optional
+    Per-agent config keys:
+      provider  — ollama, mistral, openai, anthropic
+      api_key   — API key for the provider (set as env var for LiteLLM)
+      model     — model name (e.g. qwen2.5:0.5b, mistral/mistral-small)
+      api_base  — custom API base URL
+      temperature — model temperature (0-2)
+      max_tokens  — max tokens in response
+      system_prompt — system prompt override (NOT used here, handled by orchestrator)
     """
+    if llm_config:
+        model_name = llm_config.get("model") or settings.ollama_model
+        api_base = llm_config.get("api_base") or settings.ollama_url
+        temperature = llm_config.get("temperature") or settings.agent_temperature
+        provider = llm_config.get("provider")
+        api_key = llm_config.get("api_key")
+
+        # Set API key as env var for LiteLLM
+        if api_key and provider:
+            env_key_map = {
+                "openai": "OPENAI_API_KEY",
+                "anthropic": "ANTHROPIC_API_KEY",
+                "mistral": "MISTRAL_API_KEY",
+            }
+            if provider in env_key_map:
+                os.environ[env_key_map[provider]] = api_key
+
+        # Determine model prefix based on provider
+        if provider == "ollama" and api_base:
+            known_prefixes = ("ollama/", "ollama_chat/", "openai/", "anthropic/", "deepseek/")
+            if not model_name.startswith(known_prefixes):
+                model_name = f"ollama_chat/{model_name}"
+        elif provider == "mistral":
+            if not model_name.startswith("mistral/"):
+                model_name = f"mistral/{model_name}"
+            api_base = None  # LiteLLM handles default
+        elif provider == "openai":
+            if not model_name.startswith("openai/"):
+                model_name = f"openai/{model_name}"
+
+        api_base_url = api_base.rstrip("/") if api_base else None
+
+        return LLMClient(
+            model=model_name,
+            api_base=api_base_url,
+            timeout=settings.request_timeout,
+            temperature=temperature,
+            max_tokens_thinking=llm_config.get("max_tokens") or settings.agent_max_tokens_thinking,
+            enable_thinking=settings.think_mode,
+        )
+
+    # ── Global defaults (no per-agent config) ──
     # Mistral takes priority if API key exists
     if settings.mistral_api_key:
         model = settings.mistral_model

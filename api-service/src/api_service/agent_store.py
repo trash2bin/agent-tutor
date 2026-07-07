@@ -1,11 +1,13 @@
 """SQLite-хранилище агентов.
 
 Таблица `agents`:
-  name        TEXT PRIMARY KEY — уникальное имя агента
-  description TEXT — человекочитаемое описание
-  tenant_ids  TEXT — JSON-массив tenant_id (пример: '["tenant-a","tenant-b"]')
-  created_at  TEXT — ISO timestamp
-  updated_at  TEXT — ISO timestamp
+  name         TEXT PRIMARY KEY — уникальное имя агента
+  description  TEXT — человекочитаемое описание
+  tenant_ids   TEXT — JSON-массив tenant_id (пример: '["tenant-a","tenant-b"]')
+  widget_config TEXT — JSON-объект конфигурации embed-виджета (опционально)
+  llm_config   TEXT — JSON-объект per-agent LLM конфигурации (опционально)
+  created_at   TEXT — ISO timestamp
+  updated_at   TEXT — ISO timestamp
 """
 
 from __future__ import annotations
@@ -38,14 +40,23 @@ class AgentStore:
             try:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS agents (
-                        name        TEXT PRIMARY KEY,
-                        description TEXT NOT NULL DEFAULT '',
-                        tenant_ids  TEXT NOT NULL DEFAULT '[]',
-                        created_at  TEXT NOT NULL,
-                        updated_at  TEXT NOT NULL
+                        name         TEXT PRIMARY KEY,
+                        description  TEXT NOT NULL DEFAULT '',
+                        tenant_ids   TEXT NOT NULL DEFAULT '[]',
+                        widget_config TEXT,
+                        llm_config   TEXT,
+                        created_at   TEXT NOT NULL,
+                        updated_at   TEXT NOT NULL
                     )
                 """)
                 conn.commit()
+
+                # Backward-compat migration: add columns if upgrading from old schema
+                for col in ('widget_config', 'llm_config'):
+                    try:
+                        conn.execute(f"ALTER TABLE agents ADD COLUMN {col} TEXT")
+                    except sqlite3.OperationalError:
+                        pass  # column already exists
             finally:
                 conn.close()
 
@@ -56,7 +67,7 @@ class AgentStore:
             conn = self._conn()
             try:
                 rows = conn.execute(
-                    "SELECT name, description, tenant_ids, created_at, updated_at "
+                    "SELECT name, description, tenant_ids, widget_config, llm_config, created_at, updated_at "
                     "FROM agents ORDER BY created_at DESC"
                 ).fetchall()
                 return [self._row_to_dict(r) for r in rows]
@@ -68,29 +79,34 @@ class AgentStore:
             conn = self._conn()
             try:
                 row = conn.execute(
-                    "SELECT name, description, tenant_ids, created_at, updated_at "
+                    "SELECT name, description, tenant_ids, widget_config, llm_config, created_at, updated_at "
                     "FROM agents WHERE name = ?", (name,)
                 ).fetchone()
                 return self._row_to_dict(row) if row else None
             finally:
                 conn.close()
 
-    def create_agent(self, name: str, description: str = "", tenant_ids: list[str] | None = None) -> dict[str, Any]:
+    def create_agent(self, name: str, description: str = "", tenant_ids: list[str] | None = None,
+                     widget_config: dict | None = None, llm_config: dict | None = None) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         tenant_ids_json = json.dumps(tenant_ids or [], ensure_ascii=False)
+        widget_config_json = _json_or_none(widget_config)
+        llm_config_json = _json_or_none(llm_config)
         with self._lock:
             conn = self._conn()
             try:
                 conn.execute(
-                    "INSERT INTO agents (name, description, tenant_ids, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (name, description, tenant_ids_json, now, now),
+                    "INSERT INTO agents (name, description, tenant_ids, widget_config, llm_config, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (name, description, tenant_ids_json, widget_config_json, llm_config_json, now, now),
                 )
                 conn.commit()
                 return {
                     "name": name,
                     "description": description,
                     "tenant_ids": tenant_ids or [],
+                    "widget_config": _parse_config(widget_config),
+                    "llm_config": _parse_config(llm_config),
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -99,13 +115,14 @@ class AgentStore:
             finally:
                 conn.close()
 
-    def update_agent(self, name: str, description: str | None = None, tenant_ids: list[str] | None = None) -> dict[str, Any] | None:
+    def update_agent(self, name: str, description: str | None = None, tenant_ids: list[str] | None = None,
+                     widget_config: dict | None = None, llm_config: dict | None = None) -> dict[str, Any] | None:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             conn = self._conn()
             try:
                 existing = conn.execute(
-                    "SELECT name, description, tenant_ids, created_at, updated_at "
+                    "SELECT name, description, tenant_ids, widget_config, llm_config, created_at, updated_at "
                     "FROM agents WHERE name = ?", (name,)
                 ).fetchone()
                 if not existing:
@@ -113,10 +130,15 @@ class AgentStore:
 
                 new_description = description if description is not None else existing["description"]
                 new_tenant_ids = json.dumps(tenant_ids if tenant_ids is not None else json.loads(existing["tenant_ids"]), ensure_ascii=False)
+                new_widget_config = widget_config if widget_config is not None else existing["widget_config"]
+                new_llm_config = llm_config if llm_config is not None else existing["llm_config"]
+
+                new_widget_config_json = _json_or_none(_unpack_json(new_widget_config))
+                new_llm_config_json = _json_or_none(_unpack_json(new_llm_config))
 
                 conn.execute(
-                    "UPDATE agents SET description = ?, tenant_ids = ?, updated_at = ? WHERE name = ?",
-                    (new_description, new_tenant_ids, now, name),
+                    "UPDATE agents SET description = ?, tenant_ids = ?, widget_config = ?, llm_config = ?, updated_at = ? WHERE name = ?",
+                    (new_description, new_tenant_ids, new_widget_config_json, new_llm_config_json, now, name),
                 )
                 conn.commit()
 
@@ -125,6 +147,8 @@ class AgentStore:
                     "name": name,
                     "description": new_description,
                     "tenant_ids": new_tenant_ids_list,
+                    "widget_config": _parse_config(_unpack_json(new_widget_config)),
+                    "llm_config": _parse_config(_unpack_json(new_llm_config)),
                     "created_at": existing["created_at"],
                     "updated_at": now,
                 }
@@ -149,6 +173,40 @@ class AgentStore:
             "name": row["name"],
             "description": row["description"],
             "tenant_ids": json.loads(row["tenant_ids"]),
+            "widget_config": _parse_config(row["widget_config"]),
+            "llm_config": _parse_config(row["llm_config"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
+
+
+# ── helpers ──
+
+
+def _json_or_none(val: Any) -> str | None:
+    """Serialize a dict to a JSON string, or None if null/empty."""
+    if val is None:
+        return None
+    if isinstance(val, str):
+        return val  # already serialized
+    s = json.dumps(val, ensure_ascii=False)
+    return s if s != 'null' else None
+
+
+def _unpack_json(val: Any) -> Any:
+    """Deserialize a JSON string if it's a string, otherwise pass through."""
+    if isinstance(val, str):
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return val
+
+
+def _parse_config(val: Any) -> dict | None:
+    """Parse a config field (JSON string or None) into a dict or None."""
+    if val is None:
+        return None
+    if isinstance(val, dict):
+        return val
+    return _unpack_json(val)
