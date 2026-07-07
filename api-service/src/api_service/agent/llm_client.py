@@ -6,7 +6,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import litellm
 from litellm import CustomStreamWrapper
@@ -15,6 +15,46 @@ from litellm.types.utils import ModelResponse
 from demo.settings import settings
 
 logger = logging.getLogger("api_service.agent.llm_client")
+
+
+# ── Protocol — formal contract for structural subtyping ──────────────────────
+
+
+@runtime_checkable
+class LLMClientProtocol(Protocol):
+    """Protocol defining the LLM client interface.
+
+    Any class that provides these methods is structurally compatible
+    — no need to inherit or register.  This makes it trivial to
+    substitute mocks in tests or swap the implementation entirely
+    (e.g. OpenAI direct API, Anthropic direct API) without touching
+    callers.
+    """
+
+    model: str
+    api_base: str | None
+    enable_thinking: bool
+
+    async def stream_completion(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        stream: bool = True,
+    ) -> AsyncIterator[tuple[str | None, dict[str, Any] | None]]:
+        """Stream an LLM completion.
+
+        Yields (token, None) for each emitted token and
+        (None, final_message) exactly once when the response is complete.
+        """
+        ...
+
+    async def get_final_message(
+        self, messages: list[dict[str, Any]]
+    ) -> AsyncIterator[str]:
+        """Non-streaming fallback: yield tokens of the final answer."""
+        ...
+
+    last_final_message: dict[str, Any] | None
 
 
 @dataclass(slots=True)

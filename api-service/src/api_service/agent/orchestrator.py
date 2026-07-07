@@ -1,71 +1,51 @@
-"""Main agent orchestrator that coordinates LLM, MCP, and conversation."""
+"""Main agent orchestrator — thin coordinator that wires handlers together.
+
+Responsibility
+--------------
+Drive a single conversation turn: build context, loop through LLM →
+possible tool calls → LLM again, emit events, handle fallback.
+
+It delegates every specialised concern to dedicated modules (handlers)
+and only owns the *sequence* of steps and the loop termination logic.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
-import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
-from api_service.backlog import backlog
 from demo.settings import settings
 
 from .conversation import ConversationManager
-from .llm_client import LLMClient, create_client
-from .mcp_client import MCPClient, ToolResult
+from .event_stream import format_sse_event, unstreamed_suffix
+from .fallback_handler import FallbackHandler
+from .llm_client import LLMClient, LLMClientProtocol, create_client
+from .llm_handler import LLMHandler
+from .mcp_client import MCPClient
+from .prompts import SYSTEM_PROMPT
+from .tool_handler import ToolHandler
 from .tool_parser import ToolCallParser
+from .token_estimator import estimate_tokens
+from .turn_context import TurnContext
 from .types import (
-    AgentEventData,
-    EventType,
+    AgentEvent,
     ErrorEventData,
-    FinalEventData,
-    ParsedToolCall,
     SessionId,
-    StatusEventData,
-    TokenEventData,
-    ToolCallEventData,
-    ToolResultEventData,
-    TurnId,
-    TurnMessages,
 )
+
+from api_service.backlog import backlog
 
 logger = logging.getLogger("api_service.agent.orchestrator")
 
 
-# System prompt for the agent
-SYSTEM_PROMPT = """
-Ты университетский ассистент с доступом к базе данных через MCP-инструменты.
-
-КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА:
-1. Ты НЕ знаешь никаких данных о студентах, расписании, оценках, преподавателях или документах без инструментов.
-2. При любом вопросе о данных университета сначала используй MCP-инструмент.
-3. Не выдумывай ответ из памяти.
-4. Если вопрос общий — отвечай кратко и по делу.
-
-ПРАВИЛА РАБОТЫ С TOOL RESULTS:
-5. Когда tool вернул данные — ОБЯЗАТЕЛЬНО используй их в ответе. Если tool вернул запись студента/оценку/расписание — выведи эти данные пользователю, не говори «не найдено».
-6. Если tool вернул `{"ok": true, "data": null}` — только тогда записи нет. Если `data` — объект/массив — запись есть, извлеки данные.
-7. Не повторяй вызов того же tool с теми же аргументами если уже получил ответ.
-
-ПРАВИЛА ОТВЕТА:
-- Отвечай на языке пользователя, по умолчанию используй русский.
-- Если данных нет — прямо скажи об этом.
-- Если не понял запрос — уточни.
-""".strip()
-
-
-@dataclass(slots=True)
-class AgentEvent:
-    """Event emitted by the agent during processing."""
-
-    type: EventType
-    data: AgentEventData
-
-
 class LLMAgent:
-    """Main agent that orchestrates LLM, MCP, and conversation management."""
+    """Thin orchestrator that wires handlers into a conversation turn loop.
+
+    Components are injected in ``__init__`` (with defaults for production)
+    so tests can substitute mocks freely.
+    """
 
     def __init__(
         self,
@@ -73,29 +53,43 @@ class LLMAgent:
         mcp_client: MCPClient | None = None,
         conversation_manager: ConversationManager | None = None,
     ) -> None:
-        """
-        Initialize the agent with optional component overrides for testing.
-
-        Args:
-            llm_client: LLM client for model interactions
-            mcp_client: MCP client for tool interactions
-            conversation_manager: Manager for conversation history
-        """
-        # Initialize components
-        self.llm_client = llm_client or create_client()
+        # ── Core components ─────────────────────────────────────────────
+        self.llm_client: LLMClientProtocol = llm_client or create_client()
         self.mcp_client = mcp_client or MCPClient()
         self.conversation_manager = conversation_manager or ConversationManager()
         self.tool_parser = ToolCallParser()
 
-        # Configuration from settings
+        # ── Handlers (wired with injected components) ──────────────────
+        self._llm_handler = LLMHandler(self.llm_client, self.tool_parser)
+        self._tool_handler = ToolHandler(self.mcp_client, self.conversation_manager)
+        self._fallback_handler = FallbackHandler(
+            self.llm_client, self.conversation_manager
+        )
+
+        # ── Settings ──────────��────────────────────────────────────────
         self.max_iterations = settings.agent_max_iterations
         self.max_empty_rounds = settings.agent_max_empty_rounds
         self.max_turn_tokens = settings.agent_max_turn_tokens
 
+    # ── Public entry points ────────────────────��─────────────────────────
+
+    def create_per_request_llm(self, llm_config: dict | None = None) -> LLMClient:
+        """Create a per-request LLM client from per-agent config.
+
+        Allows each request to use a different model/provider without
+        recreating the entire orchestrator.
+        """
+        if llm_config:
+            return create_client(llm_config)
+        return self.llm_client
+
     async def stream_answer(
         self, user_message: str, session_id: SessionId = "default"
     ) -> AsyncIterator[str]:
-        """Backward-compatible token stream for the existing server.py."""
+        """Backward-compatible token stream (plain strings, no SSE).
+
+        Used by ``server.py`` before the event-stream API was added.
+        """
         streamed_text = ""
         async for event in self.stream_events(user_message, session_id=session_id):
             if event.type == "token":
@@ -104,515 +98,66 @@ class LLMAgent:
                 yield token
             elif event.type == "final":
                 content = (
-                    event.data.get("content") if isinstance(event.data, dict) else None
+                    event.data.get("content")
+                    if isinstance(event.data, dict)
+                    else None
                 )
                 if content:
-                    suffix = self._unstreamed_suffix(streamed_text, str(content))
+                    suffix = unstreamed_suffix(streamed_text, str(content))
                     if suffix:
                         yield suffix
 
     async def stream_sse(
         self, user_message: str, session_id: SessionId = "default"
     ) -> AsyncIterator[str]:
-        """Stream Server-Sent Events."""
+        """Stream Server-Sent Events (legacy compatibility)."""
         async for event in self.stream_events(user_message, session_id=session_id):
-            yield self._format_sse_event(event)
-
-    def create_per_request_llm(self, llm_config: dict | None = None) -> LLMClient:
-        """Create a per-request LLM client from per-agent config.
-        
-        This allows each request to use a different model/provider
-        without recreating the entire orchestrator.
-        """
-        if llm_config:
-            return create_client(llm_config)
-        return self.llm_client
+            yield format_sse_event(event)
 
     async def stream_events(
-        self, user_message: str, session_id: SessionId = "default", tenant_ids: list[str] | None = None,
-        llm_config: dict | None = None, system_prompt: str | None = None
+        self,
+        user_message: str,
+        session_id: SessionId = "default",
+        tenant_ids: list[str] | None = None,
+        llm_config: dict | None = None,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[AgentEvent]:
-        """Stream agent events (tokens, tool calls, results, etc.).
-        
+        """Stream agent events: tokens, tool calls, tool results, final.
+
+        This is the main entry point for new code.
+
         Args:
-            user_message: User's message text
-            session_id: Session identifier
-            tenant_ids: Optional list of tenant IDs
-            llm_config: Optional per-agent LLM config (provider, model, api_key, etc.)
-            system_prompt: Optional per-agent system prompt override
+            user_message:  Raw text from the user.
+            session_id:    Conversation session identifier.
+            tenant_ids:    Scopes the MCP session to one or more tenants.
+            llm_config:    Overrides the global LLM config for this request.
+            system_prompt: Overrides the global system prompt.
         """
         session_id = self.conversation_manager.normalize_session_id(session_id)
         logger.info(
-            "[AGENT] User message for session %s (tenants: %s): %s...",
+            "[AGENT] User message for session %s (tenants: %s): %s",
             session_id,
             tenant_ids or ["(default)"],
             user_message[:100],
         )
 
-        # Use per-request LLM client if per-agent config provided
-        request_llm = self.create_per_request_llm(llm_config) if llm_config else self.llm_client
+        # Use per-request LLM client if per-agent config provided.
+        request_llm = (
+            self.create_per_request_llm(llm_config) if llm_config else self.llm_client
+        )
 
         lock = self.conversation_manager.get_session_lock(session_id)
         async with lock:
-            async for event in self._run_turn(user_message, session_id, tenant_ids, request_llm=request_llm, system_prompt=system_prompt):
-                yield event
-
-    async def _run_turn(
-        self, user_message: str, session_id: SessionId, tenant_ids: list[str] | None = None,
-        request_llm: LLMClient | None = None, system_prompt: str | None = None
-    ) -> AsyncIterator[AgentEvent]:
-        """Execute a single conversation turn with multiple iterations."""
-        # Use per-request LLM if provided
-        llm = request_llm or self.llm_client
-        # Build initial messages (async — sync SQLite через to_thread)
-        messages: list[dict[str, Any]] = await self._build_messages_raw(
-            user_message, session_id, system_prompt=system_prompt
-        )
-        turn_messages: list[dict[str, Any]] = [
-            {"role": "user", "content": user_message}
-        ]
-
-        turn_id: TurnId = backlog.turn_start(session_id, user_message)
-
-        try:
-            async with self.mcp_client.get_session(tenant_ids=tenant_ids) as session:
-                tools: list[dict[str, Any]] = await self.mcp_client.list_tools(session)
-                logger.info(
-                    "[AGENT] Available tools: %s",
-                    [t.get("function", {}).get("name") for t in tools],
-                )
-
-                empty_rounds = 0
-                is_finished = False
-
-                for iteration in range(self.max_iterations):
-                    iteration_empty_rounds = empty_rounds
-                    iteration_completed = False
-
-                    async for event in self._handle_iteration(
-                        iteration,
-                        session,
-                        session_id,
-                        turn_id,
-                        messages,
-                        turn_messages,
-                        tools,
-                        empty_rounds,
-                    ):
-                        if event.type == "final":
-                            is_finished = True
-                            iteration_completed = True
-                        elif event.type == "tool_call":
-                            iteration_completed = True
-                        elif event.type == "tool_result":
-                            iteration_completed = True
-                        elif event.type == "status":
-                            data = event.data
-                            if (
-                                isinstance(data, dict)
-                                and data.get("phase") == "tool_calls"
-                            ):
-                                iteration_completed = True
-                            elif (
-                                isinstance(data, dict)
-                                and data.get("phase") == "empty_round"
-                            ):
-                                empty_round_value = data.get("empty_rounds")
-                                if isinstance(empty_round_value, int):
-                                    iteration_empty_rounds = empty_round_value
-                        yield event
-
-                    empty_rounds = 0 if iteration_completed else iteration_empty_rounds
-
-                    # Check if we should stop
-                    if is_finished or empty_rounds >= self.max_empty_rounds:
-                        break
-
-                    # Token budget check: прервать turn если messages уже близки
-                    # к context window модели. Модель всё равно не сможет обработать.
-                    if self._estimate_tokens(messages) >= self.max_turn_tokens:
-                        logger.warning(
-                            "[AGENT] Turn token budget exceeded (%d ≥ %d) — stopping turn",
-                            self._estimate_tokens(messages),
-                            self.max_turn_tokens,
-                        )
-                        break
-
-                # Fallback only when no final answer was produced.
-                if not is_finished:
-                    async for event in self._run_fallback(
-                        messages,
-                        turn_messages,
-                        session_id,
-                        is_finished,
-                    ):
-                        yield event
-
-        except Exception as exc:
-            backlog.error(session_id, turn_id, self.max_iterations, str(exc))
-            yield AgentEvent("error", ErrorEventData(message=str(exc)))
-
-    async def _handle_iteration(
-        self,
-        iteration: int,
-        session: Any,
-        session_id: SessionId,
-        turn_id: TurnId,
-        messages: list[dict[str, Any]],
-        turn_messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        empty_rounds: int,
-    ) -> AsyncIterator[AgentEvent]:
-        """Handle a single iteration of the agent loop."""
-        logger.info(
-            "[AGENT] Iteration %s/%s - calling model...",
-            iteration + 1,
-            self.max_iterations,
-        )
-        backlog.model_request(session_id, turn_id, iteration, messages, tools)
-
-        # Call LLM and stream tokens
-        final_message: dict[str, Any] | None = None
-        async for token, final in self.llm_client.stream_completion(messages, tools):
-            if token:
-                yield AgentEvent("token", TokenEventData(data=token))
-            elif final:
-                final_message = final
-
-        # If no final message, try fallback from previous
-        if final_message is None:
-            final_message = self.llm_client.last_final_message
-
-        # Handle empty response
-        if final_message is None:
-            new_empty_rounds = empty_rounds + 1
-            backlog.empty_round(
+            async for event in self._run_turn(
+                user_message,
                 session_id,
-                turn_id,
-                iteration,
-                "",
-                messages,
-            )
-            yield AgentEvent(
-                "status",
-                StatusEventData(
-                    phase="empty_round",
-                    iteration=iteration,
-                    empty_rounds=new_empty_rounds,
-                ),
-            )
-            return
-
-        # Log model response
-        usage = final_message.get("_usage")
-        _ = final_message.pop("_usage", None)  # убираем перед append в messages
-        backlog.model_response(
-            session_id,
-            turn_id,
-            iteration,
-            final_message,
-            duration_ms=0,
-            token_usage=usage,
-        )
-
-        # Extract components from final message
-        reasoning: str | None = final_message.get("reasoning_content")
-        tool_calls: list[ParsedToolCall] = self.tool_parser.extract_tool_calls(
-            final_message
-        )
-        content: str = (final_message.get("content") or "").strip()
-
-        # Log reasoning if present
-        if reasoning:
-            backlog.empty_round(session_id, turn_id, iteration, reasoning, messages)
-
-        # Handle tool calls
-        if tool_calls:
-            async for event in self._handle_tool_calls(
-                tool_calls,
-                session,
-                session_id,
-                turn_id,
-                iteration,
-                messages,
-                turn_messages,
-                final_message,
+                tenant_ids,
+                request_llm=request_llm,
+                system_prompt=system_prompt,
             ):
                 yield event
-            return  # Continue to next iteration
 
-        # Handle final content
-        if content:
-            async for event in self._handle_final_content(
-                final_message,
-                content,
-                messages,
-                turn_messages,
-                session_id,
-            ):
-                yield event
-            return  # We're done
-
-        # Handle partial response (no content, no tool calls)
-        async for event in self._handle_partial_response(
-            reasoning,
-            iteration,
-            empty_rounds,
-            session_id,
-            turn_id,
-            messages,
-        ):
-            yield event
-
-    async def _handle_tool_calls(
-        self,
-        tool_calls: list[ParsedToolCall],
-        session: Any,
-        session_id: SessionId,
-        turn_id: TurnId,
-        iteration: int,
-        messages: list[dict[str, Any]],
-        turn_messages: list[dict[str, Any]],
-        final_message: dict[str, Any],
-    ) -> AsyncIterator[AgentEvent]:
-        """Handle tool calls from LLM response."""
-        yield AgentEvent(
-            "status",
-            StatusEventData(
-                phase="tool_calls",
-                iteration=iteration,
-                count=len(tool_calls),
-            ),
-        )
-
-        # Format tool calls for model history
-        final_message["tool_calls"] = self.tool_parser.format_for_model(tool_calls)
-        messages.append(final_message)
-        turn_messages.append(final_message)
-
-        # Process each tool call
-        for tool_call in tool_calls:
-            name: str = tool_call["name"]
-            arguments: dict[str, Any] = tool_call["arguments"]
-            tool_call_id: str = (
-                tool_call.get("id") or f"call_{name}_{uuid.uuid4().hex[:8]}"
-            )
-
-            # Log tool call
-            backlog.tool_call(session_id, turn_id, iteration, name, arguments)
-            yield AgentEvent(
-                "tool_call",
-                ToolCallEventData(
-                    id=tool_call_id,
-                    name=name,
-                    arguments=arguments,
-                ),
-            )
-
-            # Call the tool with per-tool error recovery — один сбой не убивает turn.
-            # Модель получит ToolResult с ошибкой и сможет переформулировать запрос.
-            try:
-                tool_result: ToolResult = await self.mcp_client.call_tool(
-                    session, name, arguments
-                )
-                # DETAILED LOGGING
-                logger.info("[ORCHESTRATOR] Tool %s returned OK=%s, ContentLength=%d", 
-                            name, tool_result.ok, len(tool_result.tool_content))
-                logger.debug("[ORCHESTRATOR] Tool %s full content: %s", name, tool_result.tool_content)
-            except Exception as exc:
-                logger.exception("[ORCHESTRATOR] Tool call '%s' failed with exception", name)
-                tool_result = ToolResult(
-                    tool_content=json.dumps({"error": True, "message": str(exc)}),
-                    reminder=(
-                        f"Инструмент '{name}' завершился ошибкой: {exc}. "
-                        "Попробуй другой инструмент или ответь пользователю, что сервис временно недоступен."
-                    ),
-                    ok=False,
-                    error=str(exc),
-                )
-            backlog.tool_result(
-                session_id, turn_id, iteration, name, tool_result.tool_content,
-                duration_ms=0,
-            )
-
-            yield AgentEvent(
-                "tool_result",
-                ToolResultEventData(
-                    id=tool_call_id,
-                    name=name,
-                    result=tool_result.tool_content,
-                ),
-            )
-
-            # Post-tool reminder is logged but no longer added to LLM messages 
-            # to avoid breaking strict role sequence (Mistral/Claude requirements).
-            if tool_result.reminder:
-                logger.info("[ORCHESTRATOR] Tool reminder (logged only): %s", tool_result.reminder)
-
-            tool_message: dict[str, Any] = {
-                "role": "tool",
-                "content": tool_result.tool_content,
-                "tool_call_id": tool_call_id,
-                "name": name,
-            }
-            logger.info("[ORCHESTRATOR] Adding tool message to history. Role=tool, ContentLength=%d", len(tool_result.tool_content))
-            messages.append(tool_message)
-            turn_messages.append(tool_message)
-
-    async def _handle_final_content(
-        self,
-        final_message: dict[str, Any],
-        content: str,
-        messages: list[dict[str, Any]],
-        turn_messages: list[dict[str, Any]],
-        session_id: SessionId,
-    ) -> AsyncIterator[AgentEvent]:
-        """Handle final content response from LLM."""
-        final_message["content"] = content
-        messages.append(final_message)
-        turn_messages.append(final_message)
-        await self.conversation_manager.aremember_turn(
-            session_id, cast(TurnMessages, turn_messages)
-        )
-
-        yield AgentEvent("final", FinalEventData(content=content))
-
-    async def _handle_partial_response(
-        self,
-        reasoning: str | None,
-        iteration: int,
-        empty_rounds: int,
-        session_id: SessionId,
-        turn_id: TurnId,
-        messages: list[dict[str, Any]],
-    ) -> AsyncIterator[AgentEvent]:
-        """Handle partial response (no content, no tool calls)."""
-        new_empty_rounds = empty_rounds + 1
-
-        yield AgentEvent(
-            "status",
-            StatusEventData(
-                phase="empty_round",
-                iteration=iteration,
-                empty_rounds=new_empty_rounds,
-            ),
-        )
-
-        # Add reasoning to history if present
-        if reasoning:
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": reasoning,
-                }
-            )
-
-        # Add system prompt to encourage action
-        messages.append(
-            {
-                "role": "system",
-                "content": (
-                    "Верни только tool_calls или финальный ответ. "
-                    "Опирайся на предыдущие сообщения и reasoning_content и действуй"
-                ),
-            }
-        )
-
-    async def _run_fallback(
-        self,
-        messages: list[dict[str, Any]],
-        turn_messages: list[dict[str, Any]],
-        session_id: SessionId,
-        is_finished: bool = False,
-    ) -> AsyncIterator[AgentEvent]:
-        """Run fallback stream when no final answer was produced.
-
-        Обрезает messages до system prompt + 2 последних обмена,
-        чтобы дать модели шанс на свежем контексте вместо повторения ошибки.
-        """
-        final_parts: list[str] = []
-        fallback_messages = self._trim_for_fallback(messages)
-
-        async for token in self.llm_client.get_final_message(fallback_messages):
-            final_parts.append(token)
-            yield AgentEvent("token", TokenEventData(data=token))
-
-        if not final_parts and not is_finished:
-            fallback_msg = "Извините, модель завершила работу без ответа. Попробуйте уточнить запрос."
-            final_parts.append(fallback_msg)
-            yield AgentEvent("token", TokenEventData(data=fallback_msg))
-
-        turn_messages.append({"role": "assistant", "content": "".join(final_parts)})
-        await self.conversation_manager.aremember_turn(
-            session_id, cast(TurnMessages, turn_messages)
-        )
-
-    async def _build_messages_raw(
-        self, user_message: str, session_id: SessionId, system_prompt: str | None = None
-    ) -> list[dict[str, Any]]:
-        """Build the raw messages list for the LLM.
-
-        History fetch идёт через asyncio.to_thread — sync SQLite не блокирует event loop.
-        
-        Args:
-            user_message: User's message text
-            session_id: Session identifier
-            system_prompt: Optional per-agent system prompt (overrides global)
-        """
-        history: list[dict[str, Any]] = await self.conversation_manager.aget_history_messages(
-            session_id
-        )
-        prompt = system_prompt if system_prompt else SYSTEM_PROMPT
-        return [
-            {"role": "system", "content": prompt},
-            *history,
-            {"role": "user", "content": user_message},
-        ]
-
-    @staticmethod
-    def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
-        """Fast heuristic token estimate: chars / 3.5 (≈ рус/eng average).
-
-        Это не точный подсчёт (нет tokenizer'а), но достаточен для guard
-        против выхода за context window. Защита от двойного счёта system
-        prompt (он встроен в messages): 8000 токенов ≈ 28000 chars.
-        """
-        total_chars = sum(
-            len(json.dumps(m, ensure_ascii=False, default=str))
-            for m in messages
-        )
-        return int(total_chars / 3.5)
-
-    @staticmethod
-    def _trim_for_fallback(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Обрезать messages для fallback: system prompt + последние 2 обмена.
-
-        Обмен = user/assistant/tool/system группа. В fallback-сценарии
-        модель исчерпала контекст — переотправка всех messages повторяет ошибку.
-        Свежий срез даёт модели шанс ответить.
-        """
-        if len(messages) <= 3:
-            return list(messages)
-        # Первый элемент — system prompt, сохраняем.
-        sys_msg = messages[0]
-        # Последние 4 сообщения (~2 обмена с reminders).
-        tail = messages[-4:]
-        return [sys_msg] + list(tail)
-
-    @staticmethod
-    def _format_sse_event(event: AgentEvent) -> str:
-        """Format an event as Server-Sent Event."""
-        payload = json.dumps(event.data, ensure_ascii=False)
-        return f"event: {event.type}\ndata: {payload}\n\n"
-
-    @staticmethod
-    def _unstreamed_suffix(streamed_text: str, final_text: str) -> str:
-        """Get the suffix of final_text that wasn't streamed."""
-        if not streamed_text:
-            return final_text
-        if final_text.startswith(streamed_text):
-            return final_text[len(streamed_text) :]
-        return ""
+    # ── Health ──────────���─────────────────────────────────────────────────
 
     async def health(self) -> dict[str, Any]:
         """Get agent health status."""
@@ -623,6 +168,99 @@ class LLMAgent:
             "thinking_enabled": self.llm_client.enable_thinking,
         }
 
+    # ── Internal: turn loop ──────────────────────────────────────────────
 
-# Default agent instance
+    async def _run_turn(
+        self,
+        user_message: str,
+        session_id: SessionId,
+        tenant_ids: list[str] | None = None,
+        request_llm: LLMClientProtocol | None = None,
+        system_prompt: str | None = None,
+    ) -> AsyncIterator[AgentEvent]:
+        """Execute a single conversation turn with multiple iterations."""
+        # ── 1. Build initial context ────────��───────────────────────────
+        effective_prompt = system_prompt or SYSTEM_PROMPT
+
+        ctx = await TurnContext.build(
+            user_message=user_message,
+            session_id=session_id,
+            system_prompt=effective_prompt,
+            conversation_manager=self.conversation_manager,
+        )
+        ctx.turn_id = backlog.turn_start(session_id, user_message)
+
+        # Re-wire handlers if a per-request LLM was provided.
+        if request_llm and request_llm is not self.llm_client:
+            self._llm_handler = LLMHandler(request_llm, self.tool_parser)
+            self._fallback_handler = FallbackHandler(
+                request_llm, self.conversation_manager
+            )
+
+        try:
+            async with self.mcp_client.get_session(
+                tenant_ids=tenant_ids
+            ) as session:
+                # ── 2. Discover tools ──────────────────────────────────
+                ctx.tools = await self.mcp_client.list_tools(session)
+                logger.info(
+                    "[AGENT] Available tools: %s",
+                    [t.get("function", {}).get("name") for t in ctx.tools],
+                )
+
+                # ── 3. Agent loop ──────────────────────────────────────
+                for iteration in range(self.max_iterations):
+                    ctx.iteration = iteration
+
+                    # 3a. Call LLM → stream tokens + determine outcome
+                    async for event in self._llm_handler.stream_and_parse(ctx):
+                        yield event
+
+                    # 3b. Dispatch based on outcome
+                    if ctx.outcome == "final" or ctx.is_finished:
+                        await self.conversation_manager.aremember_turn(
+                            ctx.session_id,
+                            ctx.turn_messages,  # type: ignore[arg-type]
+                        )
+                        return  # success
+
+                    if ctx.outcome == "tool_calls":
+                        async for event in self._tool_handler.execute(
+                            ctx.pending_tool_calls,
+                            session,
+                            ctx,
+                        ):
+                            yield event
+                        continue  # next iteration
+
+                    # 3c. Empty-round check
+                    if ctx.empty_rounds >= self.max_empty_rounds:
+                        logger.info(
+                            "[AGENT] Empty rounds limit hit (%d) — stopping",
+                            ctx.empty_rounds,
+                        )
+                        break
+
+                    # 3d. Token budget check
+                    if estimate_tokens(ctx.messages) >= self.max_turn_tokens:
+                        logger.warning(
+                            "[AGENT] Turn token budget exceeded (%d ≥ %d)",
+                            estimate_tokens(ctx.messages),
+                            self.max_turn_tokens,
+                        )
+                        break
+
+                # ── 4. Fallback (no final answer) ───────────────────────
+                if not ctx.is_finished:
+                    async for event in self._fallback_handler.run(
+                        ctx, was_finished=False
+                    ):
+                        yield event
+
+        except Exception as exc:
+            backlog.error(session_id, ctx.turn_id, ctx.iteration, str(exc))
+            yield AgentEvent("error", ErrorEventData(message=str(exc)))
+
+
+# ── Default singleton ─────────────────────────────────────────────────────
 agent = LLMAgent()

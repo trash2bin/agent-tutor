@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Literal, TypedDict, NotRequired
 
 # Event types for AgentEvent
@@ -199,6 +200,17 @@ AgentEventData = (
     | ErrorEventData
     | dict[str, Any]  # Fallback for any other data
 )
+
+
+# AgentEvent — the unit of output from the orchestrator
+
+
+@dataclass(slots=True)
+class AgentEvent:
+    """Event emitted by the agent during processing."""
+
+    type: EventType
+    data: AgentEventData
 
 
 # Session and turn types
