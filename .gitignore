@@ -17,6 +17,7 @@ mcp-gateway/main
 /server
 /seed-cli
 *.exe
+admin-dashboard/bin/*
 
 # Local config / dev artifacts
 .claude/
