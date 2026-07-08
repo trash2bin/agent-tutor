@@ -148,7 +148,9 @@ func introspectTable(ctx context.Context, database Conn, name string) (Table, er
 	tbl := Table{Name: name}
 
 	// PRAGMA table_info: cid, name, type, notnull, dflt_value, pk.
-	colRows, err := database.QueryContext(ctx, "PRAGMA table_info("+quoted+")")
+	// PRAGMA в SQLite не принимает связанные параметры (bound parameters),
+	// поэтому имя таблицы экранируется через QuoteIdentifier.
+	colRows, err := database.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", quoted))
 	if err != nil {
 		return tbl, fmt.Errorf("table_info: %w", err)
 	}
@@ -194,7 +196,8 @@ func introspectTable(ctx context.Context, database Conn, name string) (Table, er
 	// PRAGMA foreign_key_list: id, seq, table, from, to, on_update, on_delete, match.
 	// Строки группируются по id: каждая группа — один FK-constraint,
 	// строки внутри упорядочены по seq и формируют композитный ключ.
-	fkRows, err := database.QueryContext(ctx, "PRAGMA foreign_key_list("+quoted+")")
+	// PRAGMA не поддерживает bound parameters — имя экранируется через QuoteIdentifier.
+	fkRows, err := database.QueryContext(ctx, fmt.Sprintf("PRAGMA foreign_key_list(%s)", quoted))
 	if err != nil {
 		return tbl, fmt.Errorf("foreign_key_list: %w", err)
 	}

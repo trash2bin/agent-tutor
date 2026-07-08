@@ -24,7 +24,9 @@ func StatsHandler(c *Context, cfg *config.Config) http.HandlerFunc {
 
 			sql := fmt.Sprintf("SELECT COUNT(*) FROM %s", c.Adapter.QuoteIdentifier(entity.Table))
 			if counter.Filter != "" {
-				sql += " WHERE " + counter.Filter
+				// counter.Filter приходит из конфига (config.json), не от HTTP-запроса.
+				// WHERE-фрагмент проходит runtime-валидацию config.schema.json при старте.
+				sql = fmt.Sprintf("%s WHERE %s", sql, counter.Filter)
 			}
 
 			rows, err := c.DB.QueryContext(r.Context(), sql)

@@ -80,9 +80,13 @@ app = FastAPI(
     swagger_ui_parameters={"tryItOutEnabled": True},
 )
 
+# CORS middleware
+# allow_origins from env: comma-separated, or "*" for all (dev only)
+cors_origins_raw = os.environ.get("CORS_ALLOW_ORIGINS", "*")
+cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()] or ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
