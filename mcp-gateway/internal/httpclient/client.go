@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -91,19 +92,20 @@ func (c *Client) Call(ctx context.Context, endpoint string, params map[string]an
 	// Separate path params from query params.
 	// Path params: substitute {param} placeholders in URL.
 	// Query params: append as ?key=value after all path substitutions.
-	queryParts := make([]string, 0)
+	// All values are URL-escaped to prevent injection via URL (SQL injection, path traversal).
+	query := url.Values{}
 
 	for k, v := range params {
 		placeholder := "{" + k + "}"
 		if strings.Contains(u, placeholder) {
-			u = strings.ReplaceAll(u, placeholder, fmt.Sprintf("%v", v))
+			u = strings.ReplaceAll(u, placeholder, url.PathEscape(fmt.Sprintf("%v", v)))
 		} else {
-			queryParts = append(queryParts, fmt.Sprintf("%s=%v", k, v))
+			query.Set(k, fmt.Sprintf("%v", v))
 		}
 	}
 
-	if len(queryParts) > 0 {
-		u += "?" + strings.Join(queryParts, "&")
+	if len(query) > 0 {
+		u += "?" + query.Encode()
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)

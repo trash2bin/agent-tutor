@@ -114,9 +114,14 @@ func (s *Server) Router() chi.Router {
 // ── Middleware ──
 
 // corsMiddleware разрешает CORS для dev-режима.
+// Origin читается из CORS_ALLOW_ORIGINS env var (по умолчанию "*" для обратной совместимости).
 func corsMiddleware(next http.Handler) http.Handler {
+	origin := os.Getenv("CORS_ALLOW_ORIGINS")
+	if origin == "" {
+		origin = "*"
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == http.MethodOptions {
@@ -167,6 +172,17 @@ func authMiddleware(token string) func(http.Handler) http.Handler {
 
 func (s *Server) staticHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Security headers for all static responses
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; "+
+				"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "+
+				"style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data:; "+
+				"connect-src 'self'; "+
+				"frame-ancestors 'none';",
+		)
+
 		// Root → index.html
 		if r.URL.Path == "/" {
 			data, err := staticFS.ReadFile("static/index.html")

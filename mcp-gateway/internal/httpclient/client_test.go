@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -219,6 +220,125 @@ func TestCall_MixedPathAndQueryParams(t *testing.T) {
 	}
 
 	_, err := c.Call(context.Background(), "/students/{id}/grades", map[string]any{"id": "42", "discipline_id": "d1"})
+	if err != nil {
+		t.Fatalf("Call() returned error: %v", err)
+	}
+}
+
+func TestCall_PathParamEscaping(t *testing.T) {
+	// SQL injection attempt via path param should have quotes escaped on the wire.
+	// url.PathEscape escapes ' → %27 and space → %20 but leaves = (RFC-safe in path).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uri := r.URL.RequestURI()
+		// Single quotes must be escaped — this is the SQL injection vector
+		if strings.Contains(uri, "'") {
+			t.Errorf("URI contains unescaped single quote, SQL injection: %q", uri)
+		}
+		// Decoded path must round-trip to original
+		if r.URL.Path != "/students/abc' OR '1'='1" {
+			t.Errorf("decoded path = %q, want original input", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		baseURL: srv.URL,
+		http:    srv.Client(),
+	}
+
+	_, err := c.Call(context.Background(), "/students/{id}", map[string]any{"id": "abc' OR '1'='1"})
+	if err != nil {
+		t.Fatalf("Call() returned error: %v", err)
+	}
+}
+
+func TestCall_PathParamEscaping_Slash(t *testing.T) {
+	// Path traversal attempt via path param should be URL-escaped
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uri := r.URL.RequestURI()
+		// ../ must NOT appear in the URI — it should be %2E%2E%2F
+		if strings.Contains(uri, "../") {
+			t.Errorf("URI contains unescaped '../': %q", uri)
+		}
+		// Decoded path must match the original (round-trip safe)
+		if r.URL.Path != "/students/../../secret" {
+			t.Errorf("decoded path = %q, want original input", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		baseURL: srv.URL,
+		http:    srv.Client(),
+	}
+
+	_, err := c.Call(context.Background(), "/students/{id}", map[string]any{"id": "../../secret"})
+	if err != nil {
+		t.Fatalf("Call() returned error: %v", err)
+	}
+}
+
+func TestCall_QueryParamEscaping(t *testing.T) {
+	// SQL injection via query param should be URL-escaped
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw := r.URL.RawQuery
+		// Raw query must not contain raw quotes or spaces
+		if strings.Contains(raw, "'") {
+			t.Errorf("raw query contains unescaped quote: %q", raw)
+		}
+		if strings.Contains(raw, " ") {
+			t.Errorf("raw query contains unescaped space: %q", raw)
+		}
+		// Decoded values must match the original
+		vals := r.URL.Query()
+		if vals.Get("name") != "Robert'; DROP TABLE Students;--" {
+			t.Errorf("query name = %q, want injection payload", vals.Get("name"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		baseURL: srv.URL,
+		http:    srv.Client(),
+	}
+
+	_, err := c.Call(context.Background(), "/students", map[string]any{"name": "Robert'; DROP TABLE Students;--"})
+	if err != nil {
+		t.Fatalf("Call() returned error: %v", err)
+	}
+}
+
+func TestCall_QueryParamEscaping_SpecialChars(t *testing.T) {
+	// Special chars in multi query params
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vals := r.URL.Query()
+		if vals.Get("q") != "a&b=c" {
+			t.Errorf("query q = %q, want 'a&b=c'", vals.Get("q"))
+		}
+		if vals.Get("x") != "1+1=2" {
+			t.Errorf("query x = %q, want '1+1=2'", vals.Get("x"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		baseURL: srv.URL,
+		http:    srv.Client(),
+	}
+
+	_, err := c.Call(context.Background(), "/search", map[string]any{"q": "a&b=c", "x": "1+1=2"})
 	if err != nil {
 		t.Fatalf("Call() returned error: %v", err)
 	}

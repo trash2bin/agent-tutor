@@ -142,12 +142,12 @@ func (rl *adminRateLimiter) Allow() bool {
 
 // AdminRateLimitMiddleware возвращает middleware, ограничивающий частоту запросов
 // token bucket алгоритмом. Параметры читаются из env:
-//   ADMIN_RATE_LIMIT_RPS   — запросов в секунду (default 5)
-//   ADMIN_RATE_LIMIT_BURST — burst размер (default 10)
+//   ADMIN_RATE_LIMIT_RPS   — запросов в секунду (default 20)
+//   ADMIN_RATE_LIMIT_BURST — burst размер (default 50)
 // При превышении лимита возвращает 429 Too Many Requests с Retry-After.
 func AdminRateLimitMiddleware() func(http.Handler) http.Handler {
-	rps := resolveIntEnv("ADMIN_RATE_LIMIT_RPS", 0, 5)
-	burst := resolveIntEnv("ADMIN_RATE_LIMIT_BURST", 0, 10)
+	rps := resolveIntEnv("ADMIN_RATE_LIMIT_RPS", 0, 20)
+	burst := resolveIntEnv("ADMIN_RATE_LIMIT_BURST", 0, 50)
 	rl := newAdminRateLimiter(rps, burst)
 
 	return func(next http.Handler) http.Handler {

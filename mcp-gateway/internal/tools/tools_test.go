@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/agent-tutor/agent-tutor-go/config"
@@ -434,6 +435,137 @@ func TestFieldTypeToParamType(t *testing.T) {
 				t.Errorf("fieldTypeToParamType(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// ════════════════════════════════════════════════════════════════
+// validateArgs tests
+// ════════════════════════════════════════════════════════════════
+
+func TestValidateArgs_RejectsNegativeNumbers(t *testing.T) {
+	params := []config.EndpointParam{
+		{Name: "limit", Type: config.ParamTypeInt},
+	}
+	args := map[string]any{"limit": -1}
+	errs := validateArgs(args, params)
+	if len(errs) == 0 {
+		t.Errorf("validateArgs should reject negative limit=-1, got no errors")
+	}
+}
+
+func TestValidateArgs_RejectsTooLargeNumbers(t *testing.T) {
+	params := []config.EndpointParam{
+		{Name: "limit", Type: config.ParamTypeInt},
+	}
+	args := map[string]any{"limit": 9999999}
+	errs := validateArgs(args, params)
+	if len(errs) == 0 {
+		t.Errorf("validateArgs should reject limit=9999999 (exceeds cap), got no errors")
+	}
+}
+
+func TestValidateArgs_RejectsLongStrings(t *testing.T) {
+	params := []config.EndpointParam{
+		{Name: "query", Type: config.ParamTypeString},
+	}
+	args := map[string]any{"query": strings.Repeat("a", 2000)}
+	errs := validateArgs(args, params)
+	if len(errs) == 0 {
+		t.Errorf("validateArgs should reject string >1000 chars, got no errors")
+	}
+}
+
+func TestValidateArgs_AcceptsValidArgs(t *testing.T) {
+	params := []config.EndpointParam{
+		{Name: "limit", Type: config.ParamTypeInt},
+		{Name: "offset", Type: config.ParamTypeInt},
+		{Name: "query", Type: config.ParamTypeString},
+	}
+	args := map[string]any{
+		"limit":  50,
+		"offset": 0,
+		"query":  "hello",
+	}
+	errs := validateArgs(args, params)
+	if len(errs) > 0 {
+		t.Errorf("validateArgs should accept valid args, got errors: %v", errs)
+	}
+}
+
+func TestValidateArgs_IgnoresUnknownArgs(t *testing.T) {
+	params := []config.EndpointParam{
+		{Name: "limit", Type: config.ParamTypeInt},
+	}
+	args := map[string]any{
+		"limit": 100,
+		"extra": "ignored",
+	}
+	errs := validateArgs(args, params)
+	if len(errs) > 0 {
+		t.Errorf("validateArgs should ignore extra params, got errors: %v", errs)
+	}
+}
+
+func TestValidateArgs_AllowsMaxBoundary(t *testing.T) {
+	params := []config.EndpointParam{
+		{Name: "limit", Type: config.ParamTypeInt},
+	}
+	args := map[string]any{"limit": float64(10000)}
+	errs := validateArgs(args, params)
+	if len(errs) > 0 {
+		t.Errorf("validateArgs should accept limit=10000 (at boundary), got errors: %v", errs)
+	}
+}
+
+func TestValidateArgs_AcceptsZeroLimit(t *testing.T) {
+	params := []config.EndpointParam{
+		{Name: "limit", Type: config.ParamTypeInt},
+	}
+	args := map[string]any{"limit": 0}
+	errs := validateArgs(args, params)
+	if len(errs) > 0 {
+		t.Errorf("validateArgs should accept limit=0, got errors: %v", errs)
+	}
+}
+
+// ════════════════════════════════════════════════════════════════
+// truncateResult tests
+// ════════════════════════════════════════════════════════════════
+
+func TestTruncateResult_ShortString(t *testing.T) {
+	result := "short"
+	truncated := truncateResult(result, 100)
+	if truncated != result {
+		t.Errorf("truncateResult(%q, 100) = %q, want %q", result, truncated, result)
+	}
+}
+
+func TestTruncateResult_LongString(t *testing.T) {
+	prefix := "abcdefghij"
+	result := strings.Repeat(prefix, 1000) // 10000 chars
+	truncated := truncateResult(result, 100)
+	if len(truncated) > 100+100 { // allow some slack for the truncation note
+		t.Errorf("truncateResult length = %d, want around %d", len(truncated), 100)
+	}
+	if !strings.Contains(truncated, "\n\n[Truncated") {
+		t.Errorf("truncateResult should contain truncation note, got: %q", truncated)
+	}
+}
+
+func TestTruncateResult_ExactBoundary(t *testing.T) {
+	// Exactly at limit should not be truncated
+	result := strings.Repeat("x", 100)
+	truncated := truncateResult(result, 100)
+	if truncated != result {
+		t.Errorf("truncateResult should not truncate at exact boundary, got len=%d", len(truncated))
+	}
+}
+
+func TestTruncateResult_EmptyString(t *testing.T) {
+	result := ""
+	truncated := truncateResult(result, 100)
+	if truncated != "" {
+		t.Errorf("truncateResult(%q, 100) = %q, want %q", result, truncated, result)
 	}
 }
 

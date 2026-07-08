@@ -322,7 +322,17 @@ func makeHandler(td toolDef, client *httpclient.Client, tenantID string) server.
 			}
 		}
 
-		// 4. Inject tenantID into context for httpclient
+		// 4. Validate tool arguments before forwarding to data-service.
+		//    Prevents DoS/OOM via negative limits, excessive values, or long strings.
+		if errs := validateArgs(args, td.Params); len(errs) > 0 {
+			msgs := make([]string, len(errs))
+			for i, e := range errs {
+				msgs[i] = e.Error()
+			}
+			return mcp.NewToolResultError(fmt.Sprintf("argument validation failed: %s", strings.Join(msgs, "; "))), nil
+		}
+
+		// 5. Inject tenantID into context for httpclient
 		ctx = context.WithValue(ctx, httpclient.TenantIDKey, actualTenantID)
 
 		result, err := client.Call(ctx, endpoint, args)
@@ -341,8 +351,8 @@ func makeHandler(td toolDef, client *httpclient.Client, tenantID string) server.
 			return mcp.NewToolResultError(fmt.Sprintf("error formatting result: %v", err)), nil
 		}
 
-		resText := string(data)
-		slog.Info("Sending tool result to agent", "tool", td.Name, "content", resText)
+		resText := truncateResult(string(data), MaxResultSize)
+		slog.Info("Sending tool result to agent", "tool", td.Name, "size", len(string(data)), "truncated", len(resText) < len(string(data)))
 		return mcp.NewToolResultText(resText), nil
 	}
 }
@@ -556,6 +566,97 @@ func fieldTypeToParamType(ft config.FieldType) config.ParamType {
 
 // pathParamRe matches {param_name} in URL path patterns.
 var pathParamRe = regexp.MustCompile(`\{(\w+)\}`)
+
+// ── Constants for validation and result size limits ──
+
+const (
+	// MaxNumericParamValue is the maximum allowed value for numeric params.
+	// Prevents DoS/OOM via limit=-1 or limit=9999999.
+	MaxNumericParamValue = 10000
+
+	// MaxStringParamLength is the maximum allowed length for string params.
+	// Prevents huge string injection via MCP tool arguments.
+	MaxStringParamLength = 1000
+
+	// MaxResultSize is the maximum size of a tool result (in characters)
+	// returned to the LLM. Prevents token explosion from large DB results.
+	MaxResultSize = 50000
+)
+
+// validateArgs validates tool arguments against parameter definitions.
+// Returns a list of validation errors (nil/nil if valid).
+// Unknown params (not in definition) are silently ignored.
+func validateArgs(args map[string]any, params []config.EndpointParam) []error {
+	if len(args) == 0 || len(params) == 0 {
+		return nil
+	}
+
+	// Build a lookup by param name for O(1) access
+	paramDefs := make(map[string]config.EndpointParam, len(params))
+	for _, p := range params {
+		paramDefs[p.Name] = p
+	}
+
+	var errs []error
+	for k, v := range args {
+		def, ok := paramDefs[k]
+		if !ok {
+			continue // unknown param, ignore
+		}
+
+		switch def.Type {
+		case config.ParamTypeInt, config.ParamTypeFloat:
+			var val float64
+			switch n := v.(type) {
+			case float64:
+				val = n
+			case int:
+				val = float64(n)
+			case int64:
+				val = float64(n)
+			default:
+				// Non-numeric passed for a numeric param
+				errs = append(errs, fmt.Errorf("param %q: expected numeric type, got %T", k, v))
+				continue
+			}
+			if val < 0 {
+				errs = append(errs, fmt.Errorf("param %q: negative value %.0f is not allowed", k, val))
+			}
+			if val > MaxNumericParamValue {
+				errs = append(errs, fmt.Errorf("param %q: value %.0f exceeds maximum allowed value %d", k, val, MaxNumericParamValue))
+			}
+
+		case config.ParamTypeString:
+			s, ok := v.(string)
+			if !ok {
+				continue // not a string, skip validation
+			}
+			if len(s) > MaxStringParamLength {
+				errs = append(errs, fmt.Errorf("param %q: string length %d exceeds maximum allowed length %d", k, len(s), MaxStringParamLength))
+			}
+
+		case config.ParamTypeBool:
+			// No validation needed for booleans
+
+		default:
+			// Unknown param type, skip
+		}
+	}
+
+	return errs
+}
+
+// truncateResult truncates a result string to at most maxLen characters.
+// If truncated, appends a note that the result was truncated.
+// Returns the original string unchanged if within limit.
+func truncateResult(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	truncated := s[:maxLen]
+	truncated += fmt.Sprintf("\n\n[Truncated: result was too large; showing first %d of %d characters]", maxLen, len(s))
+	return truncated
+}
 
 // extractPathParams extracts {param_name} from URL path patterns.
 func extractPathParams(path string) []string {
