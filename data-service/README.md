@@ -45,14 +45,58 @@ internal/
 
 ## Multi-Tenancy (Strict Mode, фаза 3.7)
 
-- **TenantStore** — мапа `tenant_id → TenantInstance{Config, *sql.DB, chi.Router, ConfigPath}`
+- **TenantStore** — мапа `tenant_id → TenantInstance{Config, Conn, Router, ConfigPath, ...}`
 - **Strict**: запрос **обязателен** `X-Tenant-ID` или `?tenant=` → иначе `404 tenant_not_found`
 - **Изоляция**: у каждого tenant свой пул коннектов, роутер, конфиг
 - **Admin API** (`Authorization: Bearer $ADMIN_TOKEN`):
   - `POST /admin/tenants` — добавить tenant на лету
   - `GET /admin/tenants` — список + health
-  - `DELETE /admin/tenants/{id}` — graceful drain (удалить из мапы → закрыть пул)
+  - `PUT /admin/tenants/{id}/config` — обновить конфиг существующего tenant'а
+  - `POST /admin/tenants/{id}/config/rewrite` — интроспекция БД → перезапись конфига
+  - `POST /admin/tenants/{id}/reload` — hot reload без рестарта процесса
+  - `DELETE /admin/tenants/{id}` — graceful drain (закрыть пул, удалить из мапы, стереть конфиг с диска)
 - **Health**: single-tenant `{"status":"ok","db":"ok"}` | multi-tenant `{"status":"degraded","tenants":[...]}`
+
+### 🗃️ Tenant Config Persistence
+
+Все tenant'ы, добавленные через admin API, автоматически сохраняются на диск.
+После перезапуска data-service читает конфиги из файловой системы и восстанавливает tenant'ов.
+
+**Директория хранения:** `$TENANTS_DIR` (по умолчанию `.data/tenants/` относительно корня проекта).
+Каждый tenant — отдельный JSON-файл:
+
+```
+.data/tenants/
+├── default.json          # Bootstrap-tenant из --config
+├── shop.json             # Добавлен через POST /admin/tenants
+└── my-client.json        # Добавлен через UI admin-dashboard
+```
+
+**Жизненный цикл:**
+
+```
+POST /admin/tenants  ──→  AddTenant() + SaveTenantConfig(id, cfg)  ──→  .data/tenants/{id}.json
+PUT .../config       ──→  update + reload  ──→  SaveTenantConfig(id, cfg)  ──→  перезаписан
+POST .../rewrite     ──→  introspect → generate → save  ──→  SaveTenantConfig(id, cfg)  ──→  обновлён
+DELETE /admin/tenants  ──→  RemoveTenant() + DeleteTenantConfig(id)  ──→  файл удалён
+
+Startup               ──→  os.ReadDir(.data/tenants/) → config.Load() → AddTenant()  ──→  восстановлен
+```
+
+**Механизм:** три публичных метода `TenantStore` отвечают за запись/чтение/удаление:
+
+| Метод | Назначение |
+|---|---|
+| `SaveTenantConfig(id, cfg) string` | Маршалит конфиг в JSON и пишет в `.data/tenants/{id}.json`. Возвращает полный путь. |
+| `TenantConfigPath(id) string` | Возвращает ожидаемый путь для tenant'а: `.data/tenants/{id}.json`. Создаёт директорию если нужно. |
+| `DeleteTenantConfig(id)` | Удаляет файл конфига с диска. Игнорирует `ENOENT` (уже удалён). |
+
+Все admin-хендлеры (`adminAddTenantHandler`, `adminConfigUpdateHandler`, `adminRewriteHandler`) пишут ТОЛЬКО через `SaveTenantConfig()` — никаких inline `os.WriteFile`.
+
+**Проверено:**
+- Tenant переживает полный restart всех сервисов data-service + mcp-gateway + rag + api + web
+- Все entities, endpoints, custom_queries восстанавливаются из JSON на диске
+- Удаление tenant'а стирает конфиг с диска
 
 ---
 
