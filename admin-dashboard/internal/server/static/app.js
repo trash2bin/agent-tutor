@@ -302,8 +302,9 @@ function dashboard() {
     // ═══════════════════════════════════════════
     async refreshPendingTools() {
       this.error = '';
+      if (!this.selectedTenant) return;
       try {
-        this.pendingTools = await this.api('/api/tools/pending');
+        this.pendingTools = await this.api('/api/tenants/' + this.selectedTenant + '/tools/pending');
       } catch (e) {
         this.pendingTools = null;
       }
@@ -311,8 +312,9 @@ function dashboard() {
 
     async approveTool(toolName) {
       this.error = '';
+      if (!this.selectedTenant) return;
       try {
-        await this.api(`/api/tools/${toolName}/approve`, { method: 'POST' });
+        await this.api(`/api/tenants/${this.selectedTenant}/tools/${toolName}/approve`, { method: 'POST' });
         await this.refreshPendingTools();
       } catch (e) {
         // error already set

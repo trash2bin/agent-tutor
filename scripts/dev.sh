@@ -88,7 +88,7 @@ load_env() {
 }
 
 ensure_dirs() {
-  mkdir -p "$LOG_DIR" "$PID_DIR"
+  mkdir -p "$LOG_DIR" "$PID_DIR" "$PROJECT_ROOT/.data/uploads"
 }
 
 pidfile() { echo "$PID_DIR/$1.pid"; }

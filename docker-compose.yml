@@ -47,6 +47,7 @@ services:
       - "127.0.0.1:8084:8084"
     volumes:
       - app_data:/data/app:ro
+      - uploads_data:/data/uploads:ro
     environment:
       - DB_DRIVER=${DB_DRIVER:-sqlite}
       - DB_PATH=/data/app/university.db
@@ -154,11 +155,14 @@ services:
       dockerfile: Dockerfile
     ports:
       - "127.0.0.1:8085:8085"
+    volumes:
+      - uploads_data:/data/uploads
     environment:
       - DATA_SERVICE_URL=http://data-service:8084
       - RAG_SERVICE_URL=http://rag:8082
       - API_SERVICE_URL=http://api:8081
       - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - DATA_DIR=/data/uploads
     depends_on:
       data-service:
         condition: service_healthy
@@ -237,6 +241,12 @@ volumes:
       type: none
       o: bind
       device: ./.data/hf_cache
+  uploads_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./.data/uploads
   pg_data:
     driver: local
     driver_opts:

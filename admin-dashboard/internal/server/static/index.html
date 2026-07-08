@@ -214,11 +214,10 @@
 
             <!-- SQLite: загрузка файла -->
             <div x-show="newTenant.driver === 'sqlite3'" x-cloak>
-              <div class="upload-zone"
+              <!-- Label wrapping the upload zone — natively triggers file input on click (no JS needed) -->
+              <label class="upload-zone" for="tenantFileInput"
                 @dragover.prevent="$el.classList.add('dragover')"
-                @dragleave.prevent="$el.classList.remove('dragover')"
-                @drop.prevent="$el.classList.remove('dragover'); newTenantUploadFile = $event.dataTransfer.files[0]"
-                @click="$refs.tenantFileInput.click()">
+                @dragleave.prevent="$el.classList.remove('dragover')">
                 <div x-show="!newTenantUploadFile">
                   <div style="font-size:32px;margin-bottom:8px;">🗄️</div>
                   <div style="font-weight:600;">Перетащите SQLite файл (.db) или кликните для выбора</div>
@@ -230,11 +229,12 @@
                     <div x-text="newTenantUploadFile.name" style="font-weight:600;"></div>
                     <div style="font-size:11px;color:#8b949e;" x-text="(newTenantUploadFile.size / 1024).toFixed(1) + ' KB'"></div>
                   </div>
-                  <button type="button" @click="newTenantUploadFile = null" class="btn btn-sm" style="margin-left:auto;">✕</button>
+                  <button type="button" @click.prevent="newTenantUploadFile = null; $el.closest('label').querySelector('input').value = ''" class="btn btn-sm" style="margin-left:auto;">✕</button>
                 </div>
-                <input type="file" x-ref="tenantFileInput" accept=".db,.sqlite,.sqlite3"
-                  @change="newTenantUploadFile = $event.target.files[0]" style="display:none">
-              </div>
+                <input type="file" id="tenantFileInput" accept=".db,.sqlite,.sqlite3"
+                  @change="newTenantUploadFile = $event.target.files[0]"
+                  style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
+              </label>
             </div>
 
             <!-- PostgreSQL: DSN -->

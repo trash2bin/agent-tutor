@@ -29,6 +29,7 @@ func main() {
 		RagSvcURL:    *ragSvcURL,
 		ApiSvcURL:    *apiSvcURL,
 		AdminToken:   *adminToken,
+		DataDir:      envOrDefault("DATA_DIR", ".data/uploads"),
 	})
 
 	slog.Info("starting admin dashboard", "addr", *addr, "data_service", *dataSvcURL)
