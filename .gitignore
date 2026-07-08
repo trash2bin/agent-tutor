@@ -48,6 +48,10 @@ specs/test_tenants/
 *.bak
 *.bak2
 
+# Trail of Bits skills — локально установленные, не в git
+.pi/skills/*
+!.pi/skills/browser-e2e-test/
+
 # Playwright
 test-results/
 playwright-report/
