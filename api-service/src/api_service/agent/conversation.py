@@ -12,6 +12,61 @@ from api_service.sessions import session_store
 logger = logging.getLogger("api_service.agent.conversation")
 
 
+class _LRULockCache:
+    """Dict-like lock cache with LRU eviction when max_size is exceeded.
+
+    Thread-safe for asyncio: access guarded by an asyncio.Lock.
+    """
+
+    def __init__(self, max_size: int = 1000) -> None:
+        self._max_size = max_size
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._access_order: list[str] = []
+        self._lock = asyncio.Lock()
+
+    async def get_or_create(self, key: str) -> asyncio.Lock:
+        async with self._lock:
+            lock = self._locks.get(key)
+            if lock is not None:
+                # Move to front (most recently used)
+                self._access_order.remove(key)
+                self._access_order.append(key)
+                return lock
+            lock = asyncio.Lock()
+            self._locks[key] = lock
+            self._access_order.append(key)
+            if len(self._access_order) > self._max_size:
+                self._evict_one()
+            return lock
+
+    async def remove(self, key: str) -> None:
+        async with self._lock:
+            self._locks.pop(key, None)
+            try:
+                self._access_order.remove(key)
+            except ValueError:
+                pass
+
+    async def size(self) -> int:
+        async with self._lock:
+            return len(self._locks)
+
+    async def has_key(self, key: str) -> bool:
+        async with self._lock:
+            return key in self._locks
+
+    async def keys(self) -> list[str]:
+        async with self._lock:
+            return list(self._locks.keys())
+
+    def _evict_one(self) -> None:
+        """Evict the least recently used lock (oldest access)."""
+        if not self._access_order:
+            return
+        oldest = self._access_order.pop(0)
+        self._locks.pop(oldest, None)
+
+
 class ConversationManager:
     """Manages conversation history and session state.
 
@@ -21,8 +76,8 @@ class ConversationManager:
     в long-running сервисах (api/mcp).
     """
 
-    def __init__(self) -> None:
-        self._session_locks: dict[str, asyncio.Lock] = {}
+    def __init__(self, max_session_locks: int = 1000) -> None:
+        self._session_locks = _LRULockCache(max_size=max_session_locks)
 
     def get_history_messages(self, session_id: SessionId) -> list[dict[str, Any]]:
         """Get history messages for a session (sync, для тестов/CLI)."""
@@ -50,6 +105,15 @@ class ConversationManager:
         """Normalize session ID."""
         return session_store.normalize_session_id(session_id)
 
-    def get_session_lock(self, session_id: SessionId) -> asyncio.Lock:
+    async def get_session_lock(self, session_id: SessionId) -> asyncio.Lock:
         """Get or create a lock for a session."""
-        return self._session_locks.setdefault(session_id, asyncio.Lock())
+        return await self._session_locks.get_or_create(session_id)
+
+    async def cleanup_session_lock(self, session_id: SessionId) -> None:
+        """Remove a session lock, allowing its memory to be reclaimed.
+
+        Call this when the SSE session ends or when a session is no longer
+        needed. After cleanup, a subsequent ``get_session_lock`` will create
+        a fresh lock.
+        """
+        await self._session_locks.remove(session_id)

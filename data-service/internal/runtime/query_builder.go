@@ -145,7 +145,7 @@ func (b *Builder) BuildList(entity Entity, whereClause string, args []any) (Quer
 // Валидация: cq.SQL ДОЛЖЕН начинаться с SELECT (case-insensitive) —
 // это whitelist-защита от destructive SQL в custom_query админом.
 func (b *Builder) BuildCustomQuery(cq CustomQuery, args []any) (Query, error) {
-	if !looksLikeSelect(cq.SQL) {
+	if !isValidSelect(cq.SQL) {
 		return Query{}, &QueryError{
 			Op:     "BuildCustomQuery",
 			Reason: "custom query must be a SELECT statement, got: " + summarizeSQL(cq.SQL),
@@ -240,15 +240,104 @@ func itoa(n int) string {
 	return string(buf[i:])
 }
 
-// looksLikeSelect — проверяет что SQL начинается с SELECT (case-insensitive).
-// Пропускает начальные пробелы и переводы строк.
-func looksLikeSelect(sql string) bool {
-	trimmed := strings.TrimSpace(sql)
-	if len(trimmed) < 6 {
+// isValidSelect — проверяет, что SQL является безопасным SELECT-выражением.
+//
+// Валидация:
+//   - Удаляет SQL-комментарии (-- и /* */) перед проверкой.
+//   - Должен начинаться с SELECT или WITH (CTE — это SELECT).
+//   - Не должен содержать ';' (защита от multi-statement инъекций).
+//   - Не должен содержать опасные ключевые слова как standalone-токены:
+//     INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, EXEC, EXECUTE.
+//
+// Все проверки case-insensitive.
+func isValidSelect(sql string) bool {
+	s := strings.TrimSpace(sql)
+	if s == "" {
 		return false
 	}
-	prefix := strings.ToLower(trimmed[:6])
-	return prefix == "select"
+
+	// 1. Удаляем block comments /* ... */
+	for {
+		start := strings.Index(s, "/*")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(s[start+2:], "*/")
+		if end < 0 {
+			// Незакрытый block comment — считаем невалидным.
+			return false
+		}
+		s = s[:start] + s[start+2+end+2:]
+	}
+
+	// 2. Удаляем line comments -- (до конца строки)
+	lines := strings.Split(s, "\n")
+	cleaned := make([]string, 0, len(lines))
+	for _, line := range lines {
+		idx := strings.Index(line, "--")
+		if idx >= 0 {
+			line = line[:idx]
+		}
+		cleaned = append(cleaned, line)
+	}
+	s = strings.Join(cleaned, "\n")
+
+	// 3. Trim после удаления комментариев
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+
+	// 4. Проверка multi-statement: ';' запрещён
+	if strings.Contains(s, ";") {
+		return false
+	}
+
+	// 5. Проверка опасных ключевых слов (standalone-токены)
+	dangerousKeywords := []string{
+		"INSERT", "UPDATE", "DELETE", "DROP",
+		"ALTER", "CREATE", "TRUNCATE", "EXEC", "EXECUTE",
+	}
+	upper := strings.ToUpper(s)
+	for _, kw := range dangerousKeywords {
+		if hasStandaloneWord(upper, kw) {
+			return false
+		}
+	}
+
+	// 6. SQL должен начинаться с SELECT или WITH (CTE)
+	switch {
+	case strings.HasPrefix(upper, "SELECT"):
+		return true
+	case strings.HasPrefix(upper, "WITH"):
+		return true
+	default:
+		return false
+	}
+}
+
+// hasStandaloneWord — проверяет, встречается ли word как самостоятельный токен
+// в строке s (регистро-чувствительно; вызывающий должен нормализовать регистр).
+// Токен считается standalone, если перед ним и после него не буква, не цифра и не '_'.
+func hasStandaloneWord(s, word string) bool {
+	if len(word) > len(s) {
+		return false
+	}
+	for i := 0; i <= len(s)-len(word); i++ {
+		if s[i:i+len(word)] == word {
+			beforeOK := i == 0 || !isIdentChar(s[i-1])
+			afterOK := i+len(word) >= len(s) || !isIdentChar(s[i+len(word)])
+			if beforeOK && afterOK {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isIdentChar — возвращает true для букв, цифр и '_' (символы SQL-идентификатора).
+func isIdentChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
 }
 
 // summarizeSQL — обрезает SQL до первых N символов для сообщения об ошибке.

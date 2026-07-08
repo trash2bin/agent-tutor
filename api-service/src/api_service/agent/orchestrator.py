@@ -145,7 +145,7 @@ class LLMAgent:
             self.create_per_request_llm(llm_config) if llm_config else self.llm_client
         )
 
-        lock = self.conversation_manager.get_session_lock(session_id)
+        lock = await self.conversation_manager.get_session_lock(session_id)
         async with lock:
             async for event in self._run_turn(
                 user_message,

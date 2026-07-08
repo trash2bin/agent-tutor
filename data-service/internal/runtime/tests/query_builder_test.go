@@ -274,6 +274,160 @@ func TestBuildCustomQuery_ArgCountMismatch(t *testing.T) {
 }
 
 // =============================================================================
+// Tests: isValidSelect validation (via BuildCustomQuery public API).
+// =============================================================================
+//
+// isValidSelect — unexported, тестируем через BuildCustomQuery:
+// невалидный SQL → BuildCustomQuery возвращает error, валидный — успех.
+
+// TestBuildCustomQuery_RejectsNonSelect — INSERT, DELETE, DROP должны
+// давать ошибку "must be a SELECT statement".
+func TestBuildCustomQuery_RejectsNonSelect(t *testing.T) {
+	adapter, cleanup := newTestAdapter(t)
+	defer cleanup()
+	b := runtime.NewBuilder(adapter)
+
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		{"INSERT", `INSERT INTO users VALUES(1)`},
+		{"UPDATE", `UPDATE users SET name='x'`},
+		{"DELETE", `DELETE FROM users`},
+		{"DROP", `DROP TABLE users`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cq := runtime.CustomQuery{
+				SQL:           tt.sql,
+				Params:        []string{},
+				ResultMapping: map[string]runtime.ResultMappingField{},
+				MaxRows:       100,
+			}
+			_, err := b.BuildCustomQuery(cq, []any{})
+			if err == nil {
+				t.Fatal("expected error for non-SELECT SQL, got nil")
+			}
+			if !strings.Contains(err.Error(), "must be a SELECT statement") {
+				t.Errorf("error = %q, want to contain 'must be a SELECT statement'", err)
+			}
+		})
+	}
+}
+
+func TestBuildCustomQuery_AcceptsSelect(t *testing.T) {
+	adapter, cleanup := newTestAdapter(t)
+	defer cleanup()
+	b := runtime.NewBuilder(adapter)
+
+	cq := runtime.CustomQuery{
+		SQL:           `SELECT * FROM customers`,
+		Params:        []string{},
+		ResultMapping: map[string]runtime.ResultMappingField{},
+		MaxRows:       100,
+	}
+	_, err := b.BuildCustomQuery(cq, []any{})
+	if err != nil {
+		t.Fatalf("expected no error for valid SELECT, got: %v", err)
+	}
+}
+
+func TestBuildCustomQuery_AcceptsSelectWithWhitespace(t *testing.T) {
+	adapter, cleanup := newTestAdapter(t)
+	defer cleanup()
+	b := runtime.NewBuilder(adapter)
+
+	cq := runtime.CustomQuery{
+		SQL:           `  SELECT 1`,
+		Params:        []string{},
+		ResultMapping: map[string]runtime.ResultMappingField{},
+		MaxRows:       100,
+	}
+	_, err := b.BuildCustomQuery(cq, []any{})
+	if err != nil {
+		t.Fatalf("expected no error for SELECT with whitespace, got: %v", err)
+	}
+}
+
+func TestBuildCustomQuery_AcceptsWithCTE(t *testing.T) {
+	adapter, cleanup := newTestAdapter(t)
+	defer cleanup()
+	b := runtime.NewBuilder(adapter)
+
+	// WITH-запрос — валидный SELECT (был сломан в looksLikeSelect).
+	cq := runtime.CustomQuery{
+		SQL:           `WITH cte AS (SELECT * FROM customers) SELECT * FROM cte`,
+		Params:        []string{},
+		ResultMapping: map[string]runtime.ResultMappingField{},
+		MaxRows:       100,
+	}
+	_, err := b.BuildCustomQuery(cq, []any{})
+	if err != nil {
+		t.Fatalf("expected no error for WITH CTE, got: %v", err)
+	}
+}
+
+func TestBuildCustomQuery_RejectsMultiStatement(t *testing.T) {
+	adapter, cleanup := newTestAdapter(t)
+	defer cleanup()
+	b := runtime.NewBuilder(adapter)
+
+	// SELECT 1; DROP TABLE — multi-statement guard.
+	cq := runtime.CustomQuery{
+		SQL:           `SELECT 1; DROP TABLE users`,
+		Params:        []string{},
+		ResultMapping: map[string]runtime.ResultMappingField{},
+		MaxRows:       100,
+	}
+	_, err := b.BuildCustomQuery(cq, []any{})
+	if err == nil {
+		t.Fatal("expected error for multi-statement SQL, got nil")
+	}
+	if !strings.Contains(err.Error(), "must be a SELECT statement") {
+		t.Errorf("error = %q, want to contain 'must be a SELECT statement'", err)
+	}
+}
+
+func TestBuildCustomQuery_RejectsMySqlCommentBypass(t *testing.T) {
+	adapter, cleanup := newTestAdapter(t)
+	defer cleanup()
+	b := runtime.NewBuilder(adapter)
+
+	// /*! SELECT */ DROP TABLE — MySQL comment bypass.
+	cq := runtime.CustomQuery{
+		SQL:           `/*! SELECT */ DROP TABLE users`,
+		Params:        []string{},
+		ResultMapping: map[string]runtime.ResultMappingField{},
+		MaxRows:       100,
+	}
+	_, err := b.BuildCustomQuery(cq, []any{})
+	if err == nil {
+		t.Fatal("expected error for MySQL comment bypass, got nil")
+	}
+	if !strings.Contains(err.Error(), "must be a SELECT statement") {
+		t.Errorf("error = %q, want to contain 'must be a SELECT statement'", err)
+	}
+}
+
+func TestBuildCustomQuery_AcceptsLineCommentBeforeSelect(t *testing.T) {
+	adapter, cleanup := newTestAdapter(t)
+	defer cleanup()
+	b := runtime.NewBuilder(adapter)
+
+	// -- comment\nSELECT 1 — line comment before SELECT is ok.
+	cq := runtime.CustomQuery{
+		SQL:           "-- comment\nSELECT 1",
+		Params:        []string{},
+		ResultMapping: map[string]runtime.ResultMappingField{},
+		MaxRows:       100,
+	}
+	_, err := b.BuildCustomQuery(cq, []any{})
+	if err != nil {
+		t.Fatalf("expected no error for line comment before SELECT, got: %v", err)
+	}
+}
+
+// =============================================================================
 // Tests: response mapper.
 // =============================================================================
 
