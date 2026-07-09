@@ -19,8 +19,8 @@ class RagConfig:
 
     # Чанкинг
     chunker_type: str = "semantic"  # semantic | recursive | sentence
-    chunk_size: int = 512
-    chunk_overlap: int = 80
+    chunk_size: int = 768
+    chunk_overlap: int = 160
     page_overlap_tokens: int = 50  # overlap между страницами
 
     # ChromaDB + SQL
@@ -34,6 +34,12 @@ class RagConfig:
         "Если в контексте нет ответа, прямо скажи, что данных в документах недостаточно. "
         "Ссылайся на название документа и страницу, когда page заполнен."
     )
+
+    # BM25 reranker
+    reranker_enabled: bool = True
+    reranker_k1: float = 1.5
+    reranker_b: float = 0.75
+    reranker_dense_factor: int = 3  # dense-кандидатов = limit * factor перед BM25
 
     # Лимиты
     search_limit_max: int = 20
@@ -57,9 +63,13 @@ class RagConfig:
             embedding_local_files_only=os.environ.get("RAG_LOCAL_FILES_ONLY", "0")
             == "1",
             chunker_type=os.environ.get("RAG_CHUNKER_TYPE", "semantic"),
-            chunk_size=int(os.environ.get("RAG_CHUNK_SIZE", "512")),
-            chunk_overlap=int(os.environ.get("RAG_CHUNK_OVERLAP", "80")),
+            chunk_size=int(os.environ.get("RAG_CHUNK_SIZE", "768")),
+            chunk_overlap=int(os.environ.get("RAG_CHUNK_OVERLAP", "160")),
             page_overlap_tokens=int(os.environ.get("RAG_PAGE_OVERLAP_TOKENS", "50")),
+            reranker_enabled=os.environ.get("RAG_RERANKER_ENABLED", "1") == "1",
+            reranker_k1=float(os.environ.get("RAG_RERANKER_K1", "1.5")),
+            reranker_b=float(os.environ.get("RAG_RERANKER_B", "0.75")),
+            reranker_dense_factor=int(os.environ.get("RAG_RERANKER_DENSE_FACTOR", "3")),
             chroma_path=os.environ.get("CHROMA_PATH", ""),
             chroma_collection=os.environ.get(
                 "CHROMA_COLLECTION", "university_documents"

@@ -75,8 +75,8 @@ def benchmark_config(benchmark_tmp_dir: Path) -> RagConfig:
         embedding_device="cpu",
         embedding_model=model,
         chunker_type="recursive",  # semantic требует реальную модель чанкования
-        chunk_size=512,
-        chunk_overlap=80,
+        chunk_size=768,
+        chunk_overlap=160,
     )
 
 
@@ -264,6 +264,8 @@ if __name__ == "__main__":
             embedding_device="cpu",
             embedding_model="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
             chunker_type="recursive",
+        chunk_size=768,
+        chunk_overlap=160,
         )
 
         conn = sqlite3.connect(str(tmp / "benchmark.db"))

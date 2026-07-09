@@ -17,6 +17,7 @@ from agent_tutor_sdk.rag.models import (
 from rag.parser import DocumentParser
 from rag.chunker import TextChunker
 from rag.repository import DocumentRepository
+from rag.reranker import BM25Reranker
 
 logger = logging.getLogger(__name__)
 
@@ -110,17 +111,47 @@ class RAGPipeline:
         discipline_id: str | None = None,
         limit: int = 5,
     ) -> list[RagSearchResult]:
-        """Семантический поиск."""
+        """Семантический поиск с BM25 reranker'ом поверх dense-поиска.
+
+        Dense-поиск (ChromaDB) даёт семантически близкие результаты.
+        BM25 reranker добивает keyword-точные запросы (HTTPS, Cache-Control,
+        бинарный поиск), которые dense-эмбеддинги могут не дотянуть.
+
+        Стратегия:
+          1. Запрашиваем limit * reranker_dense_factor кандидатов из ChromaDB
+          2. Переранжируем по BM25(query, content каждого чанка)
+          3. Возвращаем top-{limit}
+        """
         normalized_query = query.strip()
         if not normalized_query:
             return []
 
         limit = max(1, min(limit, self.config.search_limit_max))
-        return self.vector_store.search(
-            query=normalized_query,
-            discipline_id=discipline_id,
-            limit=limit,
-        )
+
+        if self.config.reranker_enabled:
+            # Dense + BM25 rerank
+            dense_limit = limit * self.config.reranker_dense_factor
+            results = self.vector_store.search(
+                query=normalized_query,
+                discipline_id=discipline_id,
+                limit=dense_limit,
+            )
+            if results:
+                reranker = BM25Reranker(
+                    k1=self.config.reranker_k1,
+                    b=self.config.reranker_b,
+                )
+                # Сохраняем dense-score для отладки, сортируем по BM25
+                reranked = reranker.rerank_with_scores(normalized_query, results)
+                return [r for r, _ in reranked[:limit]]
+            return []
+        else:
+            # Pure dense (legacy, без reranker'а)
+            return self.vector_store.search(
+                query=normalized_query,
+                discipline_id=discipline_id,
+                limit=limit,
+            )
 
     def build_rag_context(
         self,

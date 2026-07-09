@@ -24,7 +24,8 @@ def test_rag_config_defaults():
     )
     assert config.embedding_batch_size == 64
     assert config.chunker_type == "semantic"
-    assert config.chunk_size == 512
+    assert config.chunk_size == 768
+    assert config.chunk_overlap == 160
     assert config.chroma_collection == "university_documents"
     assert config.chroma_path != ""  # should be populated in __post_init__
 
