@@ -9,7 +9,7 @@ from agent_tutor_sdk.rag.models import RagSearchResult
 class MockEmbeddingService(EmbeddingProtocol):
     """Простой мок эмбеддингов, возвращающий фиксированные векторы."""
 
-    def encode_batched(self, texts: list[str]):
+    def encode_batched(self, texts: list[str], mode: str = "passage"):
         # Генерируем простой вектор на основе длины строки, чтобы поиск был хоть как-то разным
         return [[float(len(t))] * 384 for t in texts]
 

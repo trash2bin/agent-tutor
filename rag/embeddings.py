@@ -43,16 +43,34 @@ class SentenceTransformerEmbedding(EmbeddingProtocol):
                 ) from exc
         return self._model
 
-    def encode_batched(self, texts: list[str]) -> Embeddings:
-        """Векторизовать список строк с батчингом."""
+    def encode_batched(
+        self,
+        texts: list[str],
+        mode: str = "passage",
+    ) -> Embeddings:
+        """Векторизовать список строк с батчинго��.
+
+        Args:
+            texts: список строк для векторизации
+            mode: "query" — добавляет query_prefix, "passage" — passage_prefix.
+                  Для e5-моделей префиксы критичны: без них качество падает.
+        """
         if not texts:
             return []
+
+        # Префиксы для модели
+        if mode == "query" and self.config.embedding_query_prefix:
+            prefixed = [self.config.embedding_query_prefix + t for t in texts]
+        elif mode == "passage" and self.config.embedding_passage_prefix:
+            prefixed = [self.config.embedding_passage_prefix + t for t in texts]
+        else:
+            prefixed = texts
 
         all_embeddings = []
         batch_size = self.config.embedding_batch_size
 
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
+        for i in range(0, len(prefixed), batch_size):
+            batch = prefixed[i : i + batch_size]
             embeddings = self.model.encode(batch, normalize_embeddings=True)
             all_embeddings.extend(embeddings)
 

@@ -67,7 +67,8 @@ class ChromaDBVectorStore(VectorStoreProtocol):
                 )
 
             embeddings = cast(
-                Embeddings, self.embedding_service.encode_batched(batch_texts)
+                Embeddings,
+                self.embedding_service.encode_batched(batch_texts, mode="passage"),
             )
             self.collection.add(
                 ids=batch_ids,
@@ -93,7 +94,8 @@ class ChromaDBVectorStore(VectorStoreProtocol):
     ) -> list[RagSearchResult]:
         """Семантический поиск."""
         query_emb: Embeddings = cast(
-            Embeddings, self.embedding_service.encode_batched([query])
+            Embeddings,
+            self.embedding_service.encode_batched([query], mode="query"),
         )
 
         query_result = self.collection.query(

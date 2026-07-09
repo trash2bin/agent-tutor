@@ -94,7 +94,7 @@ def embedding_service_impl(benchmark_config: RagConfig):
 class MockEmbedding:
     """Мок эмбеддингов — возвращает единичный вектор."""
 
-    def encode_batched(self, texts: list[str]) -> list[list[float]]:
+    def encode_batched(self, texts: list[str], mode: str = "passage") -> list[list[float]]:
         return [[1.0 / 384] * 384 for _ in texts]
 
 

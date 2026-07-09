@@ -16,6 +16,8 @@ class RagConfig:
     embedding_batch_size: int = 64
     embedding_device: str = "cpu"
     embedding_local_files_only: bool = False
+    embedding_query_prefix: str = ""  # e5: "query: ", MiniLM: ""
+    embedding_passage_prefix: str = ""  # e5: "passage: ", MiniLM: ""
 
     # Чанкинг
     chunker_type: str = "semantic"  # semantic | recursive | sentence
@@ -62,6 +64,8 @@ class RagConfig:
             embedding_device=os.environ.get("RAG_DEVICE", "cpu"),
             embedding_local_files_only=os.environ.get("RAG_LOCAL_FILES_ONLY", "0")
             == "1",
+            embedding_query_prefix=os.environ.get("RAG_QUERY_PREFIX", ""),
+            embedding_passage_prefix=os.environ.get("RAG_PASSAGE_PREFIX", ""),
             chunker_type=os.environ.get("RAG_CHUNKER_TYPE", "semantic"),
             chunk_size=int(os.environ.get("RAG_CHUNK_SIZE", "768")),
             chunk_overlap=int(os.environ.get("RAG_CHUNK_OVERLAP", "160")),
