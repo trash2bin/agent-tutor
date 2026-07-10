@@ -323,6 +323,35 @@
   opacity: 0.9;
 }
 
+/* ── Rate limit retry countdown ── */
+.at-msg.at-retry-countdown {
+  align-self: center;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  max-width: 100%;
+}
+
+.at-retry-btn {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 6px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.at-retry-btn:hover {
+  background: var(--accent);
+  color: white;
+}
+
 /* ── Responsive ── */
 @media (max-width: 480px) {
   .at-panel {

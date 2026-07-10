@@ -113,6 +113,9 @@
         <a href="#" @click.prevent="page='agents'; loadAgents(); document.querySelector('.main').scrollTop = 0" :class="{active: page==='agents'}">
           🤖 Агенты
         </a>
+        <a href="#" @click.prevent="page='abuse'; loadAbuseSettings(); loadAgents(); document.querySelector('.main').scrollTop = 0" :class="{active: page==='abuse'}">
+          🛡️ Anti-Abuse
+        </a>
       </nav>
       <div class="sidebar-footer">
         <span class="version">v0.1.0</span>
@@ -651,6 +654,141 @@
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- ── Anti-Abuse Page ── -->
+      <div x-show="page === 'abuse'" x-cloak>
+        <div class="page-header">
+          <div class="page-header-left">
+            <h2>🛡️ Anti-Abuse / Rate Limiting</h2>
+          </div>
+          <div class="page-header-right">
+            <button @click="loadAbuseSettings(); loadAgents()" class="btn btn-sm">🔄</button>
+          </div>
+        </div>
+
+        <!-- Tab switcher -->
+        <div class="tabs" style="display:flex;gap:8px;margin-bottom:16px;">
+          <button @click="abuseTab='global'" class="btn" :class="{'btn-primary': abuseTab==='global'}" :style="abuseTab==='global'?'':'background:var(--bg-secondary)'">🌐 Global defaults</button>
+          <button @click="abuseTab='agent'" class="btn" :class="{'btn-primary': abuseTab==='agent'}" :style="abuseTab==='agent'?'':'background:var(--bg-secondary)'">🤖 Per-agent overrides</button>
+        </div>
+
+        <!-- ── Global Settings ── -->
+        <div x-show="abuseTab === 'global'" x-cloak>
+          <div class="card" x-show="!abuseGlobal">
+            <p>Загрузка...</p>
+          </div>
+          <div class="card" x-show="abuseGlobal" x-cloak>
+            <h3>🌐 Global rate / abuse defaults</h3>
+            <form @submit.prevent="saveAbuseGlobal()" class="form">
+              <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div class="form-group">
+                  <label>RPS (sustained rate)</label>
+                  <input type="number" x-model.number="abuseGlobal.rps" step="0.1" min="0.1" placeholder="1.0">
+                  <small class="text-muted">Requests per second per IP</small>
+                </div>
+                <div class="form-group">
+                  <label>Burst</label>
+                  <input type="number" x-model.number="abuseGlobal.burst" min="1" placeholder="5">
+                  <small class="text-muted">Max burst requests before rate limit kicks in</small>
+                </div>
+              </div>
+              <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+                <div class="form-group">
+                  <label>Max message length</label>
+                  <input type="number" x-model.number="abuseGlobal.max_message_length" min="1" placeholder="2000">
+                </div>
+                <div class="form-group">
+                  <label>Min interval (ms)</label>
+                  <input type="number" x-model.number="abuseGlobal.min_interval_ms" min="0" placeholder="1000">
+                  <small class="text-muted">Min ms between messages in one session</small>
+                </div>
+                <div class="form-group">
+                  <label>Max messages/session</label>
+                  <input type="number" x-model.number="abuseGlobal.max_messages_per_session" min="1" placeholder="50">
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="checkbox-row">
+                  <input type="checkbox" x-model="abuseGlobal.block_empty_user_agent">
+                  <span>Block empty User-Agent</span>
+                </label>
+              </div>
+              <div class="form-group">
+                <label>Blocked User-Agent patterns (one per line)</label>
+                <textarea x-model="abuseGlobal._ua_text" style="width:100%;min-height:80px;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg);color:var(--ink);" placeholder="curl/*&#10;python-requests/*&#10;Go-http-client/*"
+                  @input="abuseGlobal.blocked_user_agents = $event.target.value.split('\n').filter(s => s.trim())"></textarea>
+                <small class="text-muted">Glob-style patterns, one per line. Requests with matching User-Agent will be blocked.</small>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary" :disabled="abuseSaving">
+                  <span x-show="abuseSaving">⏳</span>
+                  <span x-show="!abuseSaving">💾 Save global settings</span>
+                </button>
+                <span x-show="abuseSaveMsg" style="color:var(--accent);font-size:13px;" x-text="abuseSaveMsg"></span>
+              </div>
+            </form>
+          </div>
+          <div class="card" x-show="abuseGlobal" x-cloak>
+            <h3>📋 Current effective config</h3>
+            <pre x-text="JSON.stringify(abuseGlobal, null, 2)" class="code-block" style="max-height:300px;overflow-y:auto;"></pre>
+          </div>
+        </div>
+
+        <!-- ── Per-Agent Overrides ── -->
+        <div x-show="abuseTab === 'agent'" x-cloak>
+          <div class="card">
+            <h3>🤖 Select agent</h3>
+            <div class="form-group">
+              <select x-model="abuseAgentName" @change="selectAbuseAgent(abuseAgentName)" style="width:100%;">
+                <option value="">— Select agent —</option>
+                <template x-for="a in agents" :key="a.name">
+                  <option :value="a.name" x-text="a.name + (a.description ? ' (' + a.description + ')' : '')"></option>
+                </template>
+              </select>
+            </div>
+          </div>
+
+          <div x-show="abuseAgentName" class="card" x-cloak>
+            <h3>✏️ Override settings for: <span class="highlight" x-text="abuseAgentName"></span></h3>
+            <p class="text-muted" style="font-size:12px;margin-bottom:12px;">
+              Only filled fields will override the global defaults. Leave empty for "use global default".
+            </p>
+            <form @submit.prevent="saveAbuseAgent()" class="form">
+              <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div class="form-group">
+                  <label>RPS (override)</label>
+                  <input type="number" x-model.number="abuseAgentOverrides.rps" step="0.1" min="0.1" placeholder="(global default)">
+                </div>
+                <div class="form-group">
+                  <label>Burst (override)</label>
+                  <input type="number" x-model.number="abuseAgentOverrides.burst" min="1" placeholder="(global default)">
+                </div>
+              </div>
+              <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+                <div class="form-group">
+                  <label>Max message length (override)</label>
+                  <input type="number" x-model.number="abuseAgentOverrides.max_message_length" min="1" placeholder="(global default)">
+                </div>
+                <div class="form-group">
+                  <label>Min interval ms (override)</label>
+                  <input type="number" x-model.number="abuseAgentOverrides.min_interval_ms" min="0" placeholder="(global default)">
+                </div>
+                <div class="form-group">
+                  <label>Max messages/session (override)</label>
+                  <input type="number" x-model.number="abuseAgentOverrides.max_messages_per_session" min="1" placeholder="(global default)">
+                </div>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary" :disabled="abuseSaving || !abuseAgentName">
+                  <span x-show="abuseSaving">⏳</span>
+                  <span x-show="!abuseSaving">💾 Save agent overrides</span>
+                </button>
+                <span x-show="abuseSaveMsg" style="color:var(--accent);font-size:13px;" x-text="abuseSaveMsg"></span>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
     </main>

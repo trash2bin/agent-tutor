@@ -32,6 +32,7 @@ type Server struct {
 	opts       Options
 	dataClient *DataServiceClient
 	ragClient  *RagClient
+	abuseStore *AbuseStore
 	mu         sync.RWMutex
 }
 
@@ -44,6 +45,7 @@ func New(opts Options) *Server {
 		opts:       opts,
 		dataClient: NewDataServiceClient(opts.DataSvcURL, opts.AdminToken),
 		ragClient:  NewRagClient(opts.RagSvcURL, opts.AdminToken),
+		abuseStore: NewAbuseStore(opts.DataDir),
 	}
 }
 
@@ -106,6 +108,12 @@ func (s *Server) Router() chi.Router {
 		r.Get("/agents/{name}", s.agentGetHandler)
 		r.Put("/agents/{name}", s.agentUpdateHandler)
 		r.Delete("/agents/{name}", s.agentDeleteHandler)
+
+		// Anti-abuse / rate limit settings
+		r.Get("/abuse-settings", s.abuseSettingsGetHandler)
+		r.Put("/abuse-settings", s.abuseSettingsPutHandler)
+		r.Get("/agents/{name}/abuse", s.agentAbuseGetHandler)
+		r.Put("/agents/{name}/abuse", s.agentAbusePutHandler)
 	})
 
 	return r

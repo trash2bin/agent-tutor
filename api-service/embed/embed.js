@@ -290,6 +290,29 @@
     '}',
     '.at-form button:hover { opacity: 0.9; }',
     '',
+    '.at-msg.at-retry-countdown {',
+    '  align-self: center;',
+    '  background: transparent;',
+    '  color: var(--muted);',
+    '  font-size: 12px;',
+    '  text-align: center;',
+    '  max-width: 100%;',
+    '}',
+    '.at-retry-btn {',
+    '  display: inline-block;',
+    '  margin-top: 8px;',
+    '  padding: 6px 16px;',
+    '  border: 1px solid var(--accent);',
+    '  border-radius: var(--radius);',
+    '  background: var(--panel);',
+    '  color: var(--accent);',
+    '  cursor: pointer;',
+    '  font-size: 13px;',
+    '  font-family: inherit;',
+    '  outline: none;',
+    '}',
+    '.at-retry-btn:hover { background: var(--accent); color: white; }',
+    '',
     '@media (max-width: 480px) {',
     '  .at-panel {',
     '    width: 100vw; height: 100vh;',
@@ -505,6 +528,11 @@
     var headEl = ui.head;
     var sessionId = getSessionId();
 
+    // ── Pending retry state ──
+    var pendingMessage = null;
+    var retryAttempts = {};
+    var MAX_RETRIES = 3;
+
     // ── Set global bridge so app.js can switch agent ──
     window.__agentTutorSetAgent = function __agentTutorSetAgent(name) {
       if (!name) return;
@@ -669,6 +697,36 @@
       target.innerHTML = renderMarkdown(text);
     }
 
+    // ── Retry / Rate Limit Handling ──
+
+    function scheduleRetry(message, delayMs) {
+      var remaining = Math.ceil(delayMs / 1000);
+
+      // Show countdown message
+      var countdownMsg = document.createElement('div');
+      countdownMsg.className = 'at-msg at-retry-countdown';
+      countdownMsg.textContent = '\u23F3 Повтор через ' + remaining + ' сек...';
+      messagesEl.appendChild(countdownMsg);
+      scrollToBottom(messagesEl);
+
+      var interval = setInterval(function() {
+        remaining--;
+        if (remaining <= 0) {
+          clearInterval(interval);
+          countdownMsg.remove();
+          retryChat(message);
+        } else {
+          countdownMsg.textContent = '\u23F3 Повтор через ' + remaining + ' сек...';
+        }
+      }, 1000);
+    }
+
+    function retryChat(message) {
+      // Use the same function that streamChat would create internally
+      var answerNode = addMessage('assistant', '', { persist: false, scroll: false });
+      streamChat(message, answerNode);
+    }
+
     // ── SSE Streaming ──
     function streamChat(message, targetNode) {
       targetNode.classList.add('at-thinking');
@@ -682,10 +740,59 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: message, session_id: sessionId })
       }).then(function (response) {
+        if (response.status === 429) {
+          targetNode.classList.remove('at-thinking');
+          targetNode.remove();
+
+          var retryAfter = response.headers.get('Retry-After');
+          var delay = 5; // default seconds
+          if (retryAfter) {
+            var parsed = parseInt(retryAfter, 10);
+            if (!isNaN(parsed) && parsed > 0) {
+              delay = parsed;
+            }
+          }
+
+          // Track retry attempts per message text to prevent infinite loop
+          retryAttempts[message] = (retryAttempts[message] || 0) + 1;
+          var attempts = retryAttempts[message];
+
+          if (attempts >= MAX_RETRIES) {
+            // Show manual retry button after exhausting auto-retries
+            var failMsg = document.createElement('div');
+            failMsg.className = 'at-msg at-assistant';
+            failMsg.textContent = '\u26A0\uFE0F Сервер перегружен. Попробуйте позже.';
+            messagesEl.appendChild(failMsg);
+            scrollToBottom(messagesEl);
+
+            var retryBtn = document.createElement('button');
+            retryBtn.className = 'at-retry-btn';
+            retryBtn.textContent = 'Повторить';
+            failMsg.appendChild(retryBtn);
+            retryBtn.addEventListener('click', function() {
+              delete retryAttempts[message];
+              failMsg.remove();
+              retryChat(message);
+            });
+            return;
+          }
+
+          // Show rate limit message
+          var rateMsg = document.createElement('div');
+          rateMsg.className = 'at-msg at-assistant';
+          rateMsg.textContent = '\u26A0\uFE0F Сервер временно перегружен. Повторите через ' + delay + ' сек.';
+          messagesEl.appendChild(rateMsg);
+          scrollToBottom(messagesEl);
+
+          pendingMessage = message;
+          scheduleRetry(message, delay * 1000);
+          return;
+        }
+
         if (!response.ok) {
           targetNode.classList.remove('at-thinking');
           targetNode.classList.add('at-error');
-          targetNode.textContent = 'Ошибка: ' + response.status;
+          targetNode.textContent = '��шибка: ' + response.status;
           return;
         }
 
@@ -752,7 +859,17 @@
       }).catch(function (err) {
         targetNode.classList.remove('at-thinking');
         targetNode.classList.add('at-error');
-        targetNode.textContent = 'Ошибка соединения: ' + err.message;
+        targetNode.innerHTML = '\u26A0\uFE0F Нет соединения с сервером. Проверьте интернет.<br><button class="at-retry-btn" data-message="' + escapeHtml(message) + '">Повторить</button>';
+        // Bind retry button click
+        var btn = targetNode.querySelector('.at-retry-btn');
+        if (btn) {
+          btn.addEventListener('click', function() {
+            var msg = btn.getAttribute('data-message');
+            targetNode.classList.remove('at-error');
+            targetNode.innerHTML = '';
+            streamChat(msg, targetNode);
+          });
+        }
       });
     }
 

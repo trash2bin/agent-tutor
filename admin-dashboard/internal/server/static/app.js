@@ -57,6 +57,81 @@ function dashboard() {
     savingAgent: false,
     agentCreateResult: null,
 
+    // ── Anti-Abuse ──
+    abuseTab: 'global', // 'global' | 'agent'
+    abuseGlobal: null,
+    abuseAgent: null,
+    abuseAgentName: '',
+    abuseAgentOverrides: {},
+    abuseSaving: false,
+    abuseSaveMsg: '',
+    abuseAgentList: [],
+
+    // ═══════════════════════════════════════════
+    //  ANTI-ABUSE METHODS
+    // ═══════════════════════════════════════════
+    async loadAbuseSettings() {
+      this.error = '';
+      try {
+        const cfg = await this.api('/api/abuse-settings');
+        cfg._ua_text = (cfg.blocked_user_agents || []).join('\n');
+        this.abuseGlobal = cfg;
+      } catch (e) {
+        // error already set
+      }
+    },
+
+    async saveAbuseGlobal() {
+      this.abuseSaving = true;
+      this.error = '';
+      this.abuseSaveMsg = '';
+      try {
+        await this.api('/api/abuse-settings', {
+          method: 'PUT',
+          body: JSON.stringify(this.abuseGlobal),
+        });
+        this.abuseSaveMsg = '✅ Global settings saved';
+        setTimeout(() => { this.abuseSaveMsg = ''; }, 3000);
+      } catch (e) {
+        // error already set
+      } finally {
+        this.abuseSaving = false;
+      }
+    },
+
+    async selectAbuseAgent(name) {
+      this.abuseAgentName = name;
+      this.error = '';
+      if (!name) {
+        this.abuseAgentOverrides = {};
+        return;
+      }
+      try {
+        const resp = await this.api('/api/agents/' + name + '/abuse');
+        this.abuseAgentOverrides = resp.abuse_config || {};
+      } catch (e) {
+        this.abuseAgentOverrides = {};
+      }
+    },
+
+    async saveAbuseAgent() {
+      this.abuseSaving = true;
+      this.error = '';
+      this.abuseSaveMsg = '';
+      try {
+        await this.api('/api/agents/' + this.abuseAgentName + '/abuse', {
+          method: 'PUT',
+          body: JSON.stringify(this.abuseAgentOverrides),
+        });
+        this.abuseSaveMsg = '✅ Agent settings saved';
+        setTimeout(() => { this.abuseSaveMsg = ''; }, 3000);
+      } catch (e) {
+        // error already set
+      } finally {
+        this.abuseSaving = false;
+      }
+    },
+
     // ═══════════════════════════════════════════
     //  INIT
     // ═══════════════════════════════════════════
