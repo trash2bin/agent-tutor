@@ -114,6 +114,8 @@ func (s *Server) Router() chi.Router {
 		r.Put("/abuse-settings", s.abuseSettingsPutHandler)
 		r.Get("/agents/{name}/abuse", s.agentAbuseGetHandler)
 		r.Put("/agents/{name}/abuse", s.agentAbusePutHandler)
+		r.Post("/abuse-preset/{preset}", s.abusePresetHandler)
+		r.Get("/emergency-status", s.emergencyStatusHandler)
 	})
 
 	return r

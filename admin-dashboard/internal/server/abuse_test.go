@@ -240,3 +240,208 @@ func TestAbuseSettingsGet_WithoutAuth_ReturnsError(t *testing.T) {
 		t.Errorf("GET /api/abuse-settings without auth = %d, want 401", w.Code)
 	}
 }
+
+// ════════════════════════════════════════════════════════════════
+// Emergency preset tests
+// ════════════════════════════════════════════════════════════════
+
+func TestEmergencyPresets_ValidPresets(t *testing.T) {
+	presets := EmergencyPresets()
+
+	for name, cfg := range presets {
+		t.Run(name, func(t *testing.T) {
+			if cfg.EmergencyPreset != name {
+				t.Errorf("preset %q has EmergencyPreset=%q", name, cfg.EmergencyPreset)
+			}
+			if cfg.RPS <= 0 {
+				t.Errorf("preset %q: RPS=%f", name, cfg.RPS)
+			}
+			if cfg.Burst <= 0 {
+				t.Errorf("preset %q: Burst=%d", name, cfg.Burst)
+			}
+		})
+	}
+}
+
+func TestEmergencyPreset_NormalHasMaxSettings(t *testing.T) {
+	presets := EmergencyPresets()
+	normal := presets["normal"]
+	lockdown := presets["lockdown"]
+
+	// Normal should be more permissive than lockdown
+	if normal.RPS <= lockdown.RPS {
+		t.Errorf("normal RPS (%f) should be > lockdown RPS (%f)", normal.RPS, lockdown.RPS)
+	}
+	if normal.Burst <= lockdown.Burst {
+		t.Errorf("normal burst (%d) should be > lockdown burst (%d)", normal.Burst, lockdown.Burst)
+	}
+	if normal.MaxMessagesPerSession <= lockdown.MaxMessagesPerSession {
+		t.Errorf("normal maxMessages (%d) should be > lockdown maxMessages (%d)",
+			normal.MaxMessagesPerSession, lockdown.MaxMessagesPerSession)
+	}
+}
+
+func TestEmergencyPreset_CautiousHasTokenBudget(t *testing.T) {
+	presets := EmergencyPresets()
+	cautious := presets["cautious"]
+
+	if cautious.TokenBudget == 0 {
+		t.Error("cautious preset should have TokenBudget > 0")
+	}
+	if cautious.CheapModel == "" {
+		t.Error("cautious preset should have CheapModel set")
+	}
+}
+
+func TestAbusePreset_ApplyLockdown(t *testing.T) {
+	router, cleanup := newTestAbuseServer(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/abuse-preset/lockdown", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/abuse-preset/lockdown = %d, want 200\nbody: %s", w.Code, w.Body.String())
+	}
+
+	var cfg AbuseConfig
+	if err := json.NewDecoder(w.Body).Decode(&cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if !cfg.EmergencyMode {
+		t.Error("lockdown preset should set EmergencyMode=true")
+	}
+	if cfg.EmergencyPreset != "lockdown" {
+		t.Errorf("EmergencyPreset=%q, want lockdown", cfg.EmergencyPreset)
+	}
+	if cfg.Burst > 2 {
+		t.Errorf("lockdown burst=%d, want <=2", cfg.Burst)
+	}
+	if cfg.RPS > 0.5 {
+		t.Errorf("lockdown rps=%f, want <=0.5", cfg.RPS)
+	}
+	if cfg.TokenBudget == 0 {
+		t.Error("lockdown should have TokenBudget > 0")
+	}
+}
+
+func TestAbusePreset_InvalidPreset_Returns400(t *testing.T) {
+	router, cleanup := newTestAbuseServer(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/abuse-preset/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("invalid preset = %d, want 400", w.Code)
+	}
+}
+
+func TestEmergencyStatus_ReturnsCurrentState(t *testing.T) {
+	router, cleanup := newTestAbuseServer(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/emergency-status", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/emergency-status = %d, want 200", w.Code)
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp["emergency_preset"] != "normal" {
+		t.Errorf("emergency_preset=%v, want normal", resp["emergency_preset"])
+	}
+	if resp["emergency_mode"] != false {
+		t.Errorf("emergency_mode=%v, want false", resp["emergency_mode"])
+	}
+}
+
+func TestEmergencyPreset_ApplyNormal_ReturnsNonEmergency(t *testing.T) {
+	router, cleanup := newTestAbuseServer(t)
+	defer cleanup()
+
+	// First apply lockdown
+	w1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/api/abuse-preset/lockdown", nil)
+	req1.Header.Set("Authorization", "Bearer test-token")
+	router.ServeHTTP(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Fatalf("step 1 lockdown: %d", w1.Code)
+	}
+
+	// Then apply normal
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/abuse-preset/normal", nil)
+	req2.Header.Set("Authorization", "Bearer test-token")
+	router.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("step 2 normal: %d", w2.Code)
+	}
+
+	var cfg AbuseConfig
+	if err := json.NewDecoder(w2.Body).Decode(&cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if cfg.EmergencyMode {
+		t.Error("normal preset should set EmergencyMode=false")
+	}
+	if cfg.EmergencyPreset != "normal" {
+		t.Errorf("EmergencyPreset=%q, want normal", cfg.EmergencyPreset)
+	}
+	if cfg.RPS != 1.0 {
+		t.Errorf("normal rps=%f, want 1.0", cfg.RPS)
+	}
+}
+
+func TestEmergencyPreset_CautiousReturnsCautiousSettings(t *testing.T) {
+	router, cleanup := newTestAbuseServer(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/abuse-preset/cautious", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/abuse-preset/cautious = %d, want 200", w.Code)
+	}
+
+	var cfg AbuseConfig
+	if err := json.NewDecoder(w.Body).Decode(&cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if cfg.RPS > 0.6 || cfg.RPS < 0.4 {
+		t.Errorf("cautious rps=%f, want ~0.5", cfg.RPS)
+	}
+	if cfg.TokenBudget != 10000 {
+		t.Errorf("cautious token_budget=%d, want 10000", cfg.TokenBudget)
+	}
+	if cfg.CheapModel != "gpt-4o-mini" {
+		t.Errorf("cautious cheap_model=%q, want gpt-4o-mini", cfg.CheapModel)
+	}
+	if cfg.MinIntervalMs < 1500 {
+		t.Errorf("cautious min_interval_ms=%d, want >=2000", cfg.MinIntervalMs)
+	}
+	if cfg.MaxMessageLength != 1000 {
+		t.Errorf("cautious max_message_length=%d, want 1000", cfg.MaxMessageLength)
+	}
+	if cfg.EmergencyPreset != "cautious" {
+		t.Errorf("EmergencyPreset=%q, want cautious", cfg.EmergencyPreset)
+	}
+}

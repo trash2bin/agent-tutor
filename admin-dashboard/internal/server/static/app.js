@@ -67,6 +67,14 @@ function dashboard() {
     abuseSaveMsg: '',
     abuseAgentList: [],
 
+    // ── Emergency Panel ──
+    emergencyStatus: null,
+    emergencyActive: false,
+    emergencyCurrentPreset: 'normal',
+    emergencyApplying: false,
+    emergencyTimer: null,
+    emergencyConflicting: false,
+
     // ═══════════════════════════════════════════
     //  ANTI-ABUSE METHODS
     // ═══════════════════════════════════════════
@@ -76,6 +84,8 @@ function dashboard() {
         const cfg = await this.api('/api/abuse-settings');
         cfg._ua_text = (cfg.blocked_user_agents || []).join('\n');
         this.abuseGlobal = cfg;
+        // Also load emergency status
+        await this.loadEmergencyStatus();
       } catch (e) {
         // error already set
       }
@@ -129,6 +139,68 @@ function dashboard() {
         // error already set
       } finally {
         this.abuseSaving = false;
+      }
+    },
+
+    // ═══════════════════════════════════════════
+    //  EMERGENCY METHODS
+    // ═══════════════════════════════════════════
+    async loadEmergencyStatus() {
+      try {
+        const status = await this.api('/api/emergency-status');
+        this.emergencyStatus = status;
+        this.emergencyActive = status.emergency_mode;
+        this.emergencyCurrentPreset = status.emergency_preset || 'normal';
+      } catch(e) {
+        // api() sets this.error
+      }
+    },
+
+    async applyEmergencyPreset(preset) {
+      this.emergencyApplying = true;
+      this.error = '';
+      try {
+        const cfg = await this.api('/api/abuse-preset/' + preset, { method: 'POST' });
+        this.emergencyActive = cfg.emergency_mode;
+        this.emergencyCurrentPreset = cfg.emergency_preset || preset;
+        // Reload global settings so the form reflects new values
+        if (this.abuseGlobal) {
+          // Update the form fields from the response
+          Object.assign(this.abuseGlobal, cfg);
+          this.abuseGlobal._ua_text = (cfg.blocked_user_agents || []).join('\n');
+        }
+        await this.loadEmergencyStatus();
+      } catch(e) {
+        // error already set
+      } finally {
+        this.emergencyApplying = false;
+      }
+    },
+
+    get emergencyPresetClass() {
+      if (this.emergencyCurrentPreset === 'lockdown') return 'preset-lockdown';
+      if (this.emergencyCurrentPreset === 'cautious') return 'preset-cautious';
+      return 'preset-normal';
+    },
+
+    get emergencyPresetLabel() {
+      if (this.emergencyCurrentPreset === 'lockdown') return '🔴 Lockdown';
+      if (this.emergencyCurrentPreset === 'cautious') return '🟡 Cautious';
+      return '🟢 Normal';
+    },
+
+    get emergencyPresetDescription() {
+      if (this.emergencyCurrentPreset === 'lockdown') return 'Everything locked down: burst=1, 10 msg/session, 500 char limit, token budget 2000';
+      if (this.emergencyCurrentPreset === 'cautious') return 'Limited: burst=3, 30 msg/session, 1000 char limit, token budget 10000';
+      return 'Standard limits: burst=5, 50 msg/session, 2000 char limit, no token budget';
+    },
+
+    async toggleEmergencyMode() {
+      // Toggle between normal and lockdown
+      if (this.emergencyCurrentPreset === 'lockdown') {
+        await this.applyEmergencyPreset('normal');
+      } else {
+        await this.applyEmergencyPreset('lockdown');
       }
     },
 

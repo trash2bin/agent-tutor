@@ -66,6 +66,159 @@
     }
     .login-card .btn-primary:hover { background: #79b8ff; }
     .login-card .login-error { color: #f85149; font-size: 13px; margin-top: 8px; text-align: center; }
+/* ── Emergency Panel ── */
+.emergency-panel {
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 20px;
+  background: #161b22;
+  transition: all 0.3s ease;
+}
+.emergency-panel.preset-lockdown {
+  border-color: #f85149;
+  box-shadow: 0 0 20px rgba(248, 81, 73, 0.15);
+}
+.emergency-panel.preset-cautious {
+  border-color: #d29922;
+  box-shadow: 0 0 12px rgba(210, 153, 34, 0.1);
+}
+.emergency-panel.preset-normal {
+  border-color: #3fb950;
+}
+.emergency-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+.emergency-header h3 {
+  margin: 0;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.emergency-indicator {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: #21262d;
+}
+.preset-lockdown .emergency-indicator {
+  background: #490202;
+  color: #f85149;
+}
+.preset-cautious .emergency-indicator {
+  background: #3d2e00;
+  color: #d29922;
+}
+.preset-normal .emergency-indicator {
+  background: #003d1a;
+  color: #3fb950;
+}
+.emergency-desc {
+  color: #8b949e;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.emergency-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+.btn-emergency-on, .btn-emergency-off {
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 2px solid;
+  transition: all 0.2s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.btn-emergency-on {
+  background: #490202;
+  border-color: #f85149;
+  color: #f85149;
+  animation: pulse-red 2s infinite;
+}
+.btn-emergency-on:hover {
+  background: #5c0303;
+}
+.btn-emergency-on:disabled {
+  opacity: 0.5;
+  animation: none;
+}
+.btn-emergency-off {
+  background: #003d1a;
+  border-color: #3fb950;
+  color: #3fb950;
+}
+.btn-emergency-off:hover {
+  background: #005a24;
+}
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248,81,73,0.4); }
+  50% { box-shadow: 0 0 0 10px rgba(248,81,73,0); }
+}
+.emergency-presets {
+  display: flex;
+  gap: 6px;
+}
+.btn-preset {
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid #30363d;
+  background: #0d1117;
+  color: #c9d1d9;
+  transition: all 0.15s;
+}
+.btn-preset:hover:not(:disabled) {
+  border-color: #58a6ff;
+}
+.btn-preset.active {
+  border-color: #58a6ff;
+  background: #1f3a5f;
+}
+.btn-preset:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.btn-preset-normal.active { border-color: #3fb950; background: #003d1a; }
+.btn-preset-cautious.active { border-color: #d29922; background: #3d2e00; }
+.btn-preset-lockdown.active { border-color: #f85149; background: #490202; }
+.emergency-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #21262d;
+}
+.metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 80px;
+}
+.metric-label {
+  font-size: 11px;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.metric-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e6edf3;
+  margin-top: 2px;
+}
   </style>
 </head>
 <body x-data="dashboard()" x-init="init()">
@@ -661,15 +814,90 @@
       <div x-show="page === 'abuse'" x-cloak>
         <div class="page-header">
           <div class="page-header-left">
-            <h2>🛡️ Anti-Abuse / Rate Limiting</h2>
+            <h2>🛡️ Anti-Abuse & Emergency</h2>
           </div>
           <div class="page-header-right">
             <button @click="loadAbuseSettings(); loadAgents()" class="btn btn-sm">🔄</button>
           </div>
         </div>
 
+        <!-- ═══ EMERGENCY PANEL ═══ -->
+        <div class="card emergency-panel" :class="emergencyPresetClass">
+          <div class="emergency-header">
+            <div>
+              <h3>🚨 Emergency Mode</h3>
+              <p class="text-muted">One-click presets for DDoS protection and token cost reduction</p>
+            </div>
+            <div class="emergency-indicator" x-text="emergencyPresetLabel"></div>
+          </div>
+
+          <p class="emergency-desc" x-text="emergencyPresetDescription"></p>
+
+          <div class="emergency-controls">
+            <!-- Big Red Button -->
+            <button @click="toggleEmergencyMode()"
+                    :disabled="emergencyApplying"
+                    :class="emergencyCurrentPreset === 'lockdown' ? 'btn-emergency-off' : 'btn-emergency-on'">
+              <span x-show="!emergencyApplying && emergencyCurrentPreset !== 'lockdown'">🔴 ACTIVATE LOCKDOWN</span>
+              <span x-show="!emergencyApplying && emergencyCurrentPreset === 'lockdown'">✅ DEACTIVATE LOCKDOWN</span>
+              <span x-show="emergencyApplying">⏳ Applying...</span>
+            </button>
+
+            <!-- Preset selector -->
+            <div class="emergency-presets">
+              <button @click="applyEmergencyPreset('normal')"
+                      :disabled="emergencyApplying || emergencyCurrentPreset === 'normal'"
+                      class="btn-preset btn-preset-normal"
+                      :class="{ active: emergencyCurrentPreset === 'normal' }">
+                🟢 Normal
+              </button>
+              <button @click="applyEmergencyPreset('cautious')"
+                      :disabled="emergencyApplying || emergencyCurrentPreset === 'cautious'"
+                      class="btn-preset btn-preset-cautious"
+                      :class="{ active: emergencyCurrentPreset === 'cautious' }">
+                🟡 Cautious
+              </button>
+              <button @click="applyEmergencyPreset('lockdown')"
+                      :disabled="emergencyApplying || emergencyCurrentPreset === 'lockdown'"
+                      class="btn-preset btn-preset-lockdown"
+                      :class="{ active: emergencyCurrentPreset === 'lockdown' }">
+                🔴 Lockdown
+              </button>
+            </div>
+          </div>
+
+          <!-- Metrics -->
+          <div class="emergency-metrics" x-show="emergencyStatus">
+            <div class="metric">
+              <span class="metric-label">RPS</span>
+              <span class="metric-value" x-text="emergencyStatus.rps"></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Burst</span>
+              <span class="metric-value" x-text="emergencyStatus.burst"></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Token Budget</span>
+              <span class="metric-value" x-text="emergencyStatus.token_budget || '∞'"></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Cheap Model</span>
+              <span class="metric-value" x-text="emergencyStatus.cheap_model || '—'"></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Max Msg</span>
+              <span class="metric-value" x-text="emergencyStatus.max_messages"></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Min Interval</span>
+              <span class="metric-value" x-text="emergencyStatus.min_interval_ms + 'ms'"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ EXISTING ABUSE SETTINGS ═══ -->
         <!-- Tab switcher -->
-        <div class="tabs" style="display:flex;gap:8px;margin-bottom:16px;">
+        <div class="tabs" style="display:flex;gap:8px;margin-bottom:16px;margin-top:16px;">
           <button @click="abuseTab='global'" class="btn" :class="{'btn-primary': abuseTab==='global'}" :style="abuseTab==='global'?'':'background:var(--bg-secondary)'">🌐 Global defaults</button>
           <button @click="abuseTab='agent'" class="btn" :class="{'btn-primary': abuseTab==='agent'}" :style="abuseTab==='agent'?'':'background:var(--bg-secondary)'">🤖 Per-agent overrides</button>
         </div>
@@ -707,6 +935,18 @@
                 <div class="form-group">
                   <label>Max messages/session</label>
                   <input type="number" x-model.number="abuseGlobal.max_messages_per_session" min="1" placeholder="50">
+                </div>
+              </div>
+              <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div class="form-group">
+                  <label>Token budget (0=unlimited)</label>
+                  <input type="number" x-model.number="abuseGlobal.token_budget" min="0" placeholder="0">
+                  <small class="text-muted">Max tokens per session. 0 = unlimited.</small>
+                </div>
+                <div class="form-group">
+                  <label>Fallback cheap model</label>
+                  <input type="text" x-model="abuseGlobal.cheap_model" placeholder="gpt-4o-mini">
+                  <small class="text-muted">Model switch during budget/rate limit</small>
                 </div>
               </div>
               <div class="form-group">
@@ -764,6 +1004,16 @@
                 <div class="form-group">
                   <label>Burst (override)</label>
                   <input type="number" x-model.number="abuseAgentOverrides.burst" min="1" placeholder="(global default)">
+                </div>
+              </div>
+              <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div class="form-group">
+                  <label>Token budget (override)</label>
+                  <input type="number" x-model.number="abuseAgentOverrides.token_budget" min="0" placeholder="(global default)">
+                </div>
+                <div class="form-group">
+                  <label>Cheap model (override)</label>
+                  <input type="text" x-model="abuseAgentOverrides.cheap_model" placeholder="(global default)">
                 </div>
               </div>
               <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
@@ -868,6 +1118,8 @@
           </div>
         </form>
       </div>
+    </div>
+
     </div>
 
   <script src="/app.js"></script>

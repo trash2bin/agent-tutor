@@ -33,6 +33,12 @@ type AbuseConfig struct {
 	// User-Agent filtering
 	BlockEmptyUserAgent  bool     `json:"block_empty_user_agent"`
 	BlockedUserAgents    []string `json:"blocked_user_agents"`    // patterns to block
+
+	// Emergency / token saving
+	EmergencyMode   bool   `json:"emergency_mode"`    // global emergency toggle
+	TokenBudget     int    `json:"token_budget"`       // max tokens per session (0 = unlimited)
+	CheapModel      string `json:"cheap_model"`        // fallback LLM model name for cost saving
+	EmergencyPreset string `json:"emergency_preset"`   // "normal", "cautious", "lockdown"
 }
 
 // DefaultAbuseConfig returns sensible defaults (matching api-service env defaults).
@@ -52,6 +58,12 @@ func DefaultAbuseConfig() AbuseConfig {
 			"Go-http-client/*",
 			"Wget/*",
 		},
+
+		// Emergency defaults
+		EmergencyMode:   false,
+		TokenBudget:     0,   // 0 = unlimited
+		CheapModel:      "",  // empty = no fallback
+		EmergencyPreset: "normal",
 	}
 }
 
@@ -322,4 +334,98 @@ func (s *Server) proxyPutToApiService(path string, payload any) ([]byte, int, er
 
 	body, _ := io.ReadAll(resp.Body)
 	return body, resp.StatusCode, nil
+}
+
+// ── Emergency presets ──
+
+// EmergencyPresets returns preset configurations for quick switching.
+func EmergencyPresets() map[string]AbuseConfig {
+	normal := DefaultAbuseConfig()
+
+	cautious := DefaultAbuseConfig()
+	cautious.RPS = 0.5
+	cautious.Burst = 3
+	cautious.MaxMessageLength = 1000
+	cautious.MinIntervalMs = 2000
+	cautious.MaxMessagesPerSession = 30
+	cautious.BlockedUserAgents = append(cautious.BlockedUserAgents, "Mozilla/4.*", "MSIE.*")
+	cautious.TokenBudget = 10000
+	cautious.CheapModel = "gpt-4o-mini"
+	cautious.EmergencyPreset = "cautious"
+
+	lockdown := DefaultAbuseConfig()
+	lockdown.RPS = 0.2
+	lockdown.Burst = 1
+	lockdown.MaxMessageLength = 500
+	lockdown.MinIntervalMs = 5000
+	lockdown.MaxMessagesPerSession = 10
+	lockdown.BlockEmptyUserAgent = true
+	lockdown.BlockedUserAgents = []string{
+		"curl/*", "python-requests/*", "Go-http-client/*", "Wget/*",
+		"Mozilla/4.*", "MSIE.*", "Java/*", "libwww/*", "scrapy/*",
+		"axios/*", "PostmanRuntime/*",
+	}
+	lockdown.TokenBudget = 2000
+	lockdown.CheapModel = "gpt-4o-mini"
+	lockdown.EmergencyMode = true
+	lockdown.EmergencyPreset = "lockdown"
+
+	return map[string]AbuseConfig{
+		"normal":   normal,
+		"cautious": cautious,
+		"lockdown": lockdown,
+	}
+}
+
+// abusePresetHandler applies a preset and returns the resulting config.
+func (s *Server) abusePresetHandler(w http.ResponseWriter, r *http.Request) {
+	preset := chi.URLParam(r, "preset")
+
+	presets := EmergencyPresets()
+	cfg, ok := presets[preset]
+	if !ok {
+		respondError(w, http.StatusBadRequest, "invalid_preset",
+			fmt.Sprintf("unknown preset %q, valid: normal, cautious, lockdown", preset))
+		return
+	}
+
+	if s.abuseStore != nil {
+		if err := s.abuseStore.Set(cfg); err != nil {
+			respondError(w, http.StatusInternalServerError, "save_error", err.Error())
+			return
+		}
+	}
+
+	slog.Warn("emergency preset applied",
+		"preset", preset,
+		"emergency_mode", cfg.EmergencyMode,
+		"rps", cfg.RPS,
+		"burst", cfg.Burst,
+		"token_budget", cfg.TokenBudget,
+		"cheap_model", cfg.CheapModel,
+	)
+
+	respondJSON(w, http.StatusOK, cfg)
+}
+
+// emergencyStatusHandler returns current emergency state: mode, preset, and key metrics.
+func (s *Server) emergencyStatusHandler(w http.ResponseWriter, r *http.Request) {
+	var cfg AbuseConfig
+	if s.abuseStore != nil {
+		cfg = s.abuseStore.Get()
+	} else {
+		cfg = DefaultAbuseConfig()
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"emergency_mode":   cfg.EmergencyMode,
+		"emergency_preset": cfg.EmergencyPreset,
+		"rps":              cfg.RPS,
+		"burst":            cfg.Burst,
+		"token_budget":     cfg.TokenBudget,
+		"cheap_model":      cfg.CheapModel,
+		"max_messages":     cfg.MaxMessagesPerSession,
+		"min_interval_ms":  cfg.MinIntervalMs,
+		"active":           cfg.EmergencyMode && cfg.EmergencyPreset == "lockdown",
+	})
 }
