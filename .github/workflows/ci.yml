@@ -30,6 +30,8 @@ jobs:
         run: |
           npm install -g pyright
           pyright
+      - name: uv audit — dependency vulnerability scan
+        run: uv audit --preview-features audit-command
 
   test-python:
     name: Python tests
@@ -71,6 +73,11 @@ jobs:
         with:
           go-version: stable
           cache: true
+      - name: govulncheck — Go vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+        working-directory: ${{ matrix.dir }}
       - name: golangci-lint (install v2 from source)
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
         working-directory: ${{ matrix.dir }}

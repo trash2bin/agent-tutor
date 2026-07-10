@@ -1,9 +1,18 @@
-.PHONY: ci ci-lint-py ci-test-py ci-lint-go ci-test-go ci-all
+.PHONY: ci ci-lint-py ci-test-py ci-lint-go ci-test-go ci-audit ci-all
 
 ci-lint-py:
 	uv run ruff check api-service/src/
 	uv run ruff format --check api-service/src/
 	npm install -g pyright 2>/dev/null; pyright
+
+ci-audit:
+	-uv audit --preview-features audit-command
+	@echo ""
+	@echo "=== Go vulncheck (data-service) ==="
+	cd data-service && $$(go env GOPATH)/bin/govulncheck ./... 2>&1 | grep -E '(No vulnerabilities|Your code is affected|error)' || true
+	@echo ""
+	@echo "=== Go vulncheck (mcp-gateway) ==="
+	cd mcp-gateway && $$(go env GOPATH)/bin/govulncheck ./... 2>&1 | grep -E '(No vulnerabilities|Your code is affected|error)' || true
 
 ci-test-py:
 	PYTHONPATH=$(PWD) uv run pytest api-service/src/api_service/tests/ -v --tb=short
@@ -17,5 +26,5 @@ ci-test-go:
 	go test ./data-service/... -count=1 -timeout 180s
 	go test ./mcp-gateway/... -count=1 -timeout 180s
 
-ci: ci-lint-py ci-test-py ci-lint-go ci-test-go
+ci: ci-lint-py ci-audit ci-test-py ci-lint-go ci-test-go
 	@echo "✅ CI passed locally"

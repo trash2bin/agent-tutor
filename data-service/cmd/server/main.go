@@ -42,7 +42,6 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-chi/chi/v5"
-	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/agent-tutor/agent-tutor-go/config"
 	"github.com/agent-tutor/data-service/internal/configgen"
@@ -191,7 +190,6 @@ func main() {
 	rootRouter.Use(server.RecoveryMiddleware)
 	rootRouter.Use(server.RequestIDMiddleware)
 	rootRouter.Use(server.StructuredLoggingMiddleware)
-	rootRouter.Use(chimw.RealIP)
 	rootRouter.Use(server.TenantIDMiddleware("X-Tenant-ID"))
 
 	// Mount admin endpoints separately to avoid routing conflicts

@@ -51,7 +51,6 @@ func NewRouterFromConfig(ts *TenantStore, cfg *config.Config, db runtime.Adapter
 	r.Use(RecoveryMiddleware)
 	r.Use(RequestIDMiddleware)
 	r.Use(StructuredLoggingMiddleware)
-	r.Use(chimw.RealIP)
 	r.Use(chimw.Timeout(time.Duration(ResolveRequestTimeout(cfg)) * time.Second))
 
 	// Multi-tenancy: X-Tenant-ID middleware (если auth настроен)
