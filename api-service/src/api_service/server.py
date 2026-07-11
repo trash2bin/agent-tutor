@@ -43,7 +43,12 @@ from api_service.http_models import (
 )
 from api_service.agent_store import AgentStore
 from api_service.log_config import configure_logging
-from api_service.prometheus_metrics import init_metrics
+from api_service.prometheus_metrics import (
+    init_metrics,
+    chat_sessions_total,
+    chat_messages_total,
+    embed_widget_requests,
+)
 
 configure_logging()
 logger = logging.getLogger("api_service.server")
@@ -163,6 +168,8 @@ async def chat_handler(request: Request) -> StreamingResponse:
 
     # Prefix: direct sessions are isolated from agent sessions
     effective_session_id = f"direct:{session_id}"
+    chat_sessions_total.inc()
+    chat_messages_total.labels(status="sent").inc()
 
     async def events():
         try:
@@ -311,6 +318,7 @@ async def add_embed_security_headers(
 ) -> Any:
     response = await call_next(request)
     if request.url.path.startswith("/embed/"):
+        embed_widget_requests.labels(endpoint=request.url.path).inc()
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         # Cache static assets for 1 year (they are versioned by deploy)

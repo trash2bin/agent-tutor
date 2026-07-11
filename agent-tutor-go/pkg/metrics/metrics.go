@@ -30,7 +30,7 @@ var DataRequestDuration = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Name:    "data_request_duration_ms",
 		Help:    "Request latency in milliseconds.",
-		Buckets: prometheus.DefBuckets,
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000},
 	},
 	[]string{"entity", "operation"},
 )
@@ -40,7 +40,7 @@ var DBQueryDuration = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Name:    "data_db_query_duration_ms",
 		Help:    "Database query latency in milliseconds.",
-		Buckets: prometheus.DefBuckets,
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000},
 	},
 	[]string{"tenant"},
 )

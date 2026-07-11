@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from api_service.prometheus_metrics import backlog_records_total, backlog_errors_total
 from demo.settings import settings
 
 logger = logging.getLogger("api_service.backlog")
@@ -45,6 +46,15 @@ class ModelBacklog:
         return kw
 
     def _write(self, session_id: str, record: dict[str, Any]) -> None:
+        backlog_records_total.labels(
+            type=record.get("type", record.get("event", "unknown"))
+        ).inc()
+        if record.get("type") == RECORD_ERROR or record.get("event") == "error":
+            backlog_errors_total.labels(
+                error_type=record.get("data", {}).get("error", "internal")[:50]
+                if isinstance(record.get("data"), dict)
+                else "internal"
+            ).inc()
         path = self._path(session_id)
         try:
             text = json.dumps(record, ensure_ascii=False, indent=2, default=str)

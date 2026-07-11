@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -8,6 +10,7 @@ import (
 	"time"
 
 	"github.com/agent-tutor/agent-tutor-go/config"
+	"github.com/agent-tutor/agent-tutor-go/pkg/metrics"
 	"github.com/agent-tutor/data-service/internal/configgen"
 	"github.com/agent-tutor/data-service/internal/datasource"
 	"github.com/agent-tutor/data-service/internal/runtime"
@@ -16,6 +19,44 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+// metricsAdapter wraps runtime.AdapterSubset with Prometheus instrumentation.
+type metricsAdapter struct {
+	inner runtime.AdapterSubset
+}
+
+func (m *metricsAdapter) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	start := time.Now()
+	rows, err := m.inner.QueryContext(ctx, query, args...)
+	// Use Seconds()*1000 for sub-millisecond precision — SQLite queries can be <1ms
+	elapsed := time.Since(start).Seconds() * 1000
+
+	// Extract tenant ID from context; fallback to "unknown" if not set
+	tenantID := resolvetenantID(ctx)
+	metrics.DBQueryDuration.WithLabelValues(tenantID).Observe(elapsed)
+	return rows, err
+}
+
+func (m *metricsAdapter) PingContext(ctx context.Context) error {
+	return m.inner.PingContext(ctx)
+}
+
+func (m *metricsAdapter) QuoteIdentifier(name string) string {
+	return m.inner.QuoteIdentifier(name)
+}
+
+func (m *metricsAdapter) TranslatePlaceholder(index int) string {
+	return m.inner.TranslatePlaceholder(index)
+}
+
+// resolvetenantID extracts tenant ID from context, set by TenantIDMiddleware.
+// Falls back to "default" for request paths that bypass tenant routing (/metrics).
+func resolvetenantID(ctx context.Context) string {
+	if id, ok := ctx.Value(tenantIDKey).(string); ok && id != "" {
+		return id
+	}
+	return "default"
+}
 
 // NewRouterFromConfig создаёт chi-роутер на основе конфигурации.
 //
@@ -37,8 +78,11 @@ func NewRouterFromConfig(ts *TenantStore, cfg *config.Config, db runtime.Adapter
 
 	builder := runtime.NewBuilder(adapter)
 
+	// Wrap db adapter with Prometheus metrics instrumentation
+	instrumentedDB := &metricsAdapter{inner: db}
+
 	ctx := &handlers.Context{
-		DB:            db,
+		DB:            instrumentedDB,
 		Adapter:       adapter,
 		Builder:       builder,
 		Resolver:      resolver,

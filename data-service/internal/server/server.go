@@ -50,7 +50,7 @@ func StructuredLoggingMiddleware(next http.Handler) http.Handler {
 
 		// Prometheus metrics — entity="all" для корневого уровня
 		metrics.DataRequestsTotal.WithLabelValues("all", r.Method, strconv.Itoa(wrapped.statusCode)).Inc()
-		metrics.DataRequestDuration.WithLabelValues("all", r.Method).Observe(float64(time.Since(start).Milliseconds()))
+		metrics.DataRequestDuration.WithLabelValues("all", r.Method).Observe(float64(time.Since(start).Seconds()) * 1000)
 
 		slog.Info("request",
 			"method", r.Method,
