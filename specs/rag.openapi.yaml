@@ -161,8 +161,346 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /admin/config:
+    get:
+      summary: Получить RAG-конфиг
+      description: Возвращает текущую конфигурацию RAG (embedding_api_key маскирован).
+      operationId: admin_get_config_admin_config_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminConfigResponse'
+    put:
+      summary: Обновить RAG-конфиг
+      description: Применяет новые параметры конфигурации RAG. После обновления сбрасывает
+        pipeline — новый pipeline создастся при следующем вызове get_pipeline() с
+        обновлённым конфигом. embedding_api_key не принимается (читается только из
+        env).
+      operationId: admin_put_config_admin_config_put
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminConfigUpdateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminConfigResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/stats:
+    get:
+      summary: Статистика RAG
+      description: Возвращает количество документов, чанков и размер ChromaDB.
+      operationId: admin_get_stats_admin_stats_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminStatsResponse'
 components:
   schemas:
+    AdminConfigResponse:
+      properties:
+        embedding_provider:
+          type: string
+          title: Embedding Provider
+          description: 'Провайдер эмбеддингов: local | litellm'
+          default: local
+        embedding_model:
+          type: string
+          title: Embedding Model
+          description: Модель эмбеддингов
+          default: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+        embedding_batch_size:
+          type: integer
+          title: Embedding Batch Size
+          description: Размер батча эмбеддингов
+          default: 64
+        embedding_device:
+          type: string
+          title: Embedding Device
+          description: 'Устройство: cpu | cuda'
+          default: cpu
+        embedding_local_files_only:
+          type: boolean
+          title: Embedding Local Files Only
+          description: Только локальные файлы модели
+          default: false
+        embedding_query_prefix:
+          type: string
+          title: Embedding Query Prefix
+          description: Префикс для query
+          default: ''
+        embedding_passage_prefix:
+          type: string
+          title: Embedding Passage Prefix
+          description: Префикс для passage
+          default: ''
+        embedding_api_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Embedding Api Key
+          description: API-ключ эмбеддингов (маскирован)
+        embedding_api_base:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Embedding Api Base
+          description: Базовый URL API эмбеддингов
+        embedding_dimensions:
+          type: integer
+          title: Embedding Dimensions
+          description: Размерность вектора для API-провайдеров
+          default: 1536
+        chunker_type:
+          type: string
+          title: Chunker Type
+          description: Тип чанкера
+          default: semantic
+        chunk_size:
+          type: integer
+          title: Chunk Size
+          description: Размер чанка (токенов)
+          default: 768
+        chunk_overlap:
+          type: integer
+          title: Chunk Overlap
+          description: Перекрытие чанков
+          default: 160
+        page_overlap_tokens:
+          type: integer
+          title: Page Overlap Tokens
+          description: Перекрытие между страницами
+          default: 50
+        chroma_path:
+          type: string
+          title: Chroma Path
+          description: Путь к ChromaDB
+          default: ''
+        chroma_collection:
+          type: string
+          title: Chroma Collection
+          description: Коллекция ChromaDB
+          default: university_documents
+        rag_db_path:
+          type: string
+          title: Rag Db Path
+          description: Путь к SQLite RAG
+          default: ''
+        rag_instruction:
+          type: string
+          title: Rag Instruction
+          description: Инструкция для LLM о том, как использовать RAG-контекст
+          default: Ответь на вопрос только по найденным фрагментам документов.
+        reranker_enabled:
+          type: boolean
+          title: Reranker Enabled
+          description: BM25 reranker включён
+          default: true
+        reranker_k1:
+          type: number
+          title: Reranker K1
+          description: Параметр K1 BM25
+          default: 1.5
+        reranker_b:
+          type: number
+          title: Reranker B
+          description: Параметр B BM25
+          default: 0.75
+        reranker_dense_factor:
+          type: integer
+          title: Reranker Dense Factor
+          description: Множитель dense-кандидатов перед BM25
+          default: 3
+        cache_enabled:
+          type: boolean
+          title: Cache Enabled
+          description: Кэш поиска включён
+          default: true
+        cache_maxsize:
+          type: integer
+          title: Cache Maxsize
+          description: Максимальный размер кэша
+          default: 256
+        cache_ttl:
+          type: integer
+          title: Cache Ttl
+          description: TTL кэша в секундах
+          default: 300
+        search_limit_max:
+          type: integer
+          title: Search Limit Max
+          description: Максимальный лимит поиска
+          default: 20
+        context_max_tokens:
+          type: integer
+          title: Context Max Tokens
+          description: Максимум токенов в контексте
+          default: 8000
+      type: object
+      title: AdminConfigResponse
+      description: RAG-конфиг для админ-панели (embedding_api_key маскируется).
+    AdminConfigUpdateRequest:
+      properties:
+        embedding_provider:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Embedding Provider
+        embedding_model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Embedding Model
+        embedding_batch_size:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Embedding Batch Size
+        embedding_device:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Embedding Device
+        embedding_local_files_only:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Embedding Local Files Only
+        embedding_query_prefix:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Embedding Query Prefix
+        embedding_passage_prefix:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Embedding Passage Prefix
+        embedding_api_base:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Embedding Api Base
+        embedding_dimensions:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Embedding Dimensions
+        chunker_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Chunker Type
+        chunk_size:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Chunk Size
+        chunk_overlap:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Chunk Overlap
+        page_overlap_tokens:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Page Overlap Tokens
+        chroma_collection:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Chroma Collection
+        rag_instruction:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Rag Instruction
+        reranker_enabled:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Reranker Enabled
+        reranker_k1:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Reranker K1
+        reranker_b:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Reranker B
+        reranker_dense_factor:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Reranker Dense Factor
+        cache_enabled:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Cache Enabled
+        cache_maxsize:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Cache Maxsize
+        cache_ttl:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Cache Ttl
+        search_limit_max:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Search Limit Max
+        context_max_tokens:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Context Max Tokens
+      type: object
+      title: AdminConfigUpdateRequest
+      description: Обновление RAG-конфига (все поля опциональны, api_key не принимается).
+    AdminStatsResponse:
+      properties:
+        document_count:
+          type: integer
+          title: Document Count
+          description: Количество документов в индексе
+        chunk_count:
+          type: integer
+          title: Chunk Count
+          description: Количество чанков в индексе
+        chroma_size_mb:
+          type: number
+          title: Chroma Size Mb
+          description: Размер хранилища ChromaDB в мегабайтах
+      type: object
+      required:
+      - document_count
+      - chunk_count
+      - chroma_size_mb
+      title: AdminStatsResponse
+      description: Статистика RAG-сервиса.
     Body_upload_document_documents_upload_post:
       properties:
         file:

@@ -115,6 +115,9 @@ func (c *RagClient) Do(method, path string, body any) ([]byte, int, error) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	if c.adminToken != "" {
+		req.Header.Set("X-Admin-Token", c.adminToken)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

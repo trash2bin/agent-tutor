@@ -8,17 +8,21 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import tempfile
+from contextlib import asynccontextmanager
 from typing import Any, Callable, Awaitable
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import generate_latest, REGISTRY
 
 from rag.db import RagDB
 from rag import create_rag_pipeline
+from rag.config import RagConfig
 from rag.http_models import (
     ContextRequest,
     ContextResponse,
@@ -32,6 +36,22 @@ from rag.http_models import (
     SearchRequest,
     SearchResponse,
 )
+from rag.admin_http_models import (
+    AdminConfigResponse,
+    AdminConfigUpdateRequest,
+    AdminStatsResponse,
+)
+from rag.prometheus_metrics import (
+    rag_documents,
+    rag_chunks,
+    rag_chroma_size,
+    rag_searches,
+    rag_search_duration,
+    rag_import_duration,
+    rag_cache_entries,
+    rag_cache_hits,
+    rag_cache_misses,
+)
 
 logger = logging.getLogger("rag.service")
 
@@ -39,6 +59,7 @@ logger = logging.getLogger("rag.service")
 
 RAG_HOST: str = os.environ.get("RAG_HOST", "127.0.0.1")
 RAG_PORT: int = int(os.environ.get("RAG_PORT", "8082"))
+ADMIN_API_TOKEN: str = os.environ.get("ADMIN_API_TOKEN", "")
 
 
 # === Состояние сервиса (singleton) ===
@@ -50,22 +71,35 @@ class ServiceState:
     def __init__(self) -> None:
         self._db: RagDB | None = None
         self._pipeline = None
+        self._config: RagConfig | None = None
 
     def get_db(self):
         if self._db is None:
             self._db = RagDB()
         return self._db
 
+    @property
+    def config(self) -> RagConfig:
+        if self._config is None:
+            self._config = RagConfig.from_env()
+        return self._config
+
     def get_pipeline(self):
         if self._pipeline is None:
-            self._pipeline = create_rag_pipeline(self.get_db().conn)
+            self._pipeline = create_rag_pipeline(self.get_db().conn, config=self.config)
         return self._pipeline
+
+    def reset_pipeline(self) -> None:
+        """Сбросить pipeline — при следующем вызове get_pipeline()
+        пересоздаст его с текущим ServiceState.config."""
+        self._pipeline = None
 
     def close(self) -> None:
         if self._db is not None:
             self._db.close()
             self._db = None
             self._pipeline = None
+            self._config = None
 
 
 state = ServiceState()
@@ -73,12 +107,24 @@ state = ServiceState()
 
 # === Приложение ===
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan для корректного shutdown."""
+    yield
+    logger.info("Shutting down RAG service...")
+    state.close()
+
+
 app = FastAPI(
     title="RAG Service",
     description="HTTP API for RAG pipeline (indexing and semantic search)",
     version="1.1.0",
+    lifespan=lifespan,
     swagger_ui_parameters={"tryItOutEnabled": True},
 )
+
+
 
 # CORS middleware
 # allow_origins from env: comma-separated, or default to localhost:8080 for dev.
@@ -90,8 +136,8 @@ cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()] or 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Tenant-ID", "X-Correlation-ID"],
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Admin-Token", "X-Tenant-ID", "X-Correlation-ID"],
 )
 
 
@@ -203,13 +249,14 @@ async def list_documents(req: ListDocumentsRequest) -> ListDocumentsResponse:
 async def import_document(req: ImportDocumentRequest) -> ImportDocumentResponse:
     try:
         # Долгая операция: парсинг + embedding + ChromaDB + SQLite — в thread pool
-        result = await run_in_threadpool(
-            state.get_pipeline().import_document,
-            path=req.path,
-            discipline_id=req.discipline_id,
-            discipline_name=req.discipline_name,
-            title=req.title,
-        )
+        with rag_import_duration.time():
+            result = await run_in_threadpool(
+                state.get_pipeline().import_document,
+                path=req.path,
+                discipline_id=req.discipline_id,
+                discipline_name=req.discipline_name,
+                title=req.title,
+            )
         return ImportDocumentResponse(
             document=result.document,
             chunks_count=result.chunks_count,
@@ -255,13 +302,14 @@ async def upload_document(
         with open(save_path, "wb") as f:
             f.write(content)
 
-        result = await run_in_threadpool(
-            state.get_pipeline().import_document,
-            path=save_path,
-            discipline_id=discipline_id,
-            discipline_name=discipline_name,
-            title=title,
-        )
+        with rag_import_duration.time():
+            result = await run_in_threadpool(
+                state.get_pipeline().import_document,
+                path=save_path,
+                discipline_id=discipline_id,
+                discipline_name=discipline_name,
+                title=title,
+            )
         return ImportDocumentResponse(
             document=result.document,
             chunks_count=result.chunks_count,
@@ -278,6 +326,8 @@ async def upload_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload document: {exc}",
         )
+    finally:
+        shutil.rmtree(upload_dir, ignore_errors=True)
 
 
 @app.post(
@@ -340,17 +390,20 @@ async def delete_document(req: DeleteDocumentRequest) -> DeleteDocumentResponse:
 )
 async def search(req: SearchRequest) -> SearchResponse:
     try:
-        results = await run_in_threadpool(
-            state.get_pipeline().search_documents,
-            query=req.query,
-            discipline_id=req.discipline_id,
-            limit=req.limit,
-        )
+        rag_searches.labels(status="ok").inc()
+        with rag_search_duration.time():
+            results = await run_in_threadpool(
+                state.get_pipeline().search_documents,
+                query=req.query,
+                discipline_id=req.discipline_id,
+                limit=req.limit,
+            )
         return SearchResponse(
             results=list(results),
             count=len(results),
         )
     except Exception as exc:
+        rag_searches.labels(status="error").inc()
         logger.exception("search failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -382,6 +435,151 @@ async def context(req: ContextRequest) -> ContextResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Context build failed: {exc}",
         )
+
+
+# === Prometheus metrics endpoint ===
+
+
+@app.get(
+    "/metrics",
+    summary="Prometheus-метрики",
+    description="Экспорт метрик RAG-сервиса в формате Prometheus.",
+    include_in_schema=False,
+)
+async def metrics():
+    return Response(
+        content=generate_latest(REGISTRY),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
+# === Admin API (защищённые эндпоинты для dashboard) ===
+
+
+def _check_admin_token(request: Request) -> None:
+    """Проверить X-Admin-Token, если ADMIN_API_TOKEN настроен."""
+    if not ADMIN_API_TOKEN:
+        return
+    token = request.headers.get("X-Admin-Token", "")
+    if token != ADMIN_API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or missing X-Admin-Token",
+        )
+
+
+@app.get(
+    "/admin/config",
+    response_model=AdminConfigResponse,
+    summary="Получить RAG-конфиг",
+    description="Возвращает текущую конфигурацию RAG (embedding_api_key маскирован).",
+)
+async def admin_get_config(request: Request) -> AdminConfigResponse:
+    _check_admin_token(request)
+    config = state.config
+    data = config.__dict__.copy()
+    # Маскируем embedding_api_key
+    if data.get("embedding_api_key"):
+        data["embedding_api_key"] = "***"
+    return AdminConfigResponse(**data)
+
+
+@app.put(
+    "/admin/config",
+    status_code=status.HTTP_200_OK,
+    summary="Обновить RAG-конфиг",
+    description=(
+        "Применяет новые параметры конфигурации RAG. "
+        "После обновления сбрасывает pipeline — новый pipeline создастся "
+        "при следующем вызове get_pipeline() с обновлённым конфигом. "
+        "embedding_api_key не принимается (читается только из env)."
+    ),
+)
+async def admin_put_config(
+    request: Request, req: AdminConfigUpdateRequest
+) -> AdminConfigResponse:
+    _check_admin_token(request)
+    config = state.config
+
+    update_data = req.model_dump(exclude_none=True)
+    for key, value in update_data.items():
+        if hasattr(config, key):
+            setattr(config, key, value)
+
+    # Сбрасываем pipeline — get_pipeline() пересоздаст с обновлённым конфигом
+    state.reset_pipeline()
+
+    # Отдаём обновлённый конфиг (с маскированным ключом)
+    data = config.__dict__.copy()
+    if data.get("embedding_api_key"):
+        data["embedding_api_key"] = "***"
+    return AdminConfigResponse(**data)
+
+
+@app.get(
+    "/admin/stats",
+    response_model=AdminStatsResponse,
+    summary="Статистика RAG",
+    description="Возвращает количество документов, чанков и размер ChromaDB.",
+)
+async def admin_get_stats(request: Request) -> AdminStatsResponse:
+    _check_admin_token(request)
+    db = state.get_db()
+
+    try:
+        cursor = db.conn.execute("SELECT COUNT(*) AS cnt FROM documents")
+        document_count = cursor.fetchone()["cnt"]
+        cursor.close()
+
+        cursor = db.conn.execute("SELECT COUNT(*) AS cnt FROM document_chunks")
+        chunk_count = cursor.fetchone()["cnt"]
+        cursor.close()
+    except Exception as exc:
+        logger.exception("Failed to query RAG stats")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to query stats: {exc}",
+        )
+
+    # Размер ChromaDB
+    chroma_size_mb = 0.0
+    chroma_size_bytes = 0
+    try:
+        pipeline = state.get_pipeline()
+        chroma_path = pipeline.config.chroma_path
+        if chroma_path:
+            total_bytes = 0
+            for dirpath, dirnames, filenames in os.walk(chroma_path):
+                for fn in filenames:
+                    fp = os.path.join(dirpath, fn)
+                    try:
+                        total_bytes += os.path.getsize(fp)
+                    except OSError:
+                        pass
+            chroma_size_bytes = total_bytes
+            chroma_size_mb = round(total_bytes / (1024 * 1024), 2)
+    except Exception as exc:
+        logger.warning("Failed to calculate ChromaDB size: %s", exc)
+
+    # Обновляем Prometheus-метрики
+    rag_documents.set(document_count)
+    rag_chunks.set(chunk_count)
+    rag_chroma_size.set(chroma_size_bytes)
+
+    # Обновляем метрики кэша
+    pipeline = state.get_pipeline()
+    try:
+        if hasattr(pipeline, '_cache') and pipeline._cache is not None:
+            if hasattr(pipeline._cache, '_cache'):
+                rag_cache_entries.set(len(pipeline._cache._cache))
+    except Exception:
+        pass
+
+    return AdminStatsResponse(
+        document_count=document_count,
+        chunk_count=chunk_count,
+        chroma_size_mb=chroma_size_mb,
+    )
 
 
 def main() -> None:

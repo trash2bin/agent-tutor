@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agent-tutor/agent-tutor-go/pkg/metrics"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/agent-tutor/agent-tutor-go/pkg/metrics"
 )
 
 // Options для создания сервера.
@@ -132,6 +132,9 @@ func (s *Server) Router() chi.Router {
 
 		// RAG
 		r.Get("/rag/health", s.ragHealthHandler)
+		r.Get("/rag/config", s.ragConfigGetHandler)
+		r.Put("/rag/config", s.ragConfigPutHandler)
+		r.Get("/rag/stats", s.ragStatsHandler)
 		r.Post("/rag/documents/list", s.ragDocListHandler)
 		r.Post("/rag/documents/import", s.ragDocImportHandler)
 		r.Post("/rag/documents/upload", s.ragDocUploadHandler)
@@ -413,9 +416,9 @@ func (s *Server) dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	var respData map[string]json.RawMessage
 	if err := json.Unmarshal(body, &respData); err != nil {
 		respondJSON(w, http.StatusOK, map[string]any{
-			"tenants":        json.RawMessage(body),
-			"tenant_count":   0,
-			"data_service":   s.opts.DataSvcURL,
+			"tenants":      json.RawMessage(body),
+			"tenant_count": 0,
+			"data_service": s.opts.DataSvcURL,
 		})
 		return
 	}
@@ -430,9 +433,9 @@ func (s *Server) dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{
-		"tenants":        respData["tenants"],
-		"tenant_count":   tCount,
-		"data_service":   s.opts.DataSvcURL,
+		"tenants":      respData["tenants"],
+		"tenant_count": tCount,
+		"data_service": s.opts.DataSvcURL,
 	})
 }
 
@@ -839,6 +842,46 @@ func (s *Server) ragDocUploadHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	w.Write(respBody)
+}
+
+// ── RAG Admin API ──
+
+func (s *Server) ragConfigGetHandler(w http.ResponseWriter, r *http.Request) {
+	body, status, err := s.ragClient.Do(http.MethodGet, "/admin/config", nil)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "rag_unreachable", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(body)
+}
+
+func (s *Server) ragConfigPutHandler(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "read_error", err.Error())
+		return
+	}
+	respBody, status, err := s.ragClient.Do(http.MethodPut, "/admin/config", json.RawMessage(body))
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "rag_unreachable", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(respBody)
+}
+
+func (s *Server) ragStatsHandler(w http.ResponseWriter, r *http.Request) {
+	body, status, err := s.ragClient.Do(http.MethodGet, "/admin/stats", nil)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "rag_unreachable", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(body)
 }
 
 // ── Proxy to API Service (agent CRUD) ──

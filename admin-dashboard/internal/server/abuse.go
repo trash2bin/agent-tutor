@@ -26,19 +26,19 @@ type AbuseConfig struct {
 	Burst int     `json:"burst"` // burst size (env: CHAT_RATE_LIMIT_BURST)
 
 	// Message restrictions
-	MaxMessageLength  int `json:"max_message_length"`  // max chars per message
-	MinIntervalMs     int `json:"min_interval_ms"`     // min ms between messages in a session
+	MaxMessageLength      int `json:"max_message_length"`       // max chars per message
+	MinIntervalMs         int `json:"min_interval_ms"`          // min ms between messages in a session
 	MaxMessagesPerSession int `json:"max_messages_per_session"` // max messages per session
 
 	// User-Agent filtering
-	BlockEmptyUserAgent  bool     `json:"block_empty_user_agent"`
-	BlockedUserAgents    []string `json:"blocked_user_agents"`    // patterns to block
+	BlockEmptyUserAgent bool     `json:"block_empty_user_agent"`
+	BlockedUserAgents   []string `json:"blocked_user_agents"` // patterns to block
 
 	// Emergency / token saving
-	EmergencyMode   bool   `json:"emergency_mode"`    // global emergency toggle
-	TokenBudget     int    `json:"token_budget"`       // max tokens per session (0 = unlimited)
-	CheapModel      string `json:"cheap_model"`        // fallback LLM model name for cost saving
-	EmergencyPreset string `json:"emergency_preset"`   // "normal", "cautious", "lockdown"
+	EmergencyMode   bool   `json:"emergency_mode"`   // global emergency toggle
+	TokenBudget     int    `json:"token_budget"`     // max tokens per session (0 = unlimited)
+	CheapModel      string `json:"cheap_model"`      // fallback LLM model name for cost saving
+	EmergencyPreset string `json:"emergency_preset"` // "normal", "cautious", "lockdown"
 }
 
 // DefaultAbuseConfig returns sensible defaults (matching api-service env defaults).
@@ -47,8 +47,8 @@ func DefaultAbuseConfig() AbuseConfig {
 		RPS:   1.0,
 		Burst: 5,
 
-		MaxMessageLength:     2000,
-		MinIntervalMs:        1000,
+		MaxMessageLength:      2000,
+		MinIntervalMs:         1000,
 		MaxMessagesPerSession: 50,
 
 		BlockEmptyUserAgent: true,
@@ -61,8 +61,8 @@ func DefaultAbuseConfig() AbuseConfig {
 
 		// Emergency defaults
 		EmergencyMode:   false,
-		TokenBudget:     0,   // 0 = unlimited
-		CheapModel:      "",  // empty = no fallback
+		TokenBudget:     0,  // 0 = unlimited
+		CheapModel:      "", // empty = no fallback
 		EmergencyPreset: "normal",
 	}
 }
@@ -72,13 +72,13 @@ func DefaultAbuseConfig() AbuseConfig {
 // AgentAbuseOverride represents per-agent overrides for abuse settings.
 // Empty/null fields mean "use global default".
 type AgentAbuseOverride struct {
-	RPS                 *float64 `json:"rps,omitempty"`
-	Burst               *int     `json:"burst,omitempty"`
-	MaxMessageLength    *int     `json:"max_message_length,omitempty"`
-	MinIntervalMs       *int     `json:"min_interval_ms,omitempty"`
-	MaxMessagesPerSession *int  `json:"max_messages_per_session,omitempty"`
-	BlockEmptyUserAgent *bool    `json:"block_empty_user_agent,omitempty"`
-	BlockedUserAgents   []string `json:"blocked_user_agents,omitempty"`
+	RPS                   *float64 `json:"rps,omitempty"`
+	Burst                 *int     `json:"burst,omitempty"`
+	MaxMessageLength      *int     `json:"max_message_length,omitempty"`
+	MinIntervalMs         *int     `json:"min_interval_ms,omitempty"`
+	MaxMessagesPerSession *int     `json:"max_messages_per_session,omitempty"`
+	BlockEmptyUserAgent   *bool    `json:"block_empty_user_agent,omitempty"`
+	BlockedUserAgents     []string `json:"blocked_user_agents,omitempty"`
 }
 
 // ── File-based global store ──

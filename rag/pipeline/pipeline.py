@@ -7,17 +7,18 @@ from pathlib import Path
 from typing import Callable
 
 from rag.config import RagConfig
-from rag.interfaces import EmbeddingProtocol, VectorStoreProtocol
+from rag.embedding.protocol import EmbeddingProtocol
+from rag.vector_store.protocol import VectorStoreProtocol
 from agent_tutor_sdk.rag.models import (
     Document,
     DocumentImportResult,
     RagContext,
     RagSearchResult,
 )
-from rag.parser import DocumentParser
-from rag.chunker import TextChunker
-from rag.repository import DocumentRepository
-from rag.reranker import BM25Reranker
+from rag.parser.parser import DocumentParser
+from rag.chunker.base import TextChunker
+from rag.pipeline.repository import DocumentRepository
+from rag.reranker.bm25 import BM25Reranker
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ class RAGPipeline:
         if not chunks:
             raise ValueError(f"Document has no readable text: {source_path}")
 
-        # Сохранение (транзакция SQLite + ChromaDB внутри repository)
+        # Сохранение (транзакция SQLite + VectorStore внутри repository)
         result = self.repository.save_document_with_chunks(
             source_path=str(source_path),
             chunks=chunks,
@@ -92,12 +93,7 @@ class RAGPipeline:
     def list_documents(
         self, discipline_id: str | None = None, limit: int | None = None
     ) -> list[Document]:
-        """Список документов в публичном формате (Document Pydantic).
-
-        Args:
-            discipline_id: Опциональный ID дисциплины для фильтрации
-            limit: Максимальное количество возвращаемых документов (None = без ограничения)
-        """
+        """Список документов в публичном формате (Document Pydantic)."""
         rows = self.repository.list_documents(discipline_id, limit)
         return [self.repository._to_document_model(r) for r in rows]
 
@@ -111,25 +107,20 @@ class RAGPipeline:
         discipline_id: str | None = None,
         limit: int = 5,
     ) -> list[RagSearchResult]:
-        """Семантический поиск с BM25 reranker'ом поверх dense-поиска.
-
-        Dense-поиск (ChromaDB) даёт семантически близкие результаты.
-        BM25 reranker добивает keyword-точные запросы (HTTPS, Cache-Control,
-        бинарный поиск), которые dense-эмбеддинги могут не дотянуть.
-
-        Стратегия:
-          1. Запрашиваем limit * reranker_dense_factor кандидатов из ChromaDB
-          2. Переранжируем по BM25(query, content каждого чанка)
-          3. Возвращаем top-{limit}
-        """
+        """Семантический поиск с BM25 reranker'ом поверх dense-поиска."""
         normalized_query = query.strip()
         if not normalized_query:
             return []
 
+        # Проверяем кэш
+        if hasattr(self, '_cache') and self._cache is not None:
+            cached = self._cache.get_cached_search(normalized_query, discipline_id, limit)
+            if cached is not None:
+                return cached
+
         limit = max(1, min(limit, self.config.search_limit_max))
 
         if self.config.reranker_enabled:
-            # Dense + BM25 rerank
             dense_limit = limit * self.config.reranker_dense_factor
             results = self.vector_store.search(
                 query=normalized_query,
@@ -141,17 +132,22 @@ class RAGPipeline:
                     k1=self.config.reranker_k1,
                     b=self.config.reranker_b,
                 )
-                # Сохраняем dense-score для отладки, сортируем по BM25
                 reranked = reranker.rerank_with_scores(normalized_query, results)
-                return [r for r, _ in reranked[:limit]]
-            return []
+                result = [r for r, _ in reranked[:limit]]
+            else:
+                result = []
         else:
-            # Pure dense (legacy, без reranker'а)
-            return self.vector_store.search(
+            result = self.vector_store.search(
                 query=normalized_query,
                 discipline_id=discipline_id,
                 limit=limit,
             )
+
+        # Сохраняем в кэш
+        if hasattr(self, '_cache') and self._cache is not None:
+            self._cache.set_cached_search(normalized_query, discipline_id, result)
+
+        return result
 
     def build_rag_context(
         self,

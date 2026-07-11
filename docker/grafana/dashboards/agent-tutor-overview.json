@@ -124,6 +124,67 @@
         "legendFormat": "{{path}} {{status}}",
         "refId": "A"
       }]
+    },
+    {
+      "title": "RAG — Documents",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 3, "x": 0, "y": 32 },
+      "targets": [{
+        "expr": "rag_documents_total",
+        "legendFormat": "docs",
+        "refId": "A"
+      }]
+    },
+    {
+      "title": "RAG — ChromaDB Size",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 3, "x": 3, "y": 32 },
+      "targets": [{
+        "expr": "rag_chroma_size_bytes / 1048576",
+        "legendFormat": "MB",
+        "refId": "A"
+      }],
+      "unit": "short"
+    },
+    {
+      "title": "RAG — Search Rate",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 5, "x": 6, "y": 32 },
+      "targets": [{
+        "expr": "rate(rag_searches_total[1m])",
+        "legendFormat": "{{status}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "title": "RAG — Search p95 Duration",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 5, "x": 11, "y": 32 },
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum(rate(rag_search_duration_ms_bucket[5m])) by (le))",
+        "legendFormat": "p95 ms",
+        "refId": "A"
+      }]
+    },
+    {
+      "title": "RAG — Cache Hit Ratio",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 4, "x": 0, "y": 40 },
+      "targets": [{
+        "expr": "rate(rag_cache_hits_total[5m]) / (rate(rag_cache_hits_total[5m]) + rate(rag_cache_misses_total[5m]))",
+        "legendFormat": "hit ratio",
+        "refId": "A"
+      }]
+    },
+    {
+      "title": "RAG — Import Duration (avg)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 4, "x": 4, "y": 40 },
+      "targets": [{
+        "expr": "rate(rag_import_duration_ms_sum[1m]) / rate(rag_import_duration_ms_count[1m])",
+        "legendFormat": "avg ms",
+        "refId": "A"
+      }]
     }
   ]
 }

@@ -9,7 +9,8 @@ import chromadb
 from chromadb.api.types import Embeddings, Metadata
 
 from rag.config import RagConfig
-from rag.interfaces import EmbeddingProtocol, VectorStoreProtocol
+from rag.embedding.protocol import EmbeddingProtocol
+from rag.vector_store.protocol import VectorStoreProtocol
 from agent_tutor_sdk.rag.models import RagSearchResult
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class ChromaDBVectorStore(VectorStoreProtocol):
             name=config.chroma_collection,
             metadata={"hnsw:space": "cosine"},
         )
+        self._embedding_was_rebuilt = False
 
     def add_chunks(
         self,
@@ -45,6 +47,14 @@ class ChromaDBVectorStore(VectorStoreProtocol):
         """Добавить чанки в ChromaDB с батчингом."""
         if not chunk_texts:
             return
+
+        # Store embedding_model in collection metadata on first add if missing
+        meta = dict(self.collection.metadata or {})
+        if not meta.get("embedding_model"):
+            # Filter out hnsw:* keys — ChromaDB rejects any modify with them
+            meta["embedding_model"] = self.config.embedding_model
+            safe_meta = {k: v for k, v in meta.items() if not k.startswith("hnsw:")}
+            self.collection.modify(metadata=safe_meta)
 
         batch_size = self.config.embedding_batch_size
 
@@ -131,6 +141,100 @@ class ChromaDBVectorStore(VectorStoreProtocol):
             )
 
         return results
+
+    def ensure_embedding_consistency(self, chunks_data: list[dict]) -> bool:
+        """Check if ChromaDB vectors match current embedding model.
+
+        Args:
+            chunks_data: list of dicts with keys:
+                id, content, chunk_index, page,
+                document_id, title, source_path, discipline_id
+
+        Returns:
+            True if re-embedding happened, False if consistent.
+        """
+        collection_meta = self.collection.metadata or {}
+        stored_model = collection_meta.get("embedding_model")
+
+        if stored_model == self.config.embedding_model:
+            # Already consistent
+            return False
+
+        if not stored_model:
+            # First-time setup: store model name and return
+            meta = dict(self.collection.metadata or {})
+            meta["embedding_model"] = self.config.embedding_model
+            safe_meta = {k: v for k, v in meta.items() if not k.startswith("hnsw:")}
+            self.collection.modify(metadata=safe_meta)
+            return False
+
+        if not chunks_data:
+            logger.warning(
+                "Embedding model changed but no chunks to re-embed. Skipping."
+            )
+            return False
+
+        # Re-embed!
+        logger.info(
+            "Embedding model changed: %s -> %s. Re-embedding %d chunks...",
+            stored_model,
+            self.config.embedding_model,
+            len(chunks_data),
+        )
+
+        texts = [c["content"] for c in chunks_data]
+        embeddings = self.embedding_service.encode_batched(texts, mode="passage")
+
+        # Delete old collection
+        self.client.delete_collection(self.config.chroma_collection)
+
+        # Create new one with updated metadata
+        self.collection = self.client.create_collection(
+            name=self.config.chroma_collection,
+            metadata={
+                "hnsw:space": "cosine",
+                "embedding_model": self.config.embedding_model,
+            },
+        )
+
+        # Add all chunks with new embeddings in batches
+        batch_size = 64
+        for i in range(0, len(chunks_data), batch_size):
+            batch = chunks_data[i : i + batch_size]
+            batch_embs = embeddings[i : i + batch_size]
+
+            metadatas = []
+            for c in batch:
+                page = (
+                    int(c["page"])
+                    if c.get("page") is not None and c["page"] >= 0
+                    else -1
+                )
+                metadatas.append(
+                    {
+                        "document_id": c["document_id"],
+                        "document_title": c["title"],
+                        "source_path": c["source_path"],
+                        "discipline_id": c["discipline_id"] or "",
+                        "chunk_index": c["chunk_index"],
+                        "page": page,
+                    }
+                )
+
+            self.collection.add(
+                ids=[c["id"] for c in batch],
+                documents=[c["content"] for c in batch],
+                embeddings=batch_embs,
+                metadatas=metadatas,
+            )
+
+        self._embedding_was_rebuilt = True
+        logger.info("Re-embedding complete for %d chunks.", len(chunks_data))
+        return True
+
+    @property
+    def embedding_was_rebuilt(self) -> bool:
+        return self._embedding_was_rebuilt
 
     @staticmethod
     def _meta_int(val: object) -> int:

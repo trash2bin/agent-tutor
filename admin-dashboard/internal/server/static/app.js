@@ -498,6 +498,14 @@ function dashboard() {
     // ═══════════════════════════════════════════
     //  RAG
     // ═══════════════════════════════════════════
+    ragSettings: null,
+    ragStats: null,
+    ragSettingsLoading: false,
+    ragSettingsSaving: false,
+    ragSettingsSaveMsg: '',
+    ragStatsLoading: false,
+    ragTab: 'docs', // 'docs' | 'settings'
+
     async refreshRag() {
       this.error = '';
       try {
@@ -515,6 +523,46 @@ function dashboard() {
       } catch (e) {
         this.ragDocs = [];
         this.ragDocsCount = 0;
+      }
+    },
+
+    async loadRagSettings() {
+      this.ragSettingsLoading = true;
+      this.ragSettingsSaveMsg = '';
+      try {
+        this.ragSettings = await this.api('/api/rag/config');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.ragSettingsLoading = false;
+      }
+    },
+
+    async loadRagStats() {
+      this.ragStatsLoading = true;
+      try {
+        this.ragStats = await this.api('/api/rag/stats');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.ragStatsLoading = false;
+      }
+    },
+
+    async saveRagSettings() {
+      this.ragSettingsSaving = true;
+      this.ragSettingsSaveMsg = '';
+      try {
+        await this.api('/api/rag/config', {
+          method: 'PUT',
+          body: JSON.stringify(this.ragSettings),
+        });
+        this.ragSettingsSaveMsg = 'saved';
+        setTimeout(() => { this.ragSettingsSaveMsg = ''; }, 3000);
+      } catch (e) {
+        this.ragSettingsSaveMsg = 'error';
+      } finally {
+        this.ragSettingsSaving = false;
       }
     },
 

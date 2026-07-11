@@ -8,17 +8,20 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Callable
 
 from rag.config import RagConfig
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
-    from rag.chunker import TextChunker
-    from rag.embeddings import SentenceTransformerEmbedding
-    from rag.parser import DocumentParser
-    from rag.pipeline import RAGPipeline
-    from rag.repository import DocumentRepository
-    from rag.vector_store import ChromaDBVectorStore
+    from rag.chunker.base import TextChunker
+    from rag.embedding.local import SentenceTransformerEmbedding
+    from rag.parser.parser import DocumentParser
+    from rag.pipeline.pipeline import RAGPipeline
+    from rag.pipeline.repository import DocumentRepository
+    from rag.vector_store.chroma import ChromaDBVectorStore
 
 
 __all__ = [
@@ -50,12 +53,12 @@ def create_rag_pipeline(
     попытается получить адаптер из connector.adapt_sql.
     """
     # Ленивые импорты — docling, chonkie, sentence-transformers, chromadb
-    from rag.chunker import TextChunker
-    from rag.embeddings import SentenceTransformerEmbedding
-    from rag.parser import DocumentParser
-    from rag.pipeline import RAGPipeline
-    from rag.repository import DocumentRepository
-    from rag.vector_store import ChromaDBVectorStore
+    from rag.chunker.base import TextChunker
+    from rag.embedding.local import SentenceTransformerEmbedding
+    from rag.parser.parser import DocumentParser
+    from rag.pipeline.pipeline import RAGPipeline
+    from rag.pipeline.repository import DocumentRepository
+    from rag.vector_store.chroma import ChromaDBVectorStore
 
     if config is None:
         config = RagConfig.from_env()
@@ -71,13 +74,23 @@ def create_rag_pipeline(
     ):
         adapter = connection.connector.adapt_sql  # type: ignore[union-attr]
 
-    embedding_service = SentenceTransformerEmbedding(config)
+    # Выбор провайдера эмбеддингов
+    if config.embedding_provider == "litellm":
+        from rag.embedding.litellm_provider import LiteLLMEmbedding
+        embedding_service = LiteLLMEmbedding(config)
+    else:
+        embedding_service = SentenceTransformerEmbedding(config)
+
     parser = DocumentParser(config)
     chunker = TextChunker(config)
     repository = DocumentRepository(connection, config, adapter=adapter)
     vector_store = ChromaDBVectorStore(config, embedding_service)
 
-    return RAGPipeline(
+    # Check embedding consistency and re-embed if model changed
+    chunks_for_reembed = repository.get_all_chunks_for_reembed()
+    vector_store.ensure_embedding_consistency(chunks_for_reembed)
+
+    pipeline = RAGPipeline(
         config=config,
         parser=parser,
         chunker=chunker,
@@ -85,3 +98,19 @@ def create_rag_pipeline(
         repository=repository,
         vector_store=vector_store,
     )
+
+    # Подключаем кэш, если включён
+    if config.cache_enabled:
+        from rag.cache.local import LocalTTLCache
+        pipeline._cache = LocalTTLCache(
+            maxsize=config.cache_maxsize,
+            ttl=config.cache_ttl,
+        )
+        # Clear cache if re-embedding just happened
+        if vector_store.embedding_was_rebuilt:
+            logger.info("Embedding model changed, clearing search cache.")
+            pipeline._cache.clear()
+    else:
+        pipeline._cache = None
+
+    return pipeline

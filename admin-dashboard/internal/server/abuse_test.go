@@ -145,13 +145,13 @@ func TestAbuseSettingsPut_UpdatesAndReturns(t *testing.T) {
 	defer cleanup()
 
 	payload := AbuseConfig{
-		RPS:                  2.5,
-		Burst:                8,
-		MaxMessageLength:     1000,
-		MinIntervalMs:        500,
+		RPS:                   2.5,
+		Burst:                 8,
+		MaxMessageLength:      1000,
+		MinIntervalMs:         500,
 		MaxMessagesPerSession: 30,
-		BlockEmptyUserAgent:  false,
-		BlockedUserAgents:    []string{"bot/*"},
+		BlockEmptyUserAgent:   false,
+		BlockedUserAgents:     []string{"bot/*"},
 	}
 	body, _ := json.Marshal(payload)
 

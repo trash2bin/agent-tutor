@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
@@ -13,9 +12,6 @@ from docling_core.types.doc.document import TextItem, TableItem
 
 from rag.config import RagConfig
 from rag._types import PageDict
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +55,6 @@ class DocumentParser:
             if isinstance(item, TextItem):
                 text = item.text
             elif isinstance(item, TableItem):
-                # Таблицы экспортируем в markdown для сохранения структуры
                 text = item.export_to_markdown()
             else:
                 continue
@@ -67,7 +62,6 @@ class DocumentParser:
             if not text.strip():
                 continue
 
-            # Определяем номер страницы
             page_no = 0
             if item.prov:
                 page_no = item.prov[0].page_no
@@ -80,7 +74,6 @@ class DocumentParser:
                 return [{"page": None, "text": md_text}]
             return []
 
-        # Собираем результат
         result_pages: list[PageDict] = []
         for page_no in sorted(page_lines):
             result_pages.append(
