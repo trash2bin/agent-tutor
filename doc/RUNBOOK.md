@@ -268,4 +268,100 @@ LOG_LEVEL=info          # Log level: debug, info, warn, error
 
 # ── Monitoring ───────────────────────────────────────────────────
 ENABLE_METRICS=true     # Enable /metrics endpoint on all services (always on)
+
+---
+
+## 11. Guardrails — Prompt Injection
+
+**Где:** `api-service/src/api_service/guardrails.py`
+**Admin API:** `GET/POST /admin/guardrails`
+
+Модуль проверяет input (сообщение пользо��ателя) и output (ответ LLM) на prompt injection:
+- Input: ignore instructions, role override, jailbreak, leak request, system prompt extraction
+- Output: утечка system prompt, credentials, Bearer token
+
+**Режимы:**
+- `block` (дефолт) — бло��ирует сообщение пользов��теля / заменяет ответ
+- `warn` — только лог, не блокирует
+
+**Env:** `GUARDRAIL_ENABLED`, `GUARDRAIL_BLOCK_ON_MATCH`, `GUARDRAIL_BLOCK_PATTERNS`
+
+**Администрирование:**
+```bash
+# Текущий статус
+curl -H "X-Admin-Token: $ADMIN_TOKEN" http://localhost:8081/admin/guardrails
+
+# Переключить в warn mode
+curl -X POST http://localhost:8081/admin/guardrails \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -d '{"block_on_match":"warn"}'
+
+# Отключить
+curl -X POST http://localhost:8081/admin/guardrails \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -d '{"enabled":false}'
+```
+
+---
+
+## 12. Spending Limits — Per-tenant Cost Control
+
+**Где:** `api-service/src/api_service/spending.py`
+**Admin API:** `GET /admin/spending`, `GET/POST /admin/spending/{tenant_id}`
+
+Модуль отслеживает LLM-расходы per-tenant и жёстко блокирует вызовы при превышении бюджета.
+
+**Как работает:**
+1. После каждого LLM-вызова `record_spending(tenant_id, cost)` суммирует расход
+2. П��ред следующим вызовом `check_limits()` проверяет, не превышен ли бюджет
+3. При превышении — LLM вызовы блокируются, пользователь получает ошибку
+
+**Env:** `SPENDING_LIMIT_ENABLED`, `SPENDING_DEFAULT_BUDGET=50.0`, `SPENDING_BUDGET_PERIOD=monthly`
+
+**Администрирование:**
+```bash
+# Обзор
+curl -H "X-Admin-Token: $ADMIN_TOKEN" http://localhost:8081/admin/spending
+
+# Расходы тенанта
+curl -H "X-Admin-Token: $ADMIN_TOKEN" http://localhost:8081/admin/spending/tenant-a
+
+# Установить бюджет
+curl -X POST http://localhost:8081/admin/spending/tenant-a \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -d '{"budget": 100.0}'
+
+# Отключить лимит (0 = нет лимита)
+curl -X POST http://localhost:8081/admin/spending/tenant-a \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -d '{"budget": 0}'
+```
+
+---
+
+## 13. Backups
+
+Backup responsibility matrix:
+
+| Data | Responsible | Notes |
+|------|-------------|-------|
+| Client's production DB (PostgreSQL / MySQL) | **Client** | Настройте бэкапы у вашего хостинг-провайдера. Стандартные pg_dump / point-in-time recovery. |
+| Tenant configs (.data/tenants/*.json) | Platform | ~44KB, можно скопировать вручную. `scripts/backup.sh` |
+| LLM API keys (.env) | Platform | Храните в vault / sealed secrets отдельно от сервера. |
+| ChromaDB / RAG index | Platform | Реиндексируется из исходных документов при утере. |
+| Session store / Backlog | Platform | Эфемерные данные, не критичны. |
+
+> **Важно:** Платформа не хранит вашу production-базу данных. Она подключается к ней по URL.
+> Вся ответственность за бэкапы вашей БД лежит на вас. Настройте pg_dump / PITR / снапшоты
+> у вашего хостинг-провайдера.
+
+```bash
+# Minimal backup (tenant configs + .env)
+bash scripts/backup.sh
+# → backups/20260711_143000/tenants/ + .env
+```
 ```

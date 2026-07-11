@@ -28,6 +28,11 @@
 | `/api/agents` | POST | Создать агента (Agent Store) |
 | `/api/agents` | GET | Список агентов |
 | `/api/agents/{name}` | GET | Получить агента |
+| `/admin/guardrails` | GET | Настройки guardrails (prompt injection) |
+| `/admin/guardrails` | POST | Обновить конфиг guardrails |
+| `/admin/spending` | GET | Обзор лимитов расходов |
+| `/admin/spending/{tenant_id}` | GET | Расходы тенанта |
+| `/admin/spending/{tenant_id}` | POST | Установить бюджет тенанта |
 | `/api/agents/{name}` | PUT | Обновить агента (widget_config, llm_config) |
 | `/api/agents/{name}` | DELETE | Удалить агента |
 | `/api/agents/{name}/widget-config` | GET | Конфиг виджета для агента (используется embed.js) |
@@ -294,3 +299,33 @@ curl -N -X POST http://127.0.0.1:8081/api/chat \
 - **Настройка**: через admin dashboard (глобально + per-agent через `abuse_config`)
 - **Emergency presets**: Normal / Cautious / Lockdown — одним кликом
 - Подробнее: `anti_abuse.py`
+
+## 🛡️ Guardrails (Prompt Injection)
+
+Модуль `api_service/guardrails.py` проверяет входящие сообщения и исходящие ответы на признаки prompt injection.
+
+**Режимы работы:**
+- `block` (дефолт) — сообщение блокируется, пользователь получает ошибку
+- `warn` — сообщение логируется, но не блокируется
+
+**Блокируемые паттерны (input):** ignore instructions, role override, pretend/DAN jailbreak, leak request, system prompt extraction
+
+**Блокируемые паттерны (output):** утечка system prompt, credentials, токенов
+
+**Env vars:** `GUARDRAIL_ENABLED`, `GUARDRAIL_BLOCK_ON_MATCH`, `GUARDRAIL_BLOCK_PATTERNS`
+
+**Admin API:** `GET/POST /admin/guardrails`
+
+
+## 💰 Spending Limits (Per-tenant)
+
+Модуль `api_service/spending.py` отслеживает расходы на LLM для каждого тенанта и жёстко блокирует при превышении бюджета.
+
+**Как работает:**
+1. После каждого LLM вызова `record_spending(tenant_id, cost)` суммирует расход
+2. Перед следующим вызовом `check_limits()` проверяет, не превышен ли бюджет
+3. При превышении — LLM вызовы блокируются, пользователь получает ошибку
+
+**Env vars:** `SPENDING_LIMIT_ENABLED`, `SPENDING_DEFAULT_BUDGET`, `SPENDING_BUDGET_PERIOD`
+
+**Admin API:** `GET /admin/spending`, `GET/POST /admin/spending/{tenant_id}`

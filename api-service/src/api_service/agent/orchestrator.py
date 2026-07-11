@@ -12,6 +12,7 @@ and only owns the *sequence* of steps and the loop termination logic.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -35,6 +36,8 @@ from .types import (
 )
 
 from api_service.backlog import backlog
+from api_service.guardrails import get_guard_checker
+from api_service.spending import get_spending_checker
 
 logger = logging.getLogger("api_service.agent.orchestrator")
 
@@ -178,7 +181,20 @@ class LLMAgent:
         system_prompt: str | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """Execute a single conversation turn with multiple iterations."""
-        # ── 1. Build initial context ────────��───────────────────────────
+        # ── 0. Guard: check input for prompt injection ───────────────
+        guard_result = get_guard_checker().check_input(user_message)
+        if guard_result.blocked:
+            logger.warning("[GUARD] Blocked message: %s", guard_result.reason)
+            backlog.error(session_id, "guard-block", 0, guard_result.reason)
+            yield AgentEvent(
+                "error",
+                ErrorEventData(
+                    message="Ваше сообщение заблокировано системой безопасности."
+                ),
+            )
+            return
+
+        # ── 1. Build initial context ─────────────────────────────────
         effective_prompt = system_prompt or SYSTEM_PROMPT
 
         ctx = await TurnContext.build(
@@ -186,6 +202,7 @@ class LLMAgent:
             session_id=session_id,
             system_prompt=effective_prompt,
             conversation_manager=self.conversation_manager,
+            tenant_ids=tenant_ids,
         )
         ctx.turn_id = backlog.turn_start(session_id, user_message)
 
@@ -210,8 +227,75 @@ class LLMAgent:
                     ctx.iteration = iteration
 
                     # 3a. Call LLM → stream tokens + determine outcome
+                    _llm_start = time.monotonic()
                     async for event in self._llm_handler.stream_and_parse(ctx):
                         yield event
+                    _llm_duration = (time.monotonic() - _llm_start) * 1000
+
+                    # Guard: check output for leaks
+                    if ctx.outcome == "final" and ctx.turn_messages:
+                        last_msg = ctx.turn_messages[-1]
+                        if last_msg.get("role") == "assistant":
+                            content = last_msg.get("content", "")
+                            output_check = get_guard_checker().check_output(content)
+                            if output_check.blocked:
+                                logger.warning(
+                                    "[GUARD] Blocked output: %s (session %s)",
+                                    output_check.reason,
+                                    session_id,
+                                )
+                                last_msg["content"] = (
+                                    "[Ответ заблокирован системой безопа��ности]"
+                                )
+
+                    # Record spending for tenant
+                    _cost = (
+                        self._llm_handler._llm.last_cost
+                        if hasattr(self._llm_handler._llm, "last_cost")
+                        else 0.0
+                    )
+                    if _cost > 0 and tenant_ids:
+                        for tid in tenant_ids:
+                            get_spending_checker().record_spending(tid, _cost)
+
+                    # Check spending limit
+                    if tenant_ids:
+                        for tid in tenant_ids:
+                            _allowed, _reason = get_spending_checker().check_limits(tid)
+                            if not _allowed:
+                                logger.warning("[SPENDING] %s", _reason)
+                                yield AgentEvent(
+                                    "error",
+                                    ErrorEventData(
+                                        message="Лимит расходов исчерпан для этого тенанта."
+                                    ),
+                                )
+                                return
+
+                    # Record LLM call in backlog
+                    if (
+                        hasattr(self._llm_handler._llm, "last_usage")
+                        and self._llm_handler._llm.last_usage
+                    ):
+                        usage = self._llm_handler._llm.last_usage
+                        backlog.record_llm_call(
+                            session_id=session_id,
+                            model=getattr(self._llm_handler._llm, "model", "unknown"),
+                            provider=getattr(
+                                self._llm_handler._llm, "model", "unknown"
+                            ).split("/")[0]
+                            if "/" in getattr(self._llm_handler._llm, "model", "")
+                            else "unknown",
+                            duration_ms=_llm_duration,
+                            prompt_tokens=usage.get("prompt_tokens", 0),
+                            completion_tokens=usage.get("completion_tokens", 0),
+                            total_tokens=usage.get("total_tokens", 0),
+                            cost=self._llm_handler._llm.last_cost,
+                            status="success",
+                            tenant_ids=tenant_ids or [],
+                            turn_id=ctx.turn_id,
+                            iteration=ctx.iteration,
+                        )
 
                     # 3b. Dispatch based on outcome
                     if ctx.outcome == "final" or ctx.is_finished:

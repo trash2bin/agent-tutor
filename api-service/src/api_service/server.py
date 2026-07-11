@@ -49,6 +49,8 @@ from api_service.prometheus_metrics import (
     chat_messages_total,
     embed_widget_requests,
 )
+from api_service.guardrails import get_guard_checker
+from api_service.spending import get_spending_checker
 
 configure_logging()
 logger = logging.getLogger("api_service.server")
@@ -437,6 +439,74 @@ async def session_history_endpoint(
 ):
     effective = f"agent:{agent_name}:{session_id}" if agent_name else session_id
     return await get_session_history(effective)
+
+
+# ── Guardrails Admin API ──
+
+
+@app.get("/admin/guardrails")
+async def get_guardrails():
+    """Get current guard config."""
+    checker = get_guard_checker()
+    return {
+        "enabled": checker.config.enabled,
+        "block_on_match": checker.config.block_on_match,
+        "blocked_count": checker.config.blocked_count,
+    }
+
+
+@app.post("/admin/guardrails")
+async def update_guardrails(config: dict):
+    """Update guard config. Accepts: enabled, block_on_match."""
+    checker = get_guard_checker()
+    if "enabled" in config:
+        checker.config.enabled = bool(config["enabled"])
+    if "block_on_match" in config:
+        val = str(config["block_on_match"])
+        if val in ("block", "warn"):
+            checker.config.block_on_match = val
+    return {
+        "enabled": checker.config.enabled,
+        "block_on_match": checker.config.block_on_match,
+        "blocked_count": checker.config.blocked_count,
+    }
+
+
+# ── Spending Admin API ──
+
+
+@app.get("/admin/spending")
+async def get_all_spending():
+    """Get spending overview."""
+    checker = get_spending_checker()
+    return {
+        "enabled": checker.config.enabled,
+        "default_budget": checker.config.default_budget,
+        "period": checker.config.period,
+    }
+
+
+@app.get("/admin/spending/{tenant_id}")
+async def get_tenant_spending(tenant_id: str):
+    """Get spending for a specific tenant."""
+    checker = get_spending_checker()
+    return checker.get_spending(tenant_id)
+
+
+@app.post("/admin/spending/{tenant_id}")
+async def set_tenant_budget(tenant_id: str, config: dict):
+    """Set per-tenant budget override.
+
+    Body: {"budget": 100.0}
+    """
+    budget = float(config.get("budget", 0))
+    if budget < 0:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail="Budget must be >= 0")
+    checker = get_spending_checker()
+    checker.set_budget(tenant_id, budget)
+    return checker.get_spending(tenant_id)
 
 
 # ── Agent CRUD ──

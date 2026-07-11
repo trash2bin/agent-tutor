@@ -97,5 +97,27 @@ class DemoSettings:
             os.environ.get("AGENT_MAX_TURN_TOKENS", "8000")
         )
 
+        # ── Guardrails ──────────────────────────────────────────────────
+        self.guardrail_enabled: bool = os.environ.get(
+            "GUARDRAIL_ENABLED", "true"
+        ).lower() in ("true", "1", "yes")
+        self.guardrail_block_patterns: str = os.environ.get(
+            "GUARDRAIL_BLOCK_PATTERNS", ""
+        )
+        self.guardrail_block_on_match: str = os.environ.get(
+            "GUARDRAIL_BLOCK_ON_MATCH", "block"
+        )
+
+        # ── Spending Limits ─────────────────────────────────────────────
+        self.spending_limit_enabled: bool = os.environ.get(
+            "SPENDING_LIMIT_ENABLED", "true"
+        ).lower() in ("true", "1", "yes")
+        self.spending_default_budget: float = float(
+            os.environ.get("SPENDING_DEFAULT_BUDGET", "50.0")
+        )
+        self.spending_budget_period: str = os.environ.get(
+            "SPENDING_BUDGET_PERIOD", "monthly"
+        )
+
 
 settings = DemoSettings()

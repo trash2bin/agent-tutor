@@ -165,6 +165,110 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /admin/guardrails:
+    get:
+      summary: Get Guardrails
+      description: Get current guard config.
+      operationId: get_guardrails_admin_guardrails_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: Update Guardrails
+      description: 'Update guard config. Accepts: enabled, block_on_match.'
+      operationId: update_guardrails_admin_guardrails_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              type: object
+              title: Config
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/spending:
+    get:
+      summary: Get All Spending
+      description: Get spending overview.
+      operationId: get_all_spending_admin_spending_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /admin/spending/{tenant_id}:
+    get:
+      summary: Get Tenant Spending
+      description: Get spending for a specific tenant.
+      operationId: get_tenant_spending_admin_spending__tenant_id__get
+      parameters:
+      - name: tenant_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Tenant Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      summary: Set Tenant Budget
+      description: 'Set per-tenant budget override.
+
+
+        Body: {"budget": 100.0}'
+      operationId: set_tenant_budget_admin_spending__tenant_id__post
+      parameters:
+      - name: tenant_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Tenant Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Config
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/agents:
     get:
       summary: Список агентов
