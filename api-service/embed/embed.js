@@ -7,8 +7,8 @@
  *   <script src="/embed/embed.js"
  *           data-agent="support-agent"
  *           data-api-base="https://your-server.com"
- *           data-title="Помощник"
- *           data-greeting="Чем могу помочь?"
+ *           data-title="Assistant"
+ *           data-greeting="How can I help?"
  *           data-accent="#0f766e"
  *           data-position="right">
  *   </script>
@@ -30,11 +30,11 @@
   var CONFIG = {
     agent: script.getAttribute('data-agent') || '',
     apiBase: script.getAttribute('data-api-base') || window.location.origin,
-    title: script.getAttribute('data-title') || 'Ассистент',
-    greeting: script.getAttribute('data-greeting') || 'Чем могу помочь?',
+    title: script.getAttribute('data-title') || 'Assistant',
+    greeting: script.getAttribute('data-greeting') || 'How can I help?',
     accent: script.getAttribute('data-accent') || '#0f766e',
     position: script.getAttribute('data-position') === 'left' ? 'left' : 'right',
-    placeholder: script.getAttribute('data-placeholder') || 'Напишите вопрос...',
+    placeholder: script.getAttribute('data-placeholder') || 'Ask a question...',
     width: script.getAttribute('data-width') || 'min(380px, calc(100vw - 28px))',
     height: script.getAttribute('data-height') || 'min(620px, calc(100vh - 44px))',
     triggerOffsetBottom: script.getAttribute('data-trigger-offset-bottom') || '16px',
@@ -198,7 +198,7 @@
     '}',
     '.at-msg.at-assistant.at-thinking { position: relative; min-height: 12px; }',
     '.at-msg.at-assistant.at-thinking::before {',
-    '  content: "Думаю и проверяю данные...";',
+    '  content: "Thinking and checking data......";',
     '  display: inline-block;',
     '  color: var(--muted);',
     '  font-style: italic;',
@@ -705,7 +705,7 @@
       // Show countdown message
       var countdownMsg = document.createElement('div');
       countdownMsg.className = 'at-msg at-retry-countdown';
-      countdownMsg.textContent = '\u23F3 Повтор через ' + remaining + ' сек...';
+      countdownMsg.textContent = '\u23F3 Retry in ' + remaining + 's...';
       messagesEl.appendChild(countdownMsg);
       scrollToBottom(messagesEl);
 
@@ -716,7 +716,7 @@
           countdownMsg.remove();
           retryChat(message);
         } else {
-          countdownMsg.textContent = '\u23F3 Повтор через ' + remaining + ' сек...';
+          countdownMsg.textContent = '\u23F3 Retry in ' + remaining + 's...';
         }
       }, 1000);
     }
@@ -761,13 +761,13 @@
             // Show manual retry button after exhausting auto-retries
             var failMsg = document.createElement('div');
             failMsg.className = 'at-msg at-assistant';
-            failMsg.textContent = '\u26A0\uFE0F Сервер перегружен. Попробуйте позже.';
+            failMsg.textContent = '\u26A0\uFE0F Server overloaded. Try again later.';
             messagesEl.appendChild(failMsg);
             scrollToBottom(messagesEl);
 
             var retryBtn = document.createElement('button');
             retryBtn.className = 'at-retry-btn';
-            retryBtn.textContent = 'Повторить';
+            retryBtn.textContent = 'Retry';
             failMsg.appendChild(retryBtn);
             retryBtn.addEventListener('click', function() {
               delete retryAttempts[message];
@@ -780,7 +780,7 @@
           // Show rate limit message
           var rateMsg = document.createElement('div');
           rateMsg.className = 'at-msg at-assistant';
-          rateMsg.textContent = '\u26A0\uFE0F Сервер временно перегружен. Повторите через ' + delay + ' сек.';
+          rateMsg.textContent = '\u26A0\uFE0F Server temporarily overloaded. Retry in ' + delay + 's.';
           messagesEl.appendChild(rateMsg);
           scrollToBottom(messagesEl);
 
@@ -792,7 +792,7 @@
         if (!response.ok) {
           targetNode.classList.remove('at-thinking');
           targetNode.classList.add('at-error');
-          targetNode.textContent = '��шибка: ' + response.status;
+          targetNode.textContent = ''Error: ' + response.status;
           return;
         }
 
@@ -836,7 +836,7 @@
               } else if (payload.type === 'done') {
                 var raw = targetNode.dataset.raw || '';
                 if (!raw.trim()) {
-                  setFinalText(targetNode, 'Модель не вернула текст. Попробуйте уточнить запрос.');
+                  setFinalText(targetNode, 'No response from the model. Try rephrasing.');
                 }
                 // Save to sessionStorage
                 var toolNames = [];
@@ -847,7 +847,7 @@
               } else if (payload.type === 'error') {
                 targetNode.classList.remove('at-thinking');
                 targetNode.classList.add('at-error');
-                targetNode.textContent = 'Ошибка: ' + (payload.text || '');
+                targetNode.textContent = 'Error: ' + (payload.text || '');
               }
             });
 
@@ -859,7 +859,7 @@
       }).catch(function (err) {
         targetNode.classList.remove('at-thinking');
         targetNode.classList.add('at-error');
-        targetNode.innerHTML = '\u26A0\uFE0F Нет соединения с сервером. Проверьте интернет.<br><button class="at-retry-btn" data-message="' + escapeHtml(message) + '">Повторить</button>';
+        targetNode.innerHTML = '\u26A0\uFE0F No connection to server. Check your internet.<br><button class="at-retry-btn" data-message="' + escapeHtml(message) + '">Retry</button>';
         // Bind retry button click
         var btn = targetNode.querySelector('.at-retry-btn');
         if (btn) {

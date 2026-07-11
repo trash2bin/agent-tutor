@@ -1,176 +1,321 @@
-# Runbook: второй деплой за часы
+# Runbook — onboard a new client in hours
 
-Внутренняя шпаргалка для разворачивания стека у нового клиента.
-Не для клиента — для себя. Актуально: июль 2026.
+Internal cheat sheet. Not for the client — for you. Updated: July 2026.
 
-## 0. Что нужно от клиента
+---
 
-- [ ] Доступ к PostgreSQL / MySQL (хост, порт, юзер, пароль, база)
-- [ ] Домен (для prod-режима с HTTPS)
-- [ ] API-ключ к LLM провайдеру (OpenAI / Anthropic / Mistral), если не Ollama
-- [ ] Документы для RAG (PDF, DOCX, TXT — хоть что)
-- [ ] Куда встроить виджет (страница сайта, `<body>`)
+## Prerequisites from client
 
-## 1. Сервер + Docker
+- [ ] PostgreSQL access (host, port, user, password, database)
+- [ ] Domain (for HTTPS in prod mode)
+- [ ] LLM API key (OpenAI / Anthropic / Mistral) or local Ollama
+- [ ] Documents for RAG (PDF, DOCX, TXT)
+- [ ] Where to embed the widget (page URL, inside `<body>`)
+
+---
+
+## Server + Docker
 
 ```bash
-# Сервер: Ubuntu 22.04+, Docker, git
 ssh root@client-server
 apt install docker.io docker-compose-v2
-git clone https://github.com/ivan-proger/agent-tutor.git
+git clone https://github.com/trash2bin/agent-tutor
 cd agent-tutor
 
-# Создать data-директории (они бинд-маунтятся в контейнеры)
 mkdir -p .data/{app,rag,hf_cache,uploads,pg}
-
-# Скопировать конфиг
 cp .env.example .env
 ```
 
-## 2. Конфиг — обязательные переменные
+---
 
-Минимальный набор для старта нового клиента:
+## Minimal config
 
 ```bash
-# Режим: prod, если HTTPS нужен; иначе dev
-# dev:  docker compose up -d
-# prod: docker compose --profile prod up -d
-
-# ── Data source ──────────────────────────────────────────────────
 DB_DRIVER=postgres
 DATABASE_URL=postgres://user:pass@host:5432/dbname?sslmode=require
-# Для SQLite (тесты / мелкие клиенты):
-# DB_DRIVER=sqlite
-# DB_PATH=/data/app/university.db
 
-# ── LLM ──────────────────────────────────────────────────────────
-# Вариант 1: Ollama (локально, качает модель)
+# LLM — pick one:
 OLLAMA_URL=http://host.docker.internal:11434
 OLLAMA_MODEL=qwen2.5:0.5b
-
-# Вариант 2: Mistral / OpenAI / Anthropic
+# or
 MISTRAL_API_KEY=sk-...
 MISTRAL_MODEL=mistral/mistral-small
-# OPENAI_API_KEY=sk-...     # если OPENAI_API_KEY задан, llm_client использует его
-# ANTHROPIC_API_KEY=sk-...  # или Anthropic
+# or OPENAI_API_KEY / ANTHROPIC_API_KEY
 
-# ── Tenants ────────────────────���─────────────────────────────────
 DEFAULT_TENANT_ID=client-name
-DEMO_TENANTS=client-name    # comma-separated, если несколько
+DEMO_TENANTS=client-name
 
-# ── Domain (только для prod) ────────────────────────────────────
+# Only for prod:
 DOMAIN=chat.client.com
-# После: Caddy автоматом получит Let's Encrypt сертификат
-
-# ── Anti-Abuse (дефолты безопасны, но можно зажать) ────────────
-ABUSE_RPS=1.0              # Token bucket refill rate (requests/second)
-ABUSE_BURST=5              # Token bucket burst capacity
-ABUSE_MESSAGE_MAX_LENGTH=2000  # Макс. длина сообщения (символов)
-ABUSE_MIN_INTERVAL=1.0     # Мин. интервал между сообщениями (сек)
-ABUSE_SESSION_BUDGET=50    # Макс. сообщений за сессию
-ABUSE_REPEATED_THRESHOLD=3 # Порог повторяющегося текста (раз)
-
-# ── Logging ─────────────────────────────────────────────────────
-LOG_FORMAT=text            # Формат логов: json или text
-LOG_LEVEL=info             # Уровень: debug, info, warn, error
-
-# ── Monitoring ──────────────────────────────────────────────────
-# Метрики включены по умолчанию на всех сервисах — /metrics
 ```
 
-Остальные ~170 переменных — дефолты работают. Править только под клиента.
+The other ~170 vars have safe defaults. Only change per client.
 
-## 3. Старт и проверка здоровья
+---
+
+## Start + health check
 
 ```bash
-# Dev
-docker compose up -d
-# Prod
-docker compose --profile prod up -d
+docker compose up -d                              # dev
+docker compose --profile prod up -d               # prod + Caddy HTTPS
 
-# Ждём 120s (RAG качает embedding-модель при первом старте)
+# Wait 120s — RAG downloads embedding model on first start
 docker compose logs rag --tail 20
-
-# Проверка здоровья
 docker compose ps
-# Все 6 сервисов (db, data, rag, mcp, api, web) + admin + caddy
 
-curl http://localhost:8080/                               # → 200, web
-curl http://localhost:8084/health                          # → {"status":"ok"}
-curl http://localhost:8082/health                          # → {"status":"ok"}
-curl http://localhost:8081/health                          # → {"status":"ok"}
-
-### Проверка метрик (v1.1.0)
-```bash
-curl http://localhost:8084/metrics?tenant=default | head -20   # data-service
-curl http://localhost:8083/metrics | grep mcp_                  # mcp-gateway
-curl http://localhost:8081/metrics | grep llm_                  # api-service
-curl http://localhost:8085/metrics | head -5                    # admin-dashboard
+curl http://localhost:8084/health    # → {"status":"ok"}
+curl http://localhost:8082/health    # → {"status":"ok"}
+curl http://localhost:8081/health    # → {"status":"ok"}
 ```
 
-## 3.5. Monitoring Stack (Prometheus + Grafana)
+---
 
-Стек мониторинга запускается поверх работающих сервисов через Docker profile:
+## Monitoring stack
 
 ```bash
 docker compose --profile monitoring up -d
+# Grafana: http://localhost:3000 (admin / admin) — 12-panel dashboard
 # Prometheus: http://localhost:9090
-# Grafana:    http://localhost:3000 (admin / admin)
 ```
 
-**Что мониторится:**
+Each service exposes `/metrics` by default.
 
-| Сервис | Порт | Метрики |
-|---|---|---|
-| **data-service** | :8084 | `data_requests_total`, `data_request_duration_ms` |
-| **mcp-gateway** | :8083 | `mcp_tool_calls_total`, `mcp_sessions_active`, `mcp_rate_limit_hits_total` |
-| **admin-dashboard** | :8085 | `admin_requests_total` |
-| **api-service** | :8081 | `chat_sessions_total`, `chat_messages_total`, `llm_calls_total`, `llm_duration_ms`, `llm_token_usage`, `llm_cost_total`, `abuse_blocked_total`, `backlog_*` |
+---
 
-**Grafana дашборд** (12 панелей): `docker/grafana/dashboards/agent-tutor-overview.json`
-- Общая сводка (chat sessions, active sessions)
-- LLM метрики (calls, tokens, cost, duration)
-- Data-service метрики (requests, latency)
-- MCP метрики (tool calls, active sessions)
-- Admin dashboard метрики
-- Anti-abuse блокировки
-
-**Нативный запуск (без Docker):** каждый сервис отдаёт `/metrics` независимо — можно скрапить любым Prometheus-экспортером.
-
-## 4. Тенант + данные
+## Tenant + data
 
 ```bash
-# Зарегистрировать тенанта
 uv run agent-db tenant register client-name
 
-# Создать seed-данные (дисциплины, группы, студенты, расписание)
-# из SQL-схемы клиента)
-# Если у клиента своя БД — показывает таблицы через интроспекцию
+# Introspect client DB schema
 curl http://localhost:8084/admin/introspect?tenant=client-name
 
-# Импорт RAG-документов
-# Через admin-dashboard: http://localhost:8085/rag
-# Или через CLI:
-uv run agent-rag-ingest import /path/to/client/doc.pdf -d client-name -t "Договор"
+# Import RAG documents via admin dashboard (:8085) or CLI:
+uv run agent-rag-ingest import /path/to/doc.pdf -d client-name
 ```
 
-> Анти-спам включён по умолчанию — админ может отключить/настроить через **Anti-Abuse** вкладку в admin-dashboard.
+---
 
-## 5. Агент — настройка
+## Configure agent
 
-Admin-dashboard: `http://localhost:8085`
+Admin dashboard: `http://localhost:8085`
+
+1. **Tenants** — check client-name exists
+2. **Config** — verify LLM provider
+3. **Tools** — approve write-tools (disabled by default)
+4. **Agents** — create agent, set system prompt
+5. **RAG** — upload documents, test search
+6. **Anti-Abuse** — tune RPS, burst, session budget
+7. **Emergency Presets** — Normal → Cautious → Lockdown
+
+---
+
+## Embed widget
+
+```html
+<script src="https://chat.client.com/embed/embed.js"
+        data-agent="assistant"
+        data-title="Assistant"
+        data-accent="#0f766e"
+        data-position="right"
+        data-api-base="https://chat.client.com">
+</script>
+```
+
+Insert into `<body>` on the client's page. Shadow DOM — no CSS conflicts.
+
+---
+
+## Verification
+
+```bash
+uv run agent-db e2e-data      # tenant isolation
+uv run agent-db e2e-mcp       # MCP tool isolation
+uv run agent-db e2e-full      # all three levels
+
+# Chat via web (http://localhost:8080) — check streaming, tool calling
+
+# Write-tools disabled by default
+curl http://localhost:8084/admin/tools/pending
+
+# Check logs for errors
+docker compose logs --tail 100 2>&1 | grep -i error
+```
+
+---
+
+## Troubleshooting
+
+```bash
+docker compose logs api --tail 50
+docker compose logs rag --tail 50
+docker compose restart api
+
+# Reset RAG index:
+docker compose stop rag
+rm -rf .data/rag/chroma_db
+docker compose up -d rag
+
+# Delete and re-create tenant:
+uv run agent-db tenant delete client-name
+# then repeat from section "Tenant + data"
+```
+
+---
+
+## Production (HTTPS)
+
+```bash
+docker compose --profile prod up -d
+# Caddy auto-provisions Let's Encrypt certs, proxies :443 → web:8080, redirects :80 → :443
+```
+
+---
+
+## Quick reference
+
+```
+1. git clone + mkdir -p .data/{app,rag,hf_cache,uploads,pg} + cp .env.example .env
+2. Edit .env: DATABASE_URL, LLM key, DEFAULT_TENANT_ID, DOMAIN
+3. docker compose up -d
+4. docker compose --profile monitoring up -d   (Grafana :3000)
+5. uv run agent-db tenant register client-name
+6. Admin dashboard: upload RAG, create agent, approve tools
+7. Widget: <script src="/embed/embed.js" data-agent="assistant">
+8. uv run agent-db e2e-full
+```
+
+---
+
+## Backups
+
+| Data | Responsible | Notes |
+|------|-------------|-------|
+| Client's DB | **Client** | pg_dump / PITR at their hosting provider |
+| Tenant configs | Platform | ~44KB, `scripts/backup.sh` |
+| LLM keys | Platform | Store separately from server (vault / sealed secrets) |
+| ChromaDB / RAG index | Platform | Re-indexable from source docs |
+| Session / Backlog | Platform | Ephemeral, not critical |
+
+```bash
+bash scripts/backup.sh  # → backups/<date>/tenants/ + .env
+```
+
+---
+
+# Runbook — второй деплой за часы
+
+Внутренняя шпаргалка. Не для клиента — для себя. Актуально: июль 2026.
+
+---
+
+## Что нужно от клиента
+
+- [ ] Доступ к PostgreSQL (хост, порт, юзер, пароль, база)
+- [ ] Домен (для HTTPS в prod)
+- [ ] API-ключ к LLM (OpenAI / Anthropic / Mistral) или локальный Ollama
+- [ ] Документы для RAG (PDF, DOCX, TXT)
+- [ ] Куда встроить виджет (URL страницы, внутри `<body>`)
+
+---
+
+## Сервер + Docker
+
+```bash
+ssh root@client-server
+apt install docker.io docker-compose-v2
+git clone https://github.com/trash2bin/agent-tutor
+cd agent-tutor
+
+mkdir -p .data/{app,rag,hf_cache,uploads,pg}
+cp .env.example .env
+```
+
+---
+
+## Минимальный конфиг
+
+```bash
+DB_DRIVER=postgres
+DATABASE_URL=postgres://user:pass@host:5432/dbname?sslmode=require
+
+# LLM — один из:
+OLLAMA_URL=http://host.docker.internal:11434
+OLLAMA_MODEL=qwen2.5:0.5b
+# или
+MISTRAL_API_KEY=sk-...
+MISTRAL_MODEL=mistral/mistral-small
+# или OPENAI_API_KEY / ANTHROPIC_API_KEY
+
+DEFAULT_TENANT_ID=client-name
+DEMO_TENANTS=client-name
+
+# Только для prod:
+DOMAIN=chat.client.com
+```
+
+Остальные ~170 переменных с безопасными дефолтами. Править только под клиента.
+
+---
+
+## Старт + проверка здоровья
+
+```bash
+docker compose up -d                              # dev
+docker compose --profile prod up -d               # prod + Caddy HTTPS
+
+# Ждём 120s — RAG качает embedding-модель при первом старте
+docker compose logs rag --tail 20
+docker compose ps
+
+curl http://localhost:8084/health    # → {"status":"ok"}
+curl http://localhost:8082/health    # → {"status":"ok"}
+curl http://localhost:8081/health    # → {"status":"ok"}
+```
+
+---
+
+## Мониторинг
+
+```bash
+docker compose --profile monitoring up -d
+# Grafana: http://localhost:3000 (admin / admin) — 12 панелей
+# Prometheus: http://localhost:9090
+```
+
+Каждый сервис отдаёт `/metrics` по умолчанию.
+
+---
+
+## Тенант + данные
+
+```bash
+uv run agent-db tenant register client-name
+
+# Проинтроспектировать схему БД клиента
+curl http://localhost:8084/admin/introspect?tenant=client-name
+
+# Импорт RAG-документов через админку (:8085) или CLI:
+uv run agent-rag-ingest import /path/to/doc.pdf -d client-name
+```
+
+---
+
+## Настройка агента
+
+Админка: `http://localhost:8085`
 
 1. **Tenants** — проверить, что client-name создан
-2. **Config** — проверить LLM провайдер (если не Mistral по дефолту)
+2. **Config** — проверить LLM провайдер
 3. **Tools** — утвердить write-тулы (по умолчанию выключены)
 4. **Agents** — создать агента, system prompt
 5. **RAG** — загрузить документы, проверить поиск
-6. **Monitoring** (новое, v1.1.0):
-   - **Anti-Abuse** — настройки abuse engine: RPS, burst, session budget, интервал, детекция повторов
-   - **Emergency Presets** — Big Red Button: Normal → Cautious → Lockdown одним кликом
-   - Логи в JSON (`LOG_FORMAT=json`) для интеграции с системами сбора логов
+6. **Anti-Abuse** — RPS, burst, session budget
+7. **Emergency Presets** — Normal → Cautious → Lockdown
 
-## 6. Виджет — встройка на сайт клиента
+---
+
+## Виджет
 
 ```html
 <script src="https://chat.client.com/embed/embed.js"
@@ -182,186 +327,81 @@ Admin-dashboard: `http://localhost:8085`
 </script>
 ```
 
-Вставить в `<body>` на сайте клиента. Никаких зависимостей. Shadow DOM — CSS сайта не ломается.
+Вставить в `<body>` на сайте клиента. Shadow DOM — CSS сайта не ломается.
 
-## 7. Проверка перед сдачей
+---
+
+## Проверка
 
 ```bash
-# 1. Мультитенантная изоляция
-uv run agent-db e2e-data
-uv run agent-db e2e-mcp
-uv run agent-db e2e-full
+uv run agent-db e2e-data      # изоляция тенантов
+uv run agent-db e2e-mcp       # изоляция MCP-тулов
+uv run agent-db e2e-full      # все три уровня
 
-# 2. Пишем чат-сообщение через web (http://localhost:8080)
-#    Проверить: стриминг, tool calling, ссылки на документы
+# Чат через web (http://localhost:8080) — стриминг, tool calling
 
-# 3. Проверить, что write-тулы выключены (если не утверждены)
+# Write-тулы выключены по умолчанию
 curl http://localhost:8084/admin/tools/pending
-# → список ожидающих подтверждения
 
-# 4. Логи — нет ошибок
+# Логи без ошибок
 docker compose logs --tail 100 2>&1 | grep -i error
 ```
 
-## 8. Если что-то пошло не так
+---
+
+## Если что-то пошло не так
 
 ```bash
-# Посмотреть логи конкр��тного сервиса
 docker compose logs api --tail 50
 docker compose logs rag --tail 50
-
-# Перезапустить сервис без пересборки всего стека
 docker compose restart api
 
-# Сбросить RAG-индекс (удалить chroma_db, перезапустить, переимпортировать)
+# Сбросить RAG-индекс:
 docker compose stop rag
 rm -rf .data/rag/chroma_db
 docker compose up -d rag
 
-# Сбросить всего тенанта
+# Удалить и пересоздать тенанта:
 uv run agent-db tenant delete client-name
-# заново с шага 4
+# затем повторно с раздела "Тенант + данные"
 ```
 
-## 9. Production-режим (HTTPS)
+---
+
+## Production (HTTPS)
 
 ```bash
 docker compose --profile prod up -d
-# Caddy автоматом:
-# - получает сертификаты Let's Encrypt
-# - проксирует web:8080 → :443
-# - редиректит :80 → :443
-
-# Логи Caddy
-docker compose logs caddy -f
+# Caddy сам получает Let's Encrypt, проксирует :443 → web:8080, редиректит :80 → :443
 ```
+
+---
 
 ## Краткая памятка
 
 ```
 1. git clone + mkdir -p .data/{app,rag,hf_cache,uploads,pg} + cp .env.example .env
-2. Правим .env: DATABASE_URL, LLM ключ, DEFAULT_TENANT_ID
+2. Правим .env: DATABASE_URL, LLM ключ, DEFAULT_TENANT_ID, DOMAIN
 3. docker compose up -d
-4. uv run agent-db tenant register client-name
-5. Admin-dashboard: загрузить RAG, создать агента, утвердить тулы
-6. Виджет: <script src="/embed/embed.js" data-agent="assistant">
-7. uv run agent-db e2e-full
-8. Monitoring: docker compose --profile monitoring up -d (Grafana :3000)
+4. docker compose --profile monitoring up -d   (Grafana :3000)
+5. uv run agent-db tenant register client-name
+6. Админка: загрузить RAG, создать агента, утвердить тулы
+7. Виджет: <script src="/embed/embed.js" data-agent="assistant">
+8. uv run agent-db e2e-full
 ```
 
 ---
 
-## 10. Переменные окружения — новые (v1.1.0)
+## Бэкапы
+
+| Данные | Ответственный | Заметки |
+|--------|---------------|---------|
+| БД клиента | **Клиент** | pg_dump / PITR у хостинг-провайдера |
+| Конфиги тенантов | Платформа | ~44KB, `scripts/backup.sh` |
+| LLM ключи | Платформа | Хранить отдельно от сервера (vault / sealed secrets) |
+| ChromaDB / RAG индекс | Платформа | Переиндексируется из исходных доков |
+| Сессии / Backlog | Платформа | Эфемерные, не критичны |
 
 ```bash
-# ── Anti-Abuse ──────────────────────────────────────────────────
-ABUSE_RPS=1.0           # Token bucket refill rate (requests/second)
-ABUSE_BURST=5           # Token bucket burst capacity
-ABUSE_MESSAGE_MAX_LENGTH=2000  # Max message length (chars)
-ABUSE_MIN_INTERVAL=1.0  # Min interval between messages (seconds)
-ABUSE_SESSION_BUDGET=50 # Max messages per session
-ABUSE_REPEATED_THRESHOLD=3  # Repeated text detection (times)
-
-# ── Logging ──────────────────────────────────────────────────────
-LOG_FORMAT=json         # Log format: json or text (api-service structlog)
-LOG_LEVEL=info          # Log level: debug, info, warn, error
-
-# ── Monitoring ───────────────────────────────────────────────────
-ENABLE_METRICS=true     # Enable /metrics endpoint on all services (always on)
-
----
-
-## 11. Guardrails — Prompt Injection
-
-**Где:** `api-service/src/api_service/guardrails.py`
-**Admin API:** `GET/POST /admin/guardrails`
-
-Модуль проверяет input (сообщение пользо��ателя) и output (ответ LLM) на prompt injection:
-- Input: ignore instructions, role override, jailbreak, leak request, system prompt extraction
-- Output: утечка system prompt, credentials, Bearer token
-
-**Режимы:**
-- `block` (дефолт) — бло��ирует сообщение пользов��теля / заменяет ответ
-- `warn` — только лог, не блокирует
-
-**Env:** `GUARDRAIL_ENABLED`, `GUARDRAIL_BLOCK_ON_MATCH`, `GUARDRAIL_BLOCK_PATTERNS`
-
-**Администрирование:**
-```bash
-# Текущий статус
-curl -H "X-Admin-Token: $ADMIN_TOKEN" http://localhost:8081/admin/guardrails
-
-# Переключить в warn mode
-curl -X POST http://localhost:8081/admin/guardrails \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Token: $ADMIN_TOKEN" \
-  -d '{"block_on_match":"warn"}'
-
-# Отключить
-curl -X POST http://localhost:8081/admin/guardrails \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Token: $ADMIN_TOKEN" \
-  -d '{"enabled":false}'
-```
-
----
-
-## 12. Spending Limits — Per-tenant Cost Control
-
-**Где:** `api-service/src/api_service/spending.py`
-**Admin API:** `GET /admin/spending`, `GET/POST /admin/spending/{tenant_id}`
-
-Модуль отслеживает LLM-расходы per-tenant и жёстко блокирует вызовы при превышении бюджета.
-
-**Как работает:**
-1. После каждого LLM-вызова `record_spending(tenant_id, cost)` суммирует расход
-2. П��ред следующим вызовом `check_limits()` проверяет, не превышен ли бюджет
-3. При превышении — LLM вызовы блокируются, пользователь получает ошибку
-
-**Env:** `SPENDING_LIMIT_ENABLED`, `SPENDING_DEFAULT_BUDGET=50.0`, `SPENDING_BUDGET_PERIOD=monthly`
-
-**Администрирование:**
-```bash
-# Обзор
-curl -H "X-Admin-Token: $ADMIN_TOKEN" http://localhost:8081/admin/spending
-
-# Расходы тенанта
-curl -H "X-Admin-Token: $ADMIN_TOKEN" http://localhost:8081/admin/spending/tenant-a
-
-# Установить бюджет
-curl -X POST http://localhost:8081/admin/spending/tenant-a \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Token: $ADMIN_TOKEN" \
-  -d '{"budget": 100.0}'
-
-# Отключить лимит (0 = нет лимита)
-curl -X POST http://localhost:8081/admin/spending/tenant-a \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Token: $ADMIN_TOKEN" \
-  -d '{"budget": 0}'
-```
-
----
-
-## 13. Backups
-
-Backup responsibility matrix:
-
-| Data | Responsible | Notes |
-|------|-------------|-------|
-| Client's production DB (PostgreSQL / MySQL) | **Client** | Настройте бэкапы у вашего хостинг-провайдера. Стандартные pg_dump / point-in-time recovery. |
-| Tenant configs (.data/tenants/*.json) | Platform | ~44KB, можно скопировать вручную. `scripts/backup.sh` |
-| LLM API keys (.env) | Platform | Храните в vault / sealed secrets отдельно от сервера. |
-| ChromaDB / RAG index | Platform | Реиндексируется из исходных документов при утере. |
-| Session store / Backlog | Platform | Эфемерные данные, не критичны. |
-
-> **Важно:** Платформа не хранит вашу production-базу данных. Она подключается к ней по URL.
-> Вся ответственность за бэкапы вашей БД лежит на вас. Настройте pg_dump / PITR / снапшоты
-> у вашего хостинг-провайдера.
-
-```bash
-# Minimal backup (tenant configs + .env)
-bash scripts/backup.sh
-# → backups/20260711_143000/tenants/ + .env
-```
+bash scripts/backup.sh  # → backups/<date>/tenants/ + .env
 ```

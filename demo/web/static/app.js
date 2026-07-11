@@ -28,7 +28,7 @@ function sseLog(...args) {
 }
 
 // Constants
-const THINKING_MESSAGE = "Думаю и проверяю данные...";
+const THINKING_MESSAGE = "Thinking and checking data...";
 
 // ── Manifest — единственный источник вкладок и колонок ──
 // Пока manifest не загружен — placeholder "Загрузка сущностей…" из HTML.
@@ -81,8 +81,8 @@ async function init() {
 function showTabPlaceholder() {
   const tabBar = document.getElementById("tabBar");
   if (!tabBar) return;
-  tabBar.innerHTML = '<span class="tab-placeholder">Загрузка сущностей…</span>';
-  $("#tableTitle").textContent = "Загрузка…";
+  tabBar.innerHTML = '<span class="tab-placeholder">Loading entities…</span>';
+  $("#tableTitle").textContent = "Loading…";
   $("#tableBody").innerHTML = "";
   $("#metrics").innerHTML = "";
 
@@ -117,7 +117,7 @@ async function loadManifest() {
   }
   // Исчерпали попытки — показываем ошибку
   const tabBar = document.getElementById("tabBar");
-  if (tabBar) tabBar.innerHTML = '<span class="tab-placeholder" style="color:#b4235a">Не удалось загрузить сущности. Обновите страницу.</span>';
+  if (tabBar) tabBar.innerHTML = '<span class="tab-placeholder" style="color:#b4235a">Failed to load entities. Refresh the page.</span>';
 }
 
 function buildTabsFromManifest() {
@@ -270,7 +270,7 @@ async function loadAgents() {
     activeAgent = null;
   }
 
-  select.innerHTML = '<option value="">Нет (прямой чат с tenant)</option>' +
+  select.innerHTML = '<option value="">None (direct chat with tenant)</option>' +
     state.agents.map(function(a) {
       var sel = a.name === activeAgent ? 'selected' : '';
       return '<option value="' + escapeHtml(a.name) + '" ' + sel + '>' + escapeHtml(a.name) + '</option>';
@@ -328,7 +328,7 @@ async function reloadForNewTenant() {
   // Очищаем историю чата (разные tenant'ы — разные данные)
   writeStoredMessages([]);
   $("#messages").innerHTML =
-    '<div class="message assistant">Спросите про студента, оценки, расписание или материалы.</div>';
+    '<div class="message assistant">Ask about students, grades, schedule or materials.</div>';
 
   // Reload manifest
   await loadManifest();
@@ -528,12 +528,12 @@ async function checkHealth() {
     status.textContent =
       data.ollama?.status === "ok"
         ? `API: ${data.ollama.model}`
-        : "API: Ollama недоступна";
+        : "API: Ollama unavailable";
     status.style.background =
       data.ollama?.status === "ok" ? "#eaf7f5" : "#fff7ed";
     status.style.color = data.ollama?.status === "ok" ? "#0b5f59" : "#a15c07";
   } catch {
-    status.textContent = "API: недоступен";
+    status.textContent = "API: unavailable";
     status.style.background = "#fff1f3";
     status.style.color = "#b4235a";
   }
@@ -673,7 +673,7 @@ async function streamChat(message, target) {
   } catch (error) {
     sseLog("SSE error:", error);
     target.classList.add("error");
-    target.textContent = `Ошибка: ${error.message}`;
+    target.textContent = `Error: ${error.message}`;
   }
 }
 
@@ -741,7 +741,7 @@ function handleEventChunk(chunk, target) {
   }
   if (payload.type === "done" && !(target.dataset.raw || "").trim()) {
     sseLog("Done event (empty response)");
-    target.dataset.raw = "Модель не вернула текст. Попробуйте уточнить запрос.";
+    target.dataset.raw = "Model returned no text. Try rephrasing your question.";
     target.textContent = target.dataset.raw;
   }
   if (payload.type === "done") {
@@ -751,7 +751,7 @@ function handleEventChunk(chunk, target) {
   if (payload.type === "error") {
     sseLog("Error event:", payload.text);
     target.classList.add("error");
-    target.textContent = `Ошибка: ${payload.text}`;
+    target.textContent = `Error: ${payload.text}`;
   }
 }
 

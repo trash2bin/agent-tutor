@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -14,38 +14,38 @@
       </div>
       <div class="topbar-right">
         <div class="tenant-selector">
-          <label for="tenantSelect" class="tenant-label">База:</label>
+          <label for="tenantSelect" class="tenant-label">Database:</label>
           <select id="tenantSelect" class="tenant-select">
-            <option value="">Загрузка…</option>
+            <option value="">Loading…</option>
           </select>
         </div>
         <div class="tenant-selector" style="margin-left:8px;">
-          <label for="agentSelect" class="tenant-label">🤖 Агент:</label>
+          <label for="agentSelect" class="tenant-label">🤖 Agent:</label>
           <select id="agentSelect" class="tenant-select">
-            <option value="">Нет (прямой чат с tenant)</option>
+            <option value="">None (direct chat with tenant)</option>
           </select>
         </div>
-        <div class="status" id="status">API: проверка</div>
+        <div class="status" id="status">API: checking</div>
       </div>
     </header>
 
     <main>
       <section class="hero">
         <div>
-          <h2>Данные из подключённой базы</h2>
-          <p>Все сущности доступны модели через MCP-инструменты.</p>
+          <h2>Data from connected database</h2>
+          <p>All entities are available to the model via MCP tools.</p>
         </div>
         <div class="metric-grid" id="metrics"></div>
       </section>
 
-      <section class="tabs" aria-label="Разделы данных" id="tabBar">
-      <span class="tab-placeholder">Загрузка сущностей…</span>
+      <section class="tabs" aria-label="Data sections" id="tabBar">
+      <span class="tab-placeholder">Loading entities…</span>
     </section>
 
       <section class="data-shell">
         <div class="section-title">
-          <h2 id="tableTitle">Студенты</h2>
-          <input id="filter" type="search" placeholder="Фильтр">
+          <h2 id="tableTitle">Students</h2>
+          <input id="filter" type="search" placeholder="Filter">
         </div>
         <div class="table-wrap">
           <table>

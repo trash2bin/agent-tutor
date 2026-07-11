@@ -155,28 +155,28 @@ func (r *Registry) registerRagTools(mcpServer *server.MCPServer) {
 	// search_documents — семантический поиск по документам
 	searchTool := mcp.NewTool(
 		"search_documents",
-		mcp.WithDescription("Поиск наиболее релевантных фрагментов загруженных документов (лекций, методичек) по текстовому запросу. Возвращает массив фрагментов с оценкой релевантности."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Поисковый запрос — вопрос или ключевые слова")),
-		mcp.WithString("discipline_id", mcp.Description("ID дисциплины для фильтрации (опционально)")),
-		mcp.WithNumber("limit", mcp.Description("Максимум результатов (1-20, по умолчанию 5)")),
+		mcp.WithDescription("Searches for relevant fragments in uploaded documents by text query. Returns an array of fragments with relevance score."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("Search query — question or keywords")),
+		mcp.WithString("discipline_id", mcp.Description("Discipline ID for filtering (optional)")),
+		mcp.WithNumber("limit", mcp.Description("Max results (1-20, default 5)")),
 	)
 	mcpServer.AddTool(searchTool, MakeAuditHandler("search_documents", r.tenantID, r.makeRagHandler("search")))
 
 	// list_documents — список документов в RAG
 	listTool := mcp.NewTool(
 		"list_documents",
-		mcp.WithDescription("Список документов, загруженных в базу знаний (лекции, методички, учебные материалы). Можно фильтровать по дисциплине."),
-		mcp.WithString("discipline_id", mcp.Description("ID дисциплины для фильтрации (опционально)")),
+		mcp.WithDescription("Lists documents uploaded to the knowledge base. Can be filtered by discipline."),
+		mcp.WithString("discipline_id", mcp.Description("Discipline ID for filtering (optional)")),
 	)
 	mcpServer.AddTool(listTool, MakeAuditHandler("list_documents", r.tenantID, r.makeRagHandler("list")))
 
 	// get_rag_context — готовый контекст для LLM
 	contextTool := mcp.NewTool(
 		"get_rag_context",
-		mcp.WithDescription("Формирует готовую строку контекста из релевантных фрагментов документов для подстановки в ответ модели. Возвращает контекст и список источников."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Вопрос пользователя для поиска релевантных фрагментов")),
-		mcp.WithString("discipline_id", mcp.Description("ID дисциплины для фильтрации (опционально)")),
-		mcp.WithNumber("limit", mcp.Description("Максимум фрагментов (1-20, по умолчанию 5)")),
+		mcp.WithDescription("Builds a ready context string from relevant document fragments for the model response. Returns context and source list."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("User question for searching relevant fragments")),
+		mcp.WithString("discipline_id", mcp.Description("Discipline ID for filtering (optional)")),
+		mcp.WithNumber("limit", mcp.Description("Max fragments (1-20, default 5)")),
 	)
 	mcpServer.AddTool(contextTool, MakeAuditHandler("get_rag_context", r.tenantID, r.makeRagHandler("context")))
 }
@@ -185,7 +185,7 @@ func (r *Registry) registerRagTools(mcpServer *server.MCPServer) {
 func (r *Registry) makeRagHandler(kind string) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if !r.RagEnabled() {
-			return mcp.NewToolResultError(fmt.Sprintf("RAG недоступен: %s. Проверьте RAG_SERVICE_URL и запущен ли rag-сервис.", r.RagDisabledReason())), nil
+			return mcp.NewToolResultError(fmt.Sprintf("RAG unavailable: %s. Check RAG_SERVICE_URL and ensure rag-service is running.", r.RagDisabledReason())), nil
 		}
 
 		args := request.Params.Arguments
@@ -204,38 +204,38 @@ func (r *Registry) makeRagHandler(kind string) server.ToolHandlerFunc {
 		case "search":
 			results, err := r.ragClient.SearchDocuments(query, disciplineID, limit)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Ошибка поиска: %v", err)), nil
+				return mcp.NewToolResultError(fmt.Sprintf("Search error: %v", err)), nil
 			}
 			data, err := json.MarshalIndent(results, "", "  ")
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Ошибка форматирования: %v", err)), nil
+				return mcp.NewToolResultError(fmt.Sprintf("Formatting error: %v", err)), nil
 			}
 			return mcp.NewToolResultText(string(data)), nil
 
 		case "list":
 			docs, err := r.ragClient.ListDocuments(disciplineID, 0)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Ошибка получения списка: %v", err)), nil
+				return mcp.NewToolResultError(fmt.Sprintf("List retrieval error: %v", err)), nil
 			}
 			data, err := json.MarshalIndent(docs, "", "  ")
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Ошибка форматирования: %v", err)), nil
+				return mcp.NewToolResultError(fmt.Sprintf("Formatting error: %v", err)), nil
 			}
 			return mcp.NewToolResultText(string(data)), nil
 
 		case "context":
 			ctxResp, err := r.ragClient.GetRagContext(query, disciplineID, limit)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Ошибка сборки контекста: %v", err)), nil
+				return mcp.NewToolResultError(fmt.Sprintf("Context build error: %v", err)), nil
 			}
 			data, err := json.MarshalIndent(ctxResp, "", "  ")
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Ошибка форматирования: %v", err)), nil
+				return mcp.NewToolResultError(fmt.Sprintf("Formatting error: %v", err)), nil
 			}
 			return mcp.NewToolResultText(string(data)), nil
 
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("Неизвестная RAG-операция: %s", kind)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Unknown RAG operation: %s", kind)), nil
 		}
 	}
 }
@@ -450,8 +450,8 @@ func buildDefaultDesc(ep config.Endpoint, entities []config.Entity) string {
 	switch ep.Op {
 	case config.OpGetByID:
 		desc := fmt.Sprintf(
-			"Возвращает данные о %s по его уникальному идентификатору. "+
-				"Используйте, когда уже знаете ID нужной записи (например, из результатов find_%s или list_%s).",
+			"Returns data about %s by its unique identifier. "+
+				"Use when you already know the record ID (e.g. from find_%s or list_%s).",
 			entityName, entityName, entityName)
 		if entityDesc != "" {
 			desc += fmt.Sprintf(" %s: %s", entityName, entityDesc)
@@ -459,25 +459,25 @@ func buildDefaultDesc(ep config.Endpoint, entities []config.Entity) string {
 		return desc
 	case config.OpFind:
 		desc := fmt.Sprintf(
-			"Позволяет найти %s по текстовому запросу.",
+			"Searches for %s by text query.",
 			entityName)
 		if ep.SearchField != "" {
-			desc += fmt.Sprintf(" Поиск производится по полю '%s'.", ep.SearchField)
+			desc += fmt.Sprintf(" Search is done on the '%s' field.", ep.SearchField)
 		}
-		desc += " Если параметр поиска не указан, возвращает полный список всех записей."
+		desc += " If no search parameter is provided, returns full list of all records."
 		if entityDesc != "" {
 			desc += fmt.Sprintf(" %s: %s", entityName, entityDesc)
 		}
 		return desc
 	case config.OpList:
-		return fmt.Sprintf("Возвращает полный список всех %s.", entityName)
+		return fmt.Sprintf("Returns full list of all %s.", entityName)
 	case config.OpCustomQuery:
 		if entityName != "" {
-			return fmt.Sprintf("Выполняет пользовательский запрос: %s", entityName)
+			return fmt.Sprintf("Executes custom query: %s", entityName)
 		}
-		return "Выполняет пользовательский запрос"
+		return "Executes custom query"
 	default:
-		return fmt.Sprintf("Выполняет запрос %s", ep.Path)
+		return fmt.Sprintf("Executes query %s", ep.Path)
 	}
 }
 
@@ -508,13 +508,13 @@ func deriveParams(ep config.Endpoint, entities []config.Entity) []config.Endpoin
 				if f.Description != "" {
 					fieldDesc = f.Description
 				} else {
-					fieldDesc = fmt.Sprintf("Уникальный идентификатор %s", ep.Entity)
+					fieldDesc = fmt.Sprintf("Unique identifier for %s", ep.Entity)
 				}
 				break
 			}
 		}
 		if fieldDesc == "" {
-			fieldDesc = fmt.Sprintf("Уникальный идентификатор %s", ep.Entity)
+			fieldDesc = fmt.Sprintf("Unique identifier for %s", ep.Entity)
 		}
 		ptype := fieldTypeToParamType(fieldType)
 		required := true
@@ -535,9 +535,9 @@ func deriveParams(ep config.Endpoint, entities []config.Entity) []config.Endpoin
 		}
 		if qp != "" {
 			required := false
-			desc := fmt.Sprintf("Текстовый запрос для поиска %s по имени. Если не указан, возвращаются все записи.", ep.Entity)
+			desc := fmt.Sprintf("Text query to search %s by name. If omitted, returns all records.", ep.Entity)
 			if ep.SearchField != "" {
-				desc = fmt.Sprintf("Текстовый запрос для поиска %s по полю '%s'. Если не указан, возвращаются все записи.",
+				desc = fmt.Sprintf("Text query to search %s by field '%s'. If omitted, returns all records.",
 					ep.Entity, ep.SearchField)
 			}
 			params = append(params, config.EndpointParam{

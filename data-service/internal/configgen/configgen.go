@@ -98,7 +98,7 @@ func Generate(schema *datasource.Schema, ds config.DataSourceConfig, skipPrefixe
 				Path:        fmt.Sprintf("/%s/{%s}", entity.Name, entity.IDColumn),
 				Op:          config.OpGetByID,
 				Entity:      entity.Name,
-				Description: fmt.Sprintf("Возвращает %s по идентификатору", entity.Name),
+				Description: fmt.Sprintf("Returns %s by identifier", entity.Name),
 			})
 		}
 
@@ -111,7 +111,7 @@ func Generate(schema *datasource.Schema, ds config.DataSourceConfig, skipPrefixe
 				Entity:      entity.Name,
 				SearchField: searchCol.Name,
 				QueryParam:  searchCol.Name,
-				Description: fmt.Sprintf("Ищет %s по имени. Без параметра возвращает все записи.", entity.Name),
+				Description: fmt.Sprintf("Searches %s by name. Returns all records when no query given.", entity.Name),
 			})
 		}
 
@@ -227,14 +227,14 @@ func GenerateMCPTools(endpoints []config.Endpoint) []config.MCPTool {
 		case config.OpGetByID:
 			toolName = fmt.Sprintf("get_%s", ep.Entity)
 			desc = fmt.Sprintf(
-				"Возвращает данные о %s по его уникальному и��ентификатору. "+
-					"Используйте, когда уже знаете ID нужной записи (например, из результатов find_%s).",
+				"Returns data about %s by its unique identifier. "+
+					"Use when you already know the record ID (e.g. from find_%s).",
 				ep.Entity, ep.Entity)
 		case config.OpFind:
 			toolName = fmt.Sprintf("find_%s", ep.Entity)
 			desc = fmt.Sprintf(
-				"Позволяет найти %s по текстовому запросу (имени, названию). "+
-					"Если па��аметр поиска не указан, возвращает полный список всех записей.",
+				"Searches for %s by text query (name, title). "+
+					"If no search parameter provided, returns full list of all records.",
 				ep.Entity)
 		case config.OpCustomQuery:
 			toolName = fmt.Sprintf("query_%s", ep.Path)
@@ -243,9 +243,9 @@ func GenerateMCPTools(endpoints []config.Endpoint) []config.MCPTool {
 			toolName = strings.ReplaceAll(toolName, "/", "_")
 			toolName = strings.TrimPrefix(toolName, "_")
 			if ep.Description != "" {
-				desc = fmt.Sprintf("Выполняет пользовательский запрос: %s", ep.Description)
+				desc = fmt.Sprintf("Executes custom query: %s", ep.Description)
 			} else {
-				desc = fmt.Sprintf("Выполняет пользовательский запрос по пути %s", ep.Path)
+				desc = fmt.Sprintf("Executes custom query at %s", ep.Path)
 			}
 		}
 
@@ -276,7 +276,7 @@ func deriveToolParams(ep config.Endpoint) []config.EndpointParam {
 			In:          config.ParamInPath,
 			Type:        config.ParamTypeString,
 			Required:    &required,
-			Description: fmt.Sprintf("Уникальный идентификатор %s", ep.Entity),
+			Description: fmt.Sprintf("Unique identifier for %s", ep.Entity),
 		})
 	}
 
@@ -288,7 +288,7 @@ func deriveToolParams(ep config.Endpoint) []config.EndpointParam {
 		}
 		if qp != "" {
 			required := false
-			desc := fmt.Sprintf("Текстовый запрос для поиска %s по полю '%s'. Если не указан, возвращаются все записи.",
+			desc := fmt.Sprintf("Text query to search %s by field '%s'. If omitted, returns all records.",
 				ep.Entity, ep.SearchField)
 			params = append(params, config.EndpointParam{
 				Name:        qp,

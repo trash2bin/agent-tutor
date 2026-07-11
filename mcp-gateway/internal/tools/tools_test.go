@@ -28,10 +28,10 @@ func baseConfig() *config.Config {
 				Name:        "student",
 				Table:       "students",
 				IDColumn:    "id",
-				Description: "Карточка студента",
+				Description: "Student card",
 				Fields: []config.EntityField{
 					{Name: "id", Column: "id", Type: config.FieldTypeString},
-					{Name: "full_name", Column: "name", Type: config.FieldTypeString, Description: "Полное ФИО"},
+					{Name: "full_name", Column: "name", Type: config.FieldTypeString, Description: "Full name"},
 					{Name: "course", Column: "course", Type: config.FieldTypeInt},
 				},
 			},
@@ -39,7 +39,7 @@ func baseConfig() *config.Config {
 				Name:        "group",
 				Table:       "groups",
 				IDColumn:    "id",
-				Description: "Учебная группа",
+				Description: "Study group",
 				Fields: []config.EntityField{
 					{Name: "id", Column: "id", Type: config.FieldTypeString},
 					{Name: "name", Column: "name", Type: config.FieldTypeString},
@@ -338,12 +338,12 @@ func TestBuildDefaultDesc(t *testing.T) {
 		ep   config.Endpoint
 		want string
 	}{
-		{config.Endpoint{Op: config.OpGetByID, Entity: "student"}, "Возвращает данные о student по его уникальному идентификатору. Используйте, когда уже знаете ID нужной записи (например, из результатов find_student или list_student). student: A student record"},
-		{config.Endpoint{Op: config.OpFind, Entity: "product", SearchField: "name"}, "Позволяет найти product по текстовому запросу. Поиск производится по полю 'name'. Если параметр поиска не указан, возвращает полный список всех записей. product: Product catalog entry"},
-		{config.Endpoint{Op: config.OpList, Entity: "order"}, "Возвращает полный список всех order."},
-		{config.Endpoint{Op: config.OpCustomQuery, Entity: "report"}, "Выполняет пользовательский запрос: report"},
-		{config.Endpoint{Op: config.OpGetByID, Entity: "nonexistent"}, "Возвращает данные о nonexistent по его уникальному идентификатору. Используйте, когда уже знаете ID нужной записи (например, из результатов find_nonexistent или list_nonexistent)."},
-		{config.Endpoint{Op: "unknown", Path: "/foo/bar"}, "Выполняет запрос /foo/bar"},
+		{config.Endpoint{Op: config.OpGetByID, Entity: "student"}, "Returns data about student by its unique identifier. Use when you already know the record ID (e.g. from find_student or list_student). student: A student record"},
+		{config.Endpoint{Op: config.OpFind, Entity: "product", SearchField: "name"}, "Searches for product by text query. Search is done on the 'name' field. If no search parameter is provided, returns full list of all records. product: Product catalog entry"},
+		{config.Endpoint{Op: config.OpList, Entity: "order"}, "Returns full list of all order."},
+		{config.Endpoint{Op: config.OpCustomQuery, Entity: "report"}, "Executes custom query: report"},
+		{config.Endpoint{Op: config.OpGetByID, Entity: "nonexistent"}, "Returns data about nonexistent by its unique identifier. Use when you already know the record ID (e.g. from find_nonexistent or list_nonexistent)."},
+		{config.Endpoint{Op: "unknown", Path: "/foo/bar"}, "Executes query /foo/bar"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want[:min(len(tt.want), 30)], func(t *testing.T) {
