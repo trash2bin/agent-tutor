@@ -22,7 +22,7 @@ from litellm import CustomStreamWrapper
 from litellm.router import Router
 from litellm.types.utils import ModelResponse
 
-from demo.settings import settings
+from helperium_sdk.settings import settings
 
 logger = logging.getLogger("api_service.agent.llm_client")
 

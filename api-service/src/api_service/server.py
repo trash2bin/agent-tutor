@@ -26,7 +26,7 @@ from api_service.agent.orchestrator import LLMAgent
 from api_service.agent.types import AgentEventData
 from api_service.backlog import backlog
 from api_service.sessions import session_store
-from demo.settings import settings
+from helperium_sdk.settings import settings
 from api_service.http_models import (
     BacklogDetailResponse,
     BacklogEvent,

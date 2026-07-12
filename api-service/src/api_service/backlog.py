@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from api_service.prometheus_metrics import backlog_records_total, backlog_errors_total
-from demo.settings import settings
+from helperium_sdk.settings import settings
 
 logger = logging.getLogger("api_service.backlog")
 

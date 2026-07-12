@@ -636,18 +636,16 @@ uv run agent-db e2e-full               # полный e2e пайплайн
 
 ### 1. Python Unit/Integration тесты
 ```bash
-uv run pytest rag/tests/                   # RAG (индексация, поиск, pipeline, repository)
-uv run pytest api-service/src/api_service/tests/              # API (OpenAPI spec, backlog, sessions, rate limiter)
-uv run pytest demo/web/tests/              # Web (50 тестов: 22 proxy + 4 url mapping + 24 CORS)
+uv run pytest rag/tests/                   # RAG (индексация, поиск, pipeline, repository) — 108 тестов
+uv run pytest api-service/src/api_service/tests/              # API (OpenAPI spec, guardrails, sessions, spending) — 262 теста
+uv run pytest demo/web/tests/              # Web (73 теста: proxy, CORS, URL mapping)
 uv run pytest demo/tests/                  # Settings (18 тестов конфигурации из env)
-uv run pytest helperium-sdk/tests/       # SDK модели и seedgen
+uv run pytest helperium-sdk/tests/       # SDK модели и seedgen — 66 тестов
 ```
-
-> Примечание: тесты MCP-клиента и оркестратора помечены `@pytest.mark.skip` — ожидают переписывания под новый MCP SDK протокол.
 
 ### 2. Go Unit/Integration тесты
 ```bash
-go test ./data-service/... ./mcp-gateway/...  # 591 тест в 19 пакетах (data-service: 470 в 14 пакетах, mcp-gateway: 121 в 5)
+go test ./data-service/... ./mcp-gateway/...  # ~655 тестов в 25 пакетах (data-service: ~470, mcp-gateway: ~100, admin-dashboard: ~26, helperium-go: ~30)
 ```
 
 ### 3. Сквозные интеграционные скрипты
@@ -736,7 +734,7 @@ specs/
 | Job | Что проверяет | Команда |
 |---|---|---|
 | `lint-python` | Ruff lint, Ruff format check, Pyright type check | `ruff check`, `ruff format --check`, `pyright` |
-| `test-python` | Все Python unit/integration тесты | `pytest api-service/src/api_service/tests/` |
+| `test-python` | Все Python unit/integration тесты | `pytest api-service/src/api_service/tests/` + `demo/web/tests/` + `demo/tests/` + `rag/tests/unit/` + `helperium-sdk/tests/` |
 | `lint-go` | golangci-lint v2 (errcheck, staticcheck, unused, ineffassign, govet) | `golangci-lint run ./...` |
 | `test-go` | Go тесты в data-service и mcp-gateway | `go test ./... -count=1 -timeout 180s` |
 
@@ -796,15 +794,19 @@ cd mcp-gateway && golangci-lint run ./...
 ### 🏁 Makefile — локальная симуляция CI
 
 ```bash
-make ci         # полный прогон (линт + тесты Python и Go)
+make ci         # полный прогон (линт + audit + тесты Python и Go)
 make ci-lint-py # только Python линт + typecheck
-make ci-test-py # только Python тесты
+make ci-test-py # только Python тесты (api-service + demo + RAG unit + SDK)
 make ci-lint-go # только Go линтинг (data-service + mcp-gateway)
-make ci-test-go # только Go тесты
+make ci-test-go # только Go тесты (data-service + mcp-gateway)
 make ci-audit   # полный security audit (uv audit + govulncheck)
 ```
 
-**Перед каждым пушем:** `make ci` — занимает ~30–60 сек, ловит ~95% проблем, которые упадут в CI.
+**Перед каждым пушем:** `make ci` — занимает ~2–3 мин, ловит ~95% проблем, которые упадут в CI.
+
+Альтернатива — запустить только нужный набор:
+- `make ci-test-py` — только Python тесты (509 тестов, ~10 сек)
+- `make ci-test-go` — только Go тесты (655 тестов, ~30 сек)
 
 ### 🐳 act — точная симуляция GitHub Actions
 
@@ -825,10 +827,9 @@ act --pull=false           # весь пайплайн
 
 ### 🧪 Критерий готовности перед коммитом
 
-1. [ ] `make ci` — зелёный (или его части)
+1. [ ] `make ci` — зелёный (если не уверен — `make ci-test-py` быстрее: ~10 сек)
 2. [ ] Pre-commit hooks — все Passed
 3. [ ] `uv run agent-db e2e-full` — зелёный (если менялась логика data-service / mcp-gateway / orchestrator)
-4. [ ] `make ci` — зелёный целиком (не обязательно перед каждым коммитом, но перед пушем — обязательно)
 
 ---
 

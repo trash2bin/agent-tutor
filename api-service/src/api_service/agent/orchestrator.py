@@ -16,7 +16,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-from demo.settings import settings
+from helperium_sdk.settings import settings
 
 from .conversation import ConversationManager
 from .event_stream import format_sse_event, unstreamed_suffix

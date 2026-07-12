@@ -9,7 +9,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
-from demo.settings import PROJECT_ROOT, settings
+
+from helperium_sdk.settings import settings, project_root
+
+PROJECT_ROOT = project_root()
 
 logger = logging.getLogger("api_service.sessions")
 

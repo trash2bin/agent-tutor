@@ -387,10 +387,12 @@ class TestSettingsDefaultOrigin:
     def test_settings_can_be_overridden_by_env(self, monkeypatch):
         """Overriding WEB_ORIGIN env var changes settings value."""
         monkeypatch.setenv("WEB_ORIGIN", "http://custom.com")
-        # Re-read settings via fresh import (isolated to this test)
         import importlib
 
+        # Reload the canonical source first, then the bridge
+        import helperium_sdk.settings as hs
         import demo.settings as ds
 
+        importlib.reload(hs)
         importlib.reload(ds)
         assert ds.settings.web_origin == "http://custom.com"

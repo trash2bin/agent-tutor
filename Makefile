@@ -16,6 +16,9 @@ ci-audit:
 
 ci-test-py:
 	PYTHONPATH=$(PWD) uv run -- python -m pytest api-service/src/api_service/tests/ -v --tb=short
+	PYTHONPATH=$(PWD) uv run -- python -m pytest demo/web/tests/ demo/tests/ -v --tb=short
+	PYTHONPATH=$(PWD) uv run -- python -m pytest rag/tests/unit/ -v --tb=short
+	PYTHONPATH=$(PWD) uv run -- python -m pytest helperium-sdk/tests/ -v --tb=short
 
 ci-lint-go:
 	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest

@@ -18,26 +18,37 @@ import pytest
 
 
 class TestDemoSettingsDefaults:
-    """Без env vars — все дефолты."""
+    """Без env vars — все дефолты.
+
+    NB: LiteLLM автоматически загружает .env при импорте —
+    очищаем ключи из .env для изоляции.
+    """
+
+    _CLEAN_ENV = {k: v for k, v in os.environ.items()
+                   if k not in ("DEFAULT_TENANT_ID", "DEMO_TENANTS",
+                                "WEB_ORIGIN", "CORS_ALLOW_ORIGINS",
+                                "MISTRAL_API_KEY", "MISTRAL_MODEL")}
 
     def test_core_defaults(self):
         from demo.settings import DemoSettings
 
-        s = DemoSettings()
-        assert s.api_host == "127.0.0.1"
-        assert s.api_port == 8081
-        assert s.web_host == "127.0.0.1"
-        assert s.web_port == 8080
-        assert s.web_origin == "http://localhost:8080"
-        assert s.api_bearer_token is None
+        with patch.dict(os.environ, self._CLEAN_ENV, clear=True):
+            s = DemoSettings()
+            assert s.api_host == "127.0.0.1"
+            assert s.api_port == 8081
+            assert s.web_host == "127.0.0.1"
+            assert s.web_port == 8080
+            assert s.web_origin == "http://localhost:8080"
+            assert s.api_bearer_token is None
 
     def test_tenant_defaults(self):
         """Новые поля tenant-конфигурации — дефолты."""
         from demo.settings import DemoSettings
 
-        s = DemoSettings()
-        assert s.default_tenant_id == "default"
-        assert s.demo_tenants == ""  # пустая строка = авто-дискавери
+        with patch.dict(os.environ, self._CLEAN_ENV, clear=True):
+            s = DemoSettings()
+            assert s.default_tenant_id == "default"
+            assert s.demo_tenants == ""  # пустая строка = авто-дискавери
 
     def test_service_url_defaults(self):
         """Новые поля URL сервисов — дефолты."""

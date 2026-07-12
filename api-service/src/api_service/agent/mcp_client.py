@@ -43,7 +43,7 @@ from typing import Any
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 
-from demo.settings import settings
+from helperium_sdk.settings import settings
 
 logger = logging.getLogger("api_service.agent.mcp_client")
 

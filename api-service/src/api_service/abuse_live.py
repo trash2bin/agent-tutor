@@ -279,7 +279,7 @@ class LiveAbuseProvider:
         This lets existing code that reads ``settings.history_turns`` etc.
         benefit from the new config without changes.
         """
-        from demo.settings import settings as live_settings
+        from helperium_sdk.settings import settings as live_settings
 
         cfg = self.get_config()
 

@@ -699,6 +699,7 @@ version = "1.1.0"
 source = { editable = "demo/web" }
 dependencies = [
     { name = "fastapi" },
+    { name = "helperium-sdk" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "starlette" },
@@ -708,6 +709,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.137.2" },
+    { name = "helperium-sdk", editable = "helperium-sdk" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "starlette", specifier = ">=0.50.0" },
