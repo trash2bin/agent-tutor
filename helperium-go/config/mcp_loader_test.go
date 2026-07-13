@@ -19,30 +19,7 @@ func writeTempConfig(t *testing.T, data string) string {
 	return path
 }
 
-// withConfigSchemaNoop — убирает CONFIG_SCHEMA (тесты сами знают где она).
-func withSchemaPath(t *testing.T) {
-	t.Helper()
-	// Берём схему из specs/ относительно helperium-go/
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("os.Getwd: %v", err)
-	}
-	candidates := []string{
-		filepath.Join(wd, "..", "..", "specs", "config.schema.json"), // helperium-go/config → repo/specs
-		filepath.Join(wd, "..", "..", "specs", "config.schema.json"),
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			abs, _ := filepath.Abs(c)
-			t.Setenv("CONFIG_SCHEMA", abs)
-			return
-		}
-	}
-	t.Fatalf("config.schema.json not found; tried %v", candidates)
-}
-
 func TestMCPLoad_ValidConfig(t *testing.T) {
-	withSchemaPath(t)
 	path := writeTempConfig(t, `{
 		"version": 1,
 		"data_source": { "driver": "sqlite", "dsn": ":memory:" },
@@ -78,7 +55,6 @@ func TestMCPLoad_ValidConfig(t *testing.T) {
 }
 
 func TestMCPLoad_InvalidPath(t *testing.T) {
-	withSchemaPath(t)
 	_, err := config.Load("/nonexistent/path/config.json")
 	if err == nil {
 		t.Fatal("Load() expected error for nonexistent path, got nil")
@@ -86,7 +62,6 @@ func TestMCPLoad_InvalidPath(t *testing.T) {
 }
 
 func TestMCPLoad_InvalidJSON(t *testing.T) {
-	withSchemaPath(t)
 	path := writeTempConfig(t, `{invalid json}`)
 	_, err := config.Load(path)
 	if err == nil {
@@ -95,7 +70,6 @@ func TestMCPLoad_InvalidJSON(t *testing.T) {
 }
 
 func TestMCPLoad_EmptyEntitiesAndEndpoints(t *testing.T) {
-	withSchemaPath(t)
 	path := writeTempConfig(t, `{
 		"version": 1,
 		"data_source": { "driver": "postgres", "dsn": "host=localhost" },
@@ -118,7 +92,6 @@ func TestMCPLoad_EmptyEntitiesAndEndpoints(t *testing.T) {
 }
 
 func TestMCPLoad_EntityWithAllFieldTypes(t *testing.T) {
-	withSchemaPath(t)
 	path := writeTempConfig(t, `{
 		"version": 1,
 		"data_source": { "driver": "sqlite", "dsn": ":memory:" },
@@ -173,10 +146,14 @@ func TestMCPLoad_EntityWithAllFieldTypes(t *testing.T) {
 }
 
 func TestMCPLoad_MCPToolOverrideOrderPreserved(t *testing.T) {
-	withSchemaPath(t)
 	path := writeTempConfig(t, `{
 		"version": 1,
 		"data_source": { "driver": "sqlite", "dsn": ":memory:" },
+		"endpoints": [
+			{ "method": "GET", "path": "/a", "op": "builtin_health" },
+			{ "method": "GET", "path": "/b", "op": "builtin_health" },
+			{ "method": "GET", "path": "/c", "op": "builtin_health" }
+		],
 		"mcp_tools": [
 			{ "name": "first_tool", "endpoint": "/a", "description": "First" },
 			{ "name": "second_tool", "endpoint": "/b", "description": "Second" },
@@ -200,7 +177,6 @@ func TestMCPLoad_MCPToolOverrideOrderPreserved(t *testing.T) {
 }
 
 func TestMCPLoad_TrailingCommas(t *testing.T) {
-	withSchemaPath(t)
 	path := writeTempConfig(t, `{
 		"version": 1,
 		"data_source": { "driver": "sqlite", "dsn": ":memory:", }
@@ -212,7 +188,6 @@ func TestMCPLoad_TrailingCommas(t *testing.T) {
 }
 
 func TestMCPLoad_UnicodeFieldDescriptions(t *testing.T) {
-	withSchemaPath(t)
 	path := writeTempConfig(t, `{
 		"version": 1,
 		"data_source": { "driver": "sqlite", "dsn": ":memory:" },

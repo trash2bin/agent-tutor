@@ -1,15 +1,14 @@
-# OpenAPI-спецификации сервисов + JSON-конфиги
+# OpenAPI-спецификации сервисов + конфигурация
 
-В `specs/` лежат **декларативные контракты** между сервисами. Каждый файл —
-источник правды для своего аспекта системы.
+`specs/` содержит декларативные контракты между сервисами и документацию
+к формату конфига.
 
 ## File layout
 
 ```
 specs/
-├── config.schema.json         # JSON Schema конфига data-service (runtime-валидация)
-├── config.schema.md           # Человеко-читаемое руководство к схеме
-├── config.example.json        # Пример конфига SQLite (для тестов, dev-запуска)
+├── config.schema.md           # Человеко-читаемое руководство (архив — валидация в Go-типах)
+├── config.example.json        # Пример конфига SQLite (shop scenario)
 ├── config.postgres.json       # Пример конфига PostgreSQL (production-шаблон)
 ├── api.openapi.yaml           # OpenAPI api-service сервера (порт 8081)
 ├── rag.openapi.yaml           # OpenAPI rag-сервиса (порт 8082)
@@ -19,25 +18,171 @@ specs/
 
 ---
 
-## config.schema.json — конфиг data-service
+## Как работает конфиг data-service (runtime)
 
-**Жизненно важный рантайм-артефакт.** Без него data-service не стартанёт:
+Конфиг — корневой артефакт, описывающий **клиентскую БД** и то, как
+data-service должен с ней работать: какие таблицы доступны, какие REST
+эндпоинты публикуются, какие SQL-запросы разрешены.
 
-- `helperium-go/config/loader.go` ищет схему по цепочке путей при загрузке
-- `helperium-go/config/validate.go` валидирует каждый конфиг JSON Schema
-- Тесты ищут `specs/config.schema.json` относительно CWD или бинарника
+### 1. Создание конфига
 
-**Принцип:** схема — Source of Truth. Примеры (`config.example.json`,
-`config.postgres.json`) должны быть валидны против схемы. Если схема
-меняется — примеры обновляются синхронно.
+**Два пути:**
 
-### Как проверить примеры против схемы
+#### A. Интроспекция БД (рекомендуется)
+
+```
+POST /admin/config/rewrite
+X-Tenant-ID: <tenant_id>
+Authorization: Bearer <admin_token>
+```
+
+→ `adminRewriteHandler()` → [`data-service/internal/configgen/configgen.go`](../data-service/internal/configgen/configgen.go)
+
+1. `adapter.Connect(ctx, dsn)` — коннект к БД tenant'а
+2. `adapter.Introspect(ctx, conn)` — читает схему (таблицы, колонки, PK)
+3. `configgen.Generate(schema, dsConfig, skipPrefixes)` — генерирует:
+   - `entities[]` — по одной на таблицу
+   - `endpoints[]` — `GET /{entity}/{id}`, `GET /{entity}` (find по name)
+   - `mcp_tools[]` — `get_{entity}`, `find_{entity}` с LLM-описаниями
+   - `stats.counters[]` — по одному счётчику на entity
+   - `read_only: true` — по умолчанию (защита от записи)
+4. `SaveTenantConfig()` → пишет `.data/tenants/{id}.json`
+5. `ReloadTenant()` — пересоздаёт роутер без рестарта
+
+#### B. Pучное создание через admin API
 
 ```bash
-# jsonschema — pip install jsonschema
-uv run jsonschema -i specs/config.example.json specs/config.schema.json
-uv run jsonschema -i specs/config.postgres.json specs/config.schema.json
+POST /admin/tenants
+Authorization: Bearer <admin_token>
+{
+  "id": "my-tenant",
+  "config": { ... полный конфиг JSON ... }
+}
 ```
+
+→ `adminAddTenantHandler()` → `config.Load()` из файла или `config.Validate(raw)` из тела запроса.
+Сохраняется в `.data/tenants/{id}.json`.
+
+**Третий способ (bootstrap):**
+- `$DS_CONFIG` env → загружается как tenant `"default"`
+- `$TENANTS_DIR` (`.data/tenants/`) → все `.json` файлы восстанавливаются при старте
+
+---
+
+### 2. Загрузка конфига
+
+Путь загрузки: [`helperium-go/config/loader.go`](../helperium-go/config/loader.go)
+
+```
+Load(path string) (*Config, error)
+```
+
+Конвейер:
+
+```
+ReadFile(path) → Envsubst() → json.Unmarshal() → cfg.Validate()
+```
+
+1. **os.ReadFile** — сырые байты с диска
+2. **Envsubst** — подстановка `$ENV` / `${ENV:-default}` из окружения
+3. **json.Unmarshal** — типизированный парсинг в `Config` (types.go)
+4. **cfg.Validate()** — семантическая валидация на Go-типах
+
+**Никакой внешний JSON Schema файл больше не требуется.**
+Валидация живёт в Go-коде: [`helperium-go/config/types.go`](../helperium-go/config/types.go) — метод `Config.Validate()`.
+
+---
+
+### 3. Потребители конфига
+
+| Потребитель | Как получает | Что делает |
+|---|---|---|
+| **data-service** (Go, :8084) | `config.Load()` с диска + `SaveTenantConfig()` | Строит роутер (`chi`), хендлеры данных, middleware, query builder |
+| **mcp-gateway** (Go, :8083) | HTTP `GET /mcp/manifest?tenant=...` к data-service | Только `json.Decode()` — без валидации. Строит MCP-инструменты из `Entities`+`Endpoints` |
+| **api-service** (Python, :8081) | Прокси через web → напрямую не читает конфиг | Получает MCP-инструменты через mcp-gateway |
+| **admin-dashboard** (Go, :8085) | HTTP-прокси к data-service admin API | Только read/write через API — своей валидации нет |
+
+**mcp-gateway не валидирует конфиг повторно** — он доверяет data-service.
+
+---
+
+### 4. Валидация
+
+Валидация происходит **один раз** — при загрузке конфига в data-service.
+
+Функция: [`helperium-go/config/validate.go`](../helperium-go/config/validate.go)
+
+```go
+func Validate(rawJSON []byte) error   // для admin API
+func (cfg *Config) Validate() error   // для Load() — проверяет всё
+```
+
+Метод `cfg.Validate()` проверяет:
+
+- **Required поля**: version, data_source.driver, data_source.dsn
+- **Enum'ы**: driver (`sqlite`/`postgres`), op, method, field type, param type, relation kind, auth strategy
+- **Cross-entity ссылки**:
+  - endpoint.entity → существует в entities
+  - endpoint.query_id → существует в custom_queries
+  - stats.entity → существует в entities
+  - mcp_tool.endpoint → существует в endpoints
+- **Семантика**: GET-эндпоинты не могут иметь `op: custom_query` без query_id, find-эндпоинты без search_field и т.п.
+
+---
+
+### 5. Что генерируется автоматически
+
+После `POST /admin/config/rewrite`:
+
+| Секция | Авто | Описание |
+|---|---|---|
+| `entities[]` | ✅ | Все не-системные таблицы, PK, FK, колонки |
+| `endpoints[]` | ✅ | `GET /{entity}/{id}` (get_by_id), `GET /{entity}` (find) |
+| `mcp_tools[]` | ✅ | `get_{entity}`, `find_{entity}` (LLM-friendly) |
+| `stats.counters[]` | ✅ | Счётчики для `/stats` |
+| `data_source.read_only` | ✅ | `true` — write по умолчанию выключен |
+
+### 6. Что нужно писать вручную
+
+| Секция | Зачем |
+|---|---|
+| `custom_queries{}` | JOIN, агрегаты, отчёты — бизнес-логика |
+| `endpoints[].method: POST/PUT/DELETE` | Write-операции (если `read_only: false`) |
+| `endpoints[].description` | Уточнить описание для LLM |
+| `auth{}` | Row-level isolation |
+| `introspection{}` | `include_schemas`, `exclude_tables`, `skip_prefixes` |
+| `approved_tools[]` | Write-эндпоинты, разрешённые при `read_only: true` |
+
+### 7. Что НЕЛЬЗЯ редактировать вручную (⚠️)
+
+**Не редактируй в конфиге руками то, что генерируется автоматикой.**
+
+Если в entities/endpoints/MCP-тулах ошибка — значит баг в генераторе,
+и его надо править в коде, а не патчить конфиг:
+
+- [`data-service/internal/configgen/configgen.go`](../data-service/internal/configgen/configgen.go) — `Generate()`, `tableToEntity()`, `GenerateMCPTools()`
+- [`data-service/internal/datasource/{sqlite,postgres}_adapter.go`](../data-service/internal/datasource/) — `Introspect()`
+- [`helperium-go/config/types.go`](../helperium-go/config/types.go) — `Config.Validate()`
+
+**Почему:** После следующего `POST /admin/config/rewrite` ручные правки будут
+перезаписаны автоматикой. Если же rewrite не делать — баг останется навсегда.
+
+**Пример:** Если таблица `order_items` не попала в entities — значит:
+1. Или `shouldSkip()` её отфильтровал
+2. Или `Introspect()` её не нашёл
+3. Или у неё нет PK и все колонки nullable
+
+Исправлять надо в `configgen.go` или адаптере, а не добавлять entity вручную.
+
+---
+
+### 8. ~~config.schema.json~~ (удалён)
+
+Файл `specs/config.schema.json` **удалён из репозитория**. Валидация
+переехала в Go-типы (`helperium-go/config/types.go`).
+
+Был нужен рантайму data-service. Больше не требуется.
+Человеко-читаемое описание формата — [`config.schema.md`](./config.schema.md).
 
 ---
 
@@ -57,9 +202,8 @@ FastAPI-код → app.openapi() → YAML spec → git commit
 обновилась сама:
 
 ```bash
-# Тесты проверяют что код и spec совпадают (без запуска сервисов):
-uv run pytest api-service/src/api_service/tests/unit/test_openapi_api.py  -v  # OpenAPI контракт api-service (см. api-service/README.md)
-uv run pytest rag/tests/unit/test_openapi_spec.py      -v
+uv run pytest api-service/src/api_service/tests/unit/test_openapi_api.py -v
+uv run pytest rag/tests/unit/test_openapi_spec.py -v
 ```
 
 Тест падает → обновляем spec:
@@ -71,7 +215,7 @@ curl -s http://127.0.0.1:8081/openapi.json | yu -x . > specs/api.openapi.yaml
 curl -s http://127.0.0.1:8082/openapi.json | yu -x . > specs/rag.openapi.yaml
 ```
 
-> `yu` — утилита конвертации JSON → YAML. Альтернатива: `python3 -c "import yaml,json; yaml.dump(json.load(sys.stdin), sys.stdout)"`.
+> `yu` — конвертер JSON → YAML. Альтернатива: `python3 -c "import yaml,json; yaml.dump(json.load(sys.stdin), sys.stdout)"`.
 
 ---
 

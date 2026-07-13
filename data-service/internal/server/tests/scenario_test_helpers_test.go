@@ -28,15 +28,6 @@ import (
 func loadScenario(t testing.TB, dir string) (*config.Config, *sql.DB) {
 	t.Helper()
 
-	// config.Load() needs specs/config.schema.json relative to CWD.
-	// Point it to the project root via CONFIG_SCHEMA env.
-	// dir is ../../../../testdata/scenarios/<name> from data-service/internal/server/tests/
-	// Go up 4 levels to reach project root.
-	schemaPath, err := filepath.Abs(filepath.Join(dir, "..", "..", "..", "..", "specs", "config.schema.json"))
-	if err == nil {
-		t.Setenv("CONFIG_SCHEMA", schemaPath)
-	}
-
 	cfg, err := config.Load(filepath.Join(dir, "config.json"))
 	if err != nil {
 		t.Fatalf("load config: %v", err)

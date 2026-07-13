@@ -1,6 +1,9 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Driver — допустимые значения cfg.data_source.driver.
 type Driver string
@@ -434,6 +437,165 @@ type ServerConfig struct {
 	// MaxConcurrent — максимум одновременных запросов.
 	// По умолчанию 100. Переопределяется через DS_MAX_CONCURRENT.
 	MaxConcurrent *int `json:"max_concurrent,omitempty"`
+}
+
+// Validate проверяет конфиг на уровне Go-типов: обязательные поля,
+// enum-значения, перекрёстные ссылки между entities/endpoints/queries.
+//
+// Ранее валидация была во внешнем JSON Schema файле. Теперь все проверки
+// живут в Go-коде и не могут рассинхронизироваться с типами.
+func (c *Config) Validate() error {
+	var errs []string
+
+	// ── Version ───────────────────────────────────────────────────────
+	if c.Version == 0 {
+		errs = append(errs, "version: required")
+	} else if c.Version != 1 {
+		errs = append(errs, fmt.Sprintf("version: unsupported value %d, expected 1", c.Version))
+	}
+
+	// ── DataSource ────────────────────────────────────────────────────
+	if c.DataSource.Driver == "" {
+		errs = append(errs, "data_source.driver: required")
+	} else if !c.DataSource.Driver.Valid() {
+		errs = append(errs, fmt.Sprintf("data_source.driver: unsupported %q", c.DataSource.Driver))
+	}
+	if c.DataSource.DSN == "" {
+		errs = append(errs, "data_source.dsn: required")
+	}
+
+	// ── Entity names index ────────────────────────────────────────────
+	entityNames := make(map[string]bool, len(c.Entities))
+	for i, e := range c.Entities {
+		if e.Name == "" {
+			errs = append(errs, fmt.Sprintf("entities[%d].name: required", i))
+		} else if entityNames[e.Name] {
+			errs = append(errs, fmt.Sprintf("entities[%d].name: duplicate %q", i, e.Name))
+		} else {
+			entityNames[e.Name] = true
+		}
+		if e.Table == "" {
+			errs = append(errs, fmt.Sprintf("entities[%d].table: required", i))
+		}
+		if e.IDColumn == "" {
+			errs = append(errs, fmt.Sprintf("entities[%d].id_column: required", i))
+		}
+		if len(e.Fields) == 0 {
+			errs = append(errs, fmt.Sprintf("entities[%d].fields: at least one field required", i))
+		}
+		for j, f := range e.Fields {
+			if f.Name == "" {
+				errs = append(errs, fmt.Sprintf("entities[%d].fields[%d].name: required", i, j))
+			}
+			if f.Column == "" {
+				errs = append(errs, fmt.Sprintf("entities[%d].fields[%d].column: required", i, j))
+			}
+			if !f.Type.Valid() {
+				errs = append(errs, fmt.Sprintf("entities[%d].fields[%d].type: unsupported %q", i, j, f.Type))
+			}
+		}
+	}
+
+	// ── Endpoints ─────────────────────────────────────────────────────
+	for i, ep := range c.Endpoints {
+		if !ep.Method.Valid() {
+			errs = append(errs, fmt.Sprintf("endpoints[%d].method: unsupported %q", i, ep.Method))
+		}
+		if ep.Path == "" {
+			errs = append(errs, fmt.Sprintf("endpoints[%d].path: required", i))
+		}
+		if !ep.Op.Valid() {
+			errs = append(errs, fmt.Sprintf("endpoints[%d].op: unsupported %q", i, ep.Op))
+		}
+		switch ep.Op {
+		case OpGetByID, OpFind, OpList:
+			if ep.Entity == "" {
+				errs = append(errs, fmt.Sprintf("endpoints[%d].entity: required for op=%q", i, ep.Op))
+			} else if !entityNames[ep.Entity] {
+				errs = append(errs, fmt.Sprintf("endpoints[%d].entity %q not found in entities", i, ep.Entity))
+			}
+			if ep.Op == OpFind && ep.SearchField == "" {
+				errs = append(errs, fmt.Sprintf("endpoints[%d].search_field: required for op=find", i))
+			}
+		case OpCustomQuery:
+			if ep.QueryID == "" {
+				errs = append(errs, fmt.Sprintf("endpoints[%d].query_id: required for op=custom_query", i))
+			} else if _, exists := c.CustomQueries[ep.QueryID]; !exists {
+				errs = append(errs, fmt.Sprintf("endpoints[%d].query_id %q not found in custom_queries", i, ep.QueryID))
+			}
+		}
+		for j, p := range ep.Params {
+			if p.Name == "" {
+				errs = append(errs, fmt.Sprintf("endpoints[%d].params[%d].name: required", i, j))
+			}
+			if !p.In.Valid() {
+				errs = append(errs, fmt.Sprintf("endpoints[%d].params[%d].in: unsupported %q", i, j, p.In))
+			}
+			if p.Type != "" && !p.Type.Valid() {
+				errs = append(errs, fmt.Sprintf("endpoints[%d].params[%d].type: unsupported %q", i, j, p.Type))
+			}
+		}
+	}
+
+	// ── Custom queries ────────────────────────────────────────────────
+	for qk, q := range c.CustomQueries {
+		if q.SQL == "" {
+			errs = append(errs, fmt.Sprintf("custom_queries[%q].sql: required", qk))
+		}
+		if q.MaxRows <= 0 || q.MaxRows > 10000 {
+			errs = append(errs, fmt.Sprintf("custom_queries[%q].max_rows: out of range (1-10000)", qk))
+		}
+	}
+
+	// ── MCP tools ─────────────────────────────────────────────────────
+	for i, mt := range c.MCPTools {
+		if mt.Name == "" {
+			errs = append(errs, fmt.Sprintf("mcp_tools[%d].name: required", i))
+		}
+		if mt.Endpoint == "" {
+			errs = append(errs, fmt.Sprintf("mcp_tools[%d].endpoint: required", i))
+		} else {
+			found := false
+			for _, ep := range c.Endpoints {
+				if ep.Path == mt.Endpoint {
+					found = true
+					break
+				}
+			}
+			if !found {
+				errs = append(errs, fmt.Sprintf("mcp_tools[%d].endpoint %q not found in endpoints", i, mt.Endpoint))
+			}
+		}
+		if mt.Description == "" {
+			errs = append(errs, fmt.Sprintf("mcp_tools[%d].description: required", i))
+		}
+	}
+
+	// ── Auth ──────────────────────────────────────────────────────────
+	if c.Auth != nil {
+		if !c.Auth.Strategy.Valid() {
+			errs = append(errs, fmt.Sprintf("auth.strategy: unsupported %q", c.Auth.Strategy))
+		}
+	}
+
+	// ── Stats ─────────────────────────────────────────────────────────
+	if c.Stats != nil {
+		for i, cnt := range c.Stats.Counters {
+			if cnt.Name == "" {
+				errs = append(errs, fmt.Sprintf("stats.counters[%d].name: required", i))
+			}
+			if cnt.Entity == "" {
+				errs = append(errs, fmt.Sprintf("stats.counters[%d].entity: required", i))
+			} else if !entityNames[cnt.Entity] {
+				errs = append(errs, fmt.Sprintf("stats.counters[%d].entity %q not found in entities", i, cnt.Entity))
+			}
+		}
+	}
+
+	if len(errs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("config validation: %s", strings.Join(errs, "; "))
 }
 
 // String возвращает строковое представление Config (для логирования).

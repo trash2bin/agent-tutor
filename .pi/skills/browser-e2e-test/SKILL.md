@@ -942,7 +942,6 @@ curl -s -X POST http://127.0.0.1:8081/api/agents \
 | `TENANTS_DIR` | `.data/tenants/` | Tenant configs (`{id}.json`)
 | `DB_PATH` | `university.db` | SQLite для `default` tenant (если не multi-tenant)
 | `DATABASE_URL` | — | PostgreSQL DSN (если не SQLite)
-| `CONFIG_SCHEMA` | `specs/config.schema.json` | JSON Schema для валидации конфигов
 
 Путь по умолчанию для `TENANTS_DIR` вычисляется как `{dir_of_config_file}/../.data/tenants/`, где конфиг — из `CONFIG_PATH` или первый найденный `config.{json,yaml,yml}`.
 

@@ -196,7 +196,6 @@ def serve(scenario: str, port: int):
         {
             **os.environ,
             "PORT": str(port),
-            "CONFIG_SCHEMA": str(PROJECT_ROOT / "specs" / "config.schema.json"),
         },
     )
 

@@ -59,6 +59,13 @@ docker-compose.override.yml
 # Auto-generated tenant configs with secrets
 specs/config.autoparts*.json
 
+# Deprecated runtime schema — validation lives in Go types now
+specs/config.schema.json
+
+# Session artifacts (architecture analysis)
+ARCHITECTURE_REPORT.md
+DEEP_DIVE_*.md
+
 # Trail of Bits skills — локально установленные, не в git
 .pi/skills/*
 !.pi/skills/browser-e2e-test/

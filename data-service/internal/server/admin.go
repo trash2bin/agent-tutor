@@ -157,8 +157,8 @@ func adminConfigUpdateHandler(ctx *AdminContext) http.HandlerFunc {
 			return
 		}
 
-		// 3. Validate against schema
-		if err := config.Validate(raw, ""); err != nil {
+		// 3. Validate via Go types (no external schema file needed)
+		if err := config.Validate(raw); err != nil {
 			handlers.RespondError(w, http.StatusBadRequest, "validation_error",
 				fmt.Sprintf("config validation failed: %v", err))
 			return

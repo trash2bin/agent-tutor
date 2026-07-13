@@ -632,9 +632,9 @@ func (ts *TenantStore) adminAddTenantHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Validate config against schema (skipped if schema file unavailable)
-	if err := config.Validate(req.Config, ""); err != nil {
-		slog.Warn("admin add tenant: schema validation skipped (schema file unavailable)", "error", err)
+	// Validate config via Go types
+	if err := config.Validate(req.Config); err != nil {
+		slog.Warn("admin add tenant: config validation failed", "error", err)
 	}
 
 	// Add tenant first (no config file yet — will persist after)
@@ -747,9 +747,9 @@ func (ts *TenantStore) adminConfigUpdateHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Validate (tolerant — warn on missing schema, skip otherwise)
-	if err := config.Validate(raw, ""); err != nil {
-		slog.Warn("admin config update: schema validation skipped", "error", err)
+	// Validate via Go types
+	if err := config.Validate(raw); err != nil {
+		slog.Warn("admin config update: validation failed", "error", err)
 	}
 
 	// Dry-run build

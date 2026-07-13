@@ -27,11 +27,6 @@ import (
 
 func loadScenarioFileBased(t *testing.T, dir string) (*config.Config, *sql.DB, string) {
 	t.Helper()
-	schemaPath, err := filepath.Abs(filepath.Join(dir, "..", "..", "..", "..", "specs", "config.schema.json"))
-	if err == nil {
-		t.Setenv("CONFIG_SCHEMA", schemaPath)
-	}
-
 	cfg, err := config.Load(filepath.Join(dir, "config.json"))
 	if err != nil {
 		t.Fatalf("load config: %v", err)

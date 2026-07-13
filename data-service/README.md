@@ -124,11 +124,11 @@ Startup               ──→  os.ReadDir(.data/tenants/) → config.Load() �
 cd data-service && go build -o bin/data-service ./cmd/server/
 
 # Dev SQLite (из корня проекта)
-CONFIG_SCHEMA=../specs/config.schema.json ./bin/data-service --config ../specs/config.example.json
+./bin/data-service --config ../specs/config.example.json
 
 # Dev PostgreSQL
 docker compose up -d db
-CONFIG_SCHEMA=../specs/config.schema.json ./bin/data-service --config ../specs/config.postgres.json
+./bin/data-service --config ../specs/config.postgres.json
 
 # Smoke-test
 curl -s http://127.0.0.1:8084/health                    # {"status":"ok"}
@@ -164,10 +164,10 @@ curl "http://127.0.0.1:8084/metrics?tenant=default" | grep data_
 
 ```bash
 # Materialize (создать/пересоздать БД)
-CONFIG_SCHEMA=../specs/config.schema.json go run ./cmd/server/ --materialize testdata/scenarios/sqlite-testseed [--force]
+go run ./cmd/server/ --materialize testdata/scenarios/sqlite-testseed [--force]
 
 # Запуск сервера со сценарием
-CONFIG_SCHEMA=../specs/config.schema.json go run ./cmd/server/ --config testdata/scenarios/sqlite-testseed/config.json
+go run ./cmd/server/ --config testdata/scenarios/sqlite-testseed/config.json
 ```
 
 ---
@@ -209,7 +209,7 @@ uv run agent-db e2e         # materialize → register → web proxy
 
 - Только SELECT, prepared statements (`?` / `$1`), `max_rows` обязателен для custom_query
 - `read_only: true` по умолчанию, enforced
-- JSON Schema валидация при загрузке (`specs/config.schema.json`)
+- Валидация через Go-типы (`helperium-go/config/types.go`), JSON Schema не используется
 - Чужая БД — read-only, data-service не пишет
 
 ---

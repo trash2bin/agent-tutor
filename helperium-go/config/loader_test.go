@@ -10,8 +10,7 @@ import (
 )
 
 // specPath возвращает абсолютный путь к файлу в specs/.
-// wd тестов — data-service/internal/config/ (cwd go test), поэтому
-// ищем относительно cwd и поднимаемся на нужную глубину.
+// Тесты запускаются из helperium-go/ или helperium-go/config/.
 func specPath(t *testing.T, name string) string {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -19,8 +18,8 @@ func specPath(t *testing.T, name string) string {
 		t.Fatalf("os.Getwd: %v", err)
 	}
 	candidates := []string{
-		filepath.Join(wd, "..", "..", "specs", name), // helperium-go/config → repo/specs
-		filepath.Join(wd, "..", "..", "..", "specs", name), // на случай запуска из helperium-go/
+		filepath.Join(wd, "..", "specs", name),      // из helperium-go/config/ → specs/
+		filepath.Join(wd, "..", "..", "specs", name), // из helperium-go/ → repo/specs
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
@@ -32,22 +31,17 @@ func specPath(t *testing.T, name string) string {
 	return ""
 }
 
-// withConfigSchema — helper: установить CONFIG_SCHEMA на время теста
-// и вернуть cleanup.
-func withConfigSchema(t *testing.T, path string) {
-	t.Helper()
-	prev := os.Getenv("CONFIG_SCHEMA")
-	if err := os.Setenv("CONFIG_SCHEMA", path); err != nil {
-		t.Fatalf("setenv: %v", err)
+// fakeGetenv — реализация getenv для Envsubst на основе map.
+func fakeGetenv(m map[string]string) func(string) (string, bool) {
+	return func(key string) (string, bool) {
+		v, ok := m[key]
+		return v, ok
 	}
-	t.Cleanup(func() { _ = os.Setenv("CONFIG_SCHEMA", prev) })
 }
 
 // TestLoad_GoodConfig — проверяет что config.example.json загружается
 // и парсится в ожидаемую форму.
 func TestLoad_GoodConfig(t *testing.T) {
-	withConfigSchema(t, specPath(t, "config.schema.json"))
-
 	cfg, err := config.Load(specPath(t, "config.example.json"))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -70,8 +64,8 @@ func TestLoad_GoodConfig(t *testing.T) {
 		t.Errorf("len(Entities) = %d, want %d", got, want)
 	}
 
-	// Endpoints: 12 в example.
-	if got, want := len(cfg.Endpoints), 12; got != want {
+	// Endpoints: 17 в example (10 entity endpoints + 2 builtin + 5 custom_query).
+	if got, want := len(cfg.Endpoints), 17; got != want {
 		t.Errorf("len(Endpoints) = %d, want %d", got, want)
 	}
 
@@ -80,45 +74,32 @@ func TestLoad_GoodConfig(t *testing.T) {
 		t.Errorf("len(CustomQueries) = %d, want %d", got, want)
 	}
 
-	// MCPTools: 7.
-	if got, want := len(cfg.MCPTools), 7; got != want {
+	// MCPTools: 0 — в example их нет.
+	if got, want := len(cfg.MCPTools), 0; got != want {
 		t.Errorf("len(MCPTools) = %d, want %d", got, want)
 	}
 
-	// Stats: 5 counters.
+	// Stats: 6 counters (по одному на каждую entity).
 	if cfg.Stats == nil {
 		t.Errorf("Stats is nil")
-	} else if got, want := len(cfg.Stats.Counters), 5; got != want {
+	} else if got, want := len(cfg.Stats.Counters), 6; got != want {
 		t.Errorf("len(Stats.Counters) = %d, want %d", got, want)
 	}
 
-	// Auth: strategy=none.
-	if cfg.Auth == nil {
-		t.Errorf("Auth is nil")
-	} else if cfg.Auth.Strategy != config.AuthStrategyNone {
-		t.Errorf("Auth.Strategy = %q, want %q", cfg.Auth.Strategy, config.AuthStrategyNone)
+	// Auth: nil (в example нет секции auth).
+	if cfg.Auth != nil {
+		t.Errorf("Auth = %+v, want nil", cfg.Auth)
 	}
 }
 
 // TestLoad_FileNotFound — Load на несуществующем файле возвращает ошибку.
 func TestLoad_FileNotFound(t *testing.T) {
-	withConfigSchema(t, specPath(t, "config.schema.json"))
-
 	_, err := config.Load("nonexistent_config_xyz.json")
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	// os.ReadFile errors include "no such file" on POSIX.
 	if !strings.Contains(err.Error(), "no such file") {
 		t.Errorf("error = %q, want substring %q", err.Error(), "no such file")
-	}
-}
-
-// fakeGetenv — реализация getenv для Envsubst на основе map.
-func fakeGetenv(m map[string]string) func(string) (string, bool) {
-	return func(key string) (string, bool) {
-		v, ok := m[key]
-		return v, ok
 	}
 }
 
@@ -157,8 +138,7 @@ func TestEnvsubst_Basic(t *testing.T) {
 
 // TestEnvsubst_MissingRequired — ${NONEXIST} без default возвращает ошибку.
 func TestEnvsubst_MissingRequired(t *testing.T) {
-	getenv := fakeGetenv(map[string]string{}) // пустое окружение
-
+	getenv := fakeGetenv(map[string]string{})
 	_, err := config.Envsubst("${NONEXIST}", getenv)
 	if err == nil {
 		t.Fatalf("expected error, got nil")
@@ -180,42 +160,37 @@ func TestEnvsubst_Unterminated(t *testing.T) {
 	}
 }
 
-// TestValidate_InvalidConfig — минимальный JSON без version — ошибка
-// с указанием поля.
+// TestValidate_InvalidConfig — пустой JSON без version — ошибка.
 func TestValidate_InvalidConfig(t *testing.T) {
-	schemaPath := specPath(t, "config.schema.json")
 	raw := []byte(`{"data_source": {"driver": "sqlite", "dsn": "x"}}`) // нет version
-
-	err := config.Validate(raw, schemaPath)
+	err := config.Validate(raw)
 	if err == nil {
 		t.Fatalf("expected validation error, got nil")
 	}
-	// xeipuuv возвращает "(root)" для required-на-корне.
 	if !strings.Contains(err.Error(), "version") {
-		t.Errorf("error = %q, want substring %q (missing required 'version')", err.Error(), "version")
+		t.Errorf("error = %q, want substring %q", err.Error(), "version")
 	}
 }
 
 // TestValidate_GoodConfig — config.example.json валиден.
 func TestValidate_GoodConfig(t *testing.T) {
-	schemaPath := specPath(t, "config.schema.json")
 	raw, err := os.ReadFile(specPath(t, "config.example.json"))
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if err := config.Validate(raw, schemaPath); err != nil {
+	if err := config.Validate(raw); err != nil {
 		t.Errorf("Validate(good config): %v", err)
 	}
 }
 
-// TestValidate_SchemaNotFound — путь к несуществующей схеме → ErrSchemaNotFound.
-func TestValidate_SchemaNotFound(t *testing.T) {
-	err := config.Validate([]byte(`{}`), "/nonexistent/path/config.schema.json")
+// TestValidate_InvalidJSON — синтаксически битый JSON — ошибка.
+func TestValidate_InvalidJSON(t *testing.T) {
+	err := config.Validate([]byte(`{not valid json`))
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "config schema not found") {
-		t.Errorf("error = %q, want substring %q", err.Error(), "config schema not found")
+	if !strings.Contains(err.Error(), "invalid JSON") {
+		t.Errorf("error = %q, want substring 'invalid JSON'", err.Error())
 	}
 }
 
@@ -341,11 +316,6 @@ func TestTypes_AuthStrategyValid(t *testing.T) {
 	}
 }
 
-// TestFileStore_Load — FileStore.Load работает через Load().
-
-
-
-
 // TestConfig_String — smoke-тест String() (используется в логировании).
 func TestConfig_String(t *testing.T) {
 	c := &config.Config{
@@ -365,41 +335,33 @@ func TestConfig_String(t *testing.T) {
 
 // TestLoad_BadJSON — синтаксически битый JSON — понятная ошибка.
 func TestLoad_BadJSON(t *testing.T) {
-	withConfigSchema(t, specPath(t, "config.schema.json"))
-
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "bad.json")
 	if err := os.WriteFile(path, []byte(`{not valid json`), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-
 	_, err := config.Load(path)
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "invalid JSON") {
-		t.Errorf("error = %q, want substring %q", err.Error(), "invalid JSON")
+	// json.Unmarshal ошибка содержит "invalid character" для битого JSON.
+	if !strings.Contains(err.Error(), "parse") && !strings.Contains(err.Error(), "invalid character") {
+		t.Errorf("error = %q, want substring 'parse'", err.Error())
 	}
 }
 
-// TestLoad_NilConfig — загрузка пустого объекта ловится JSON Schema (нет required).
+// TestLoad_MissingRequired — загрузка пустого объекта ловится валидацией.
 func TestLoad_MissingRequired(t *testing.T) {
-	withConfigSchema(t, specPath(t, "config.schema.json"))
-
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "empty.json")
 	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-
 	_, err := config.Load(path)
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	// Должно ругаться на missing required version или data_source.
-	if !strings.Contains(err.Error(), "required") &&
-		!strings.Contains(err.Error(), "version") &&
-		!strings.Contains(err.Error(), "data_source") {
-		t.Errorf("error = %q, want substring mentioning required/version/data_source", err.Error())
+	if !strings.Contains(err.Error(), "version") {
+		t.Errorf("error = %q, want substring mentioning 'version'", err.Error())
 	}
 }

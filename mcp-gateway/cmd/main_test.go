@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,27 +22,9 @@ import (
 // Helpers
 // ════════════════════════════════════════════════════════════════
 
-// TestMain — устанавливает CONFIG_SCHEMA для тестов, которым нужен config.Load.
+// TestMain — инициализация для тестов, которым нужен config.Load.
+// CONFIG_SCHEMA больше не нужен — валидация через Go-типы.
 func TestMain(m *testing.M) {
-	wd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "TestMain: os.Getwd: %v\n", err)
-		os.Exit(1)
-	}
-	candidates := []string{
-		filepath.Join(wd, "..", "..", "specs", "config.schema.json"),
-		filepath.Join(wd, "..", "specs", "config.schema.json"),
-	}
-	var schemaPath string
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			schemaPath, _ = filepath.Abs(c)
-			break
-		}
-	}
-	if schemaPath != "" {
-		os.Setenv("CONFIG_SCHEMA", schemaPath)
-	}
 	os.Exit(m.Run())
 }
 

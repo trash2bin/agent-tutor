@@ -205,24 +205,7 @@ func TestAdminAddTenantHandler_Duplicate(t *testing.T) {
 
 // ── Admin: adminConfigUpdateHandler ──
 
-// setConfigSchemaForTest sets CONFIG_SCHEMA to point to the real schema.
-// Runs from data-service/internal/server/, need ../../../specs/config.schema.json.
-func setConfigSchemaForTest(t *testing.T) {
-	t.Helper()
-	orig := os.Getenv("CONFIG_SCHEMA")
-	// Relative from test working directory (package dir)
-	_ = os.Setenv("CONFIG_SCHEMA", "../../../specs/config.schema.json")
-	t.Cleanup(func() {
-		if orig != "" {
-			_ = os.Setenv("CONFIG_SCHEMA", orig)
-		} else {
-			_ = os.Unsetenv("CONFIG_SCHEMA")
-		}
-	})
-}
-
 func TestAdminConfigUpdateHandler_SavesToTenantsDir(t *testing.T) {
-	setConfigSchemaForTest(t)
 	ts := newTestTenantStore(t)
 	tenantsDir := t.TempDir()
 	ts.TenantsDir = tenantsDir

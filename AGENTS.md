@@ -502,21 +502,17 @@ data: {...}\n\n`
 
 ---
 
-## 🧪 2i. Config Schema Validation
+## ~~🧪 2i. Config Schema Validation~~
 
-При старте data-service загружает `config.schema.json` из одного из путей:
-1. `$DS_CONFIG_SCHEMA`
-2. `specs/config.schema.json` (относительно бинарника)
-Если schema не найден ни одним путём — `config.Load()` возвращает `ErrSchemaNotFound`, и data-service **не стартует**. Встроенного fallback нет.
+**Валидация конфига переехала из внешнего JSON Schema в Go-типы**
 
-JSON Schema валидирует:
-- Имена entities через `^[a-z][a-z0-9_]*$`
-- Driver из enum: `["sqlite", "postgres"]`
-- Op из enum: `["get_by_id", "find", "list", "custom_query", "builtin_health", "builtin_stats"]`
-- `"in"` из enum: `["path", "query", "body"]` (важно: пустая строка недопустима)
-- Connection limits, таймауты, формат DSN
+Файл `config.schema.json` **удалён из репозитория**. Валидация происходит
+в `helperium-go/config/types.go` — метод `Config.Validate()`:
 
-**Если schema не совпадает с runtime-кодом → config.Load() падает с ошибкой.**
+- Проверяет enum'ы: driver (`sqlite`/`postgres`), op, field type, param type, auth strategy
+- Проверяет required поля: version, data_source.driver, data_source.dsn
+- Проверяет cross-entity ссылки: endpoint → entity, custom_query → query_id, mcp_tool → endpoint
+- **Никакого внешнего файла не требуется.**
 
 ---
 
@@ -699,7 +695,7 @@ go test ./data-service/... ./mcp-gateway/...  # ~655 тестов в 25 паке
 
 ```
 specs/
-├── config.schema.json        # JSON Schema — runtime-валидация конфига data-service
+├── ~~config.schema.json~~     # Удалён — валидация в Go-типах helperium-go/config/types.go
 ├── config.example.json       # Пример конфига (SQLite, тесты/dev)
 ├── config.postgres.json      # Пример конфига (PostgreSQL, production)
 ├��─ api.openapi.yaml — автогенерация из FastAPI
@@ -708,7 +704,7 @@ specs/
 ```
 
 **Два типа контрактов:**
-- `config.schema.json` — загружается при старте data-service, без него сервер **не стартанёт**. Меняешь → обнови примеры → `go test`.
+- ~~`config.schema.json`~~ — удалён. Валидация в `helperium-go/config/types.go`. Меняешь типы → меняешь `Validate()` → `go test`.
 - `api.openapi.yaml` / `rag.openapi.yaml` — **слепки** автогенерации FastAPI. Первичен код. Тесты ловят рассинхрон:
   ```bash
   uv run pytest api-service/src/api_service/tests/unit/test_openapi_api.py
@@ -721,7 +717,7 @@ specs/
 - **Никакого SQL в Python**: Весь доступ к данным идет ТОЛЬКО через HTTP-запросы к `data-service`.
 - **Generic-подход**: При добавлении новых полей или сущностей не хардкодь их в коде — конфиг data-service описывает сущности декларативно.
 - **Stateless**: Сервисы не должны хранить состояние сессии локально (кроме кэша сессий в SQLite), чтобы обеспечить масштабируемость.
-- **Config schema — runtime-обязательна**: `config.schema.json` должен быть доступен по одному из путей поиска (`CONFIG_SCHEMA`, `specs/config.schema.json`, `../../specs/config.schema.json` от бинарника). Если не найден — `config.Load()` возвращает `ErrSchemaNotFound`, data-service не стартанёт. Встроенного fallback нет.
+- ~~**Config schema — runtime-обязательна**~~ — удалена. `config.schema.json` больше не нужен. Валидация встроена в `config.Load()` через `cfg.Validate()`.
 
 ---
 
