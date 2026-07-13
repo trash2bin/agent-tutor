@@ -15,7 +15,6 @@ import (
 
 	"github.com/trash2bin/helperium/helperium-go/config"
 	"github.com/trash2bin/helperium/data-service/internal/datasource"
-	"github.com/trash2bin/helperium/data-service/internal/seedgen"
 	"github.com/trash2bin/helperium/data-service/internal/server"
 )
 
@@ -71,21 +70,31 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 `
 
-// loadTestSeed заливает компактный тестовый seed (seedgen.TestSeed) в in-memory DB.
-func loadTestSeed(t *testing.T, db *sql.DB) {
+// loadTestData вставляет TestSeed-эквивалентные данные в in-memory DB.
+func loadTestData(t *testing.T, db *sql.DB) {
 	t.Helper()
-
-	if err := seedgen.Apply(context.Background(), sqlExecAdapter{db}, seedgen.TestSeed); err != nil {
-		t.Fatalf("seedgen.Apply: %v", err)
+	for _, stmt := range []string{
+		`INSERT OR IGNORE INTO groups (id, name, speciality) VALUES ('g1', 'ИВТ-21', 'Информационные системы и технологии')`,
+		`INSERT OR IGNORE INTO groups (id, name, speciality) VALUES ('g2', 'ПИ-20', 'Программная инженерия')`,
+		`INSERT OR IGNORE INTO disciplines (id, name, description) VALUES ('d1', 'Алгоритмы и структуры данных', 'Базы')`,
+		`INSERT OR IGNORE INTO disciplines (id, name, description) VALUES ('d2', 'Базы данных', 'Реляционные')`,
+		`INSERT OR IGNORE INTO disciplines (id, name, description) VALUES ('d3', 'Веб-технологии', 'HTTP')`,
+		`INSERT OR IGNORE INTO teachers (id, name, disciplines_json) VALUES ('t1', 'Оксана Ниловна Константинова', '["Базы данных","Веб-технологии"]')`,
+		`INSERT OR IGNORE INTO students (id, name, group_id, course) VALUES ('s1', 'Иван Петров Иванович', 'g1', 2)`,
+		`INSERT OR IGNORE INTO students (id, name, group_id, course) VALUES ('s2', 'Мария Сидорова Ивановна', 'g2', 3)`,
+		`INSERT OR IGNORE INTO schedule (id, day, group_id, lessons_json) VALUES ('sch1', 'Понедельник', 'g1', '[{"discipline_id":"d1","discipline_name":"Алгоритмы и структуры данных","teacher_name":"Оксана Ниловна Константинова","type":"Лекция","room":301,"time_slot":"9:00-10:30","week_type":"числитель"},{"discipline_id":"d2","discipline_name":"Базы данных","teacher_name":"Оксана Ниловна Константинова","type":"Практика","room":205,"time_slot":"10:45-12:15","week_type":"знаменатель"}]')`,
+		`INSERT OR IGNORE INTO schedule (id, day, group_id, lessons_json) VALUES ('sch2', 'Вторник', 'g1', '[{"discipline_id":"d3","discipline_name":"Веб-технологии","teacher_name":"Другой Преподаватель","type":"Лекция","room":310,"time_slot":"11:00-12:30","week_type":"каждую"}]')`,
+		`INSERT OR IGNORE INTO grades (id, student_id, discipline_id, grade, date) VALUES ('gr1', 's1', 'd1', '5', '2026-04-10')`,
+		`INSERT OR IGNORE INTO grades (id, student_id, discipline_id, grade, date) VALUES ('gr2', 's1', 'd2', '4', '2026-06-15')`,
+		`INSERT OR IGNORE INTO grades (id, student_id, discipline_id, grade, date) VALUES ('gr3', 's2', 'd3', '3', '2026-04-20')`,
+	} {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			t.Fatalf("insert test data: %v", err)
+		}
 	}
 }
 
-// sqlExecAdapter — заглушка для тестов, оборачивает *sql.DB в ExecContext + QueryRowContext.
-type sqlExecAdapter struct{ *sql.DB }
-
-func (a sqlExecAdapter) Close() error { return a.DB.Close() }
-
-// testDB открывает in-memory SQLite и заливает TestSeed.
+// testDB opens in-memory SQLite and loads TestSeed.
 func testDB(t *testing.T) *sql.DB {
 	t.Helper()
 
@@ -99,7 +108,7 @@ func testDB(t *testing.T) *sql.DB {
 		t.Fatalf("apply schema: %v", err)
 	}
 
-	loadTestSeed(t, db)
+	loadTestData(t, db)
 	return db
 }
 
@@ -563,3 +572,192 @@ func pathEncode(s string) string {
 
 func intPtr(i int) *int    { return &i }
 func boolPtr(b bool) *bool { return &b }
+
+// ── Reusable subtest helpers (formerly in scenario_test_helpers_test.go) ──
+
+func testHealth(t *testing.T, ts *httptest.Server) {
+	status, body := getJSON[map[string]string](t, ts.URL+"/health")
+	if status != 200 {
+		t.Errorf("expected 200, got %d", status)
+	}
+	if body["status"] != "ok" {
+		t.Errorf("expected status ok, got %q", body["status"])
+	}
+}
+
+func testStudents(t *testing.T, ts *httptest.Server) {
+	status, s := getJSON[map[string]any](t, ts.URL+"/students/s1")
+	if status != 200 {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if s["full_name"] != "Иван Петров Иванович" {
+		t.Errorf("expected Иван Петров Иванович, got %v", s["full_name"])
+	}
+	if s["course"] != float64(2) {
+		t.Errorf("expected course 2, got %v", s["course"])
+	}
+
+	status, body := getJSON[map[string]string](t, ts.URL+"/students/nonexistent")
+	if status != 404 {
+		t.Errorf("expected 404, got %d", status)
+	}
+	if body["error"] != "not_found" {
+		t.Errorf("expected 'not_found', got %q", body["error"])
+	}
+
+	status, s = getJSON[map[string]any](t,
+		ts.URL+"/students?name="+pathEncode("Мария Сидорова Ивановна"))
+	if status != 200 {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if s["full_name"] != "Мария Сидорова Ивановна" {
+		t.Errorf("expected Мария Сидорова Ивановна, got %v", s["full_name"])
+	}
+	if s["course"] != float64(3) {
+		t.Errorf("expected course 3, got %v", s["course"])
+	}
+
+	status, _ = getJSON[map[string]string](t,
+		ts.URL+"/students?name=Неизвестный+Студент")
+	if status != 404 {
+		t.Errorf("expected 404, got %d", status)
+	}
+
+	status, disciplines := getJSON[[]map[string]any](t,
+		ts.URL+"/students/s1/disciplines")
+	if status != 200 {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if len(disciplines) != 3 {
+		t.Fatalf("expected 3 disciplines, got %d", len(disciplines))
+	}
+	if disciplines[0]["name"] != "Алгоритмы и структуры данных" {
+		t.Errorf("unexpected first discipline: %v", disciplines[0]["name"])
+	}
+}
+
+func testGrades(t *testing.T, ts *httptest.Server) {
+	status, grades := getJSON[[]map[string]any](t,
+		ts.URL+"/students/s1/grades")
+	if status != 200 {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if len(grades) != 2 {
+		t.Fatalf("expected 2 grades, got %d", len(grades))
+	}
+	if grades[0]["grade"] != "4" {
+		t.Errorf("expected grade 4 (most recent date), got %v", grades[0]["grade"])
+	}
+	if grades[0]["discipline_name"] != "Базы данных" {
+		t.Errorf("expected Базы данных first (date DESC), got %v", grades[0]["discipline_name"])
+	}
+}
+
+func testTeachers(t *testing.T, ts *httptest.Server) {
+	status, teacher := getJSON[map[string]any](t,
+		ts.URL+"/teachers?name="+pathEncode("Оксана Ниловна Константинова"))
+	if status != 200 {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if teacher["full_name"] != "Оксана Ниловна Константинова" {
+		t.Errorf("unexpected name: %v", teacher["full_name"])
+	}
+}
+
+func testDisciplines(t *testing.T, ts *httptest.Server) {
+	status, disciplines := getJSON[[]map[string]any](t,
+		ts.URL+"/disciplines")
+	if status != 200 {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if len(disciplines) != 3 {
+		t.Fatalf("expected 3 disciplines, got %d", len(disciplines))
+	}
+	if disciplines[0]["name"] != "Алгоритмы и структуры данных" {
+		t.Errorf("unexpected first: %v", disciplines[0]["name"])
+	}
+}
+
+func testStats(t *testing.T, ts *httptest.Server) {
+	status, stats := getJSON[map[string]any](t, ts.URL+"/stats")
+	if status != 200 {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if stats["students"] == 0 {
+		t.Errorf("expected non-zero students, got %v", stats["students"])
+	}
+	if stats["teachers"] == 0 {
+		t.Errorf("expected non-zero teachers, got %v", stats["teachers"])
+	}
+	if stats["disciplines"] == 0 {
+		t.Errorf("expected non-zero disciplines, got %v", stats["disciplines"])
+	}
+	if stats["grades"] == 0 {
+		t.Errorf("expected non-zero grades, got %v", stats["grades"])
+	}
+}
+
+func testOpenAPI(t *testing.T, ts *httptest.Server) {
+	resp, err := http.Get(ts.URL + "/openapi.json")
+	if err != nil {
+		t.Fatalf("GET /openapi.json: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	var spec map[string]any
+	if err := json.Unmarshal(body, &spec); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if spec["openapi"] != "3.1.0" {
+		t.Errorf("expected openapi 3.1.0, got %v", spec["openapi"])
+	}
+	info, ok := spec["info"].(map[string]any)
+	if !ok {
+		t.Fatal("info should be object")
+	}
+	if info["title"] != "Data Service" {
+		t.Errorf("expected title 'Data Service', got %v", info["title"])
+	}
+
+	resp, err = http.Get(ts.URL + "/docs")
+	if err != nil {
+		t.Fatalf("GET /docs: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if len(ct) < 9 || ct[:9] != "text/html" {
+		t.Errorf("expected text/html, got %q", ct)
+	}
+}
+
+func testCustomQuery(t *testing.T, ts *httptest.Server) {
+	status, body := getJSON[[]map[string]any](t, ts.URL+"/students/s1/grades")
+	if status != 200 {
+		t.Errorf("grades expected 200, got %d", status)
+	}
+	if len(body) != 2 {
+		t.Errorf("expected 2 grades, got %d", len(body))
+	}
+
+	status, body = getJSON[[]map[string]any](t, ts.URL+"/groups/g1/schedule")
+	if status != 200 {
+		t.Errorf("schedule expected 200, got %d", status)
+	}
+	if len(body) == 0 {
+		t.Error("expected non-empty schedule list for g1")
+	}
+
+	status, body = getJSON[[]map[string]any](t, ts.URL+"/students/s1/disciplines")
+	if status != 200 {
+		t.Errorf("disciplines expected 200, got %d", status)
+	}
+	if len(body) == 0 {
+		t.Error("expected non-empty disciplines list for s1")
+	}
+}

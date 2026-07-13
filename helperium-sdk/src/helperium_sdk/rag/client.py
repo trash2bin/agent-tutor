@@ -2,6 +2,14 @@
 
 Используется MCP-сервером и другими компонентами для вызовов к standalone RAG-сервису.
 
+HTTP routes called:
+    RagClient.health()              -> rag:GET /health
+    RagClient.list_documents()      -> rag:POST /documents/list
+    RagClient.import_document()     -> rag:POST /documents/import
+    RagClient.delete_document()     -> rag:POST /documents/delete
+    RagClient.search_documents()    -> rag:POST /search
+    RagClient.build_rag_context()   -> rag:POST /context
+
 Публичный API — асинхронный (httpx.AsyncClient).
 Для синхронных CLI-вызовов (agent-ingest, agent-generate) — отдельный класс
 RagClientSync, который запускает async-методы через asyncio.run.

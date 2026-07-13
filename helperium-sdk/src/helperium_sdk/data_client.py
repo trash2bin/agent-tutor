@@ -2,11 +2,18 @@
 
 Используется MCP-сервером и API для вызовов к data-service через HTTP.
 
+HTTP routes called:
+    list_all(entity)   -> data-service:GET /{entity}
+    get(entity, id)    -> data-service:GET /{entity}/{id}
+    find(entity, f, v) -> data-service:GET /{entity}?{field}={value}
+    health()           -> data-service:GET /health
+    get_stats()        -> data-service:GET /stats
+
 Публичный API — только асинхронный (AsyncDataServiceClient).
 Для синхронных CLI-вызовов — DataServiceClientSync (на базе httpx.Client).
 
 Все методы возвращают :class:`Entity` — generic-запись из data-service.
-ID-поля семантических названий контрактов (full_name, value) живут �� data-service.
+ID-поля семантических названий контрактов (full_name, value) живут в data-service.
 """
 
 from __future__ import annotations

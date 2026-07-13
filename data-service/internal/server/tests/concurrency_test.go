@@ -14,53 +14,86 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/trash2bin/helperium/helperium-go/config"
-	"github.com/trash2bin/helperium/data-service/internal/seedgen"
 	_ "modernc.org/sqlite"
 )
 
-func loadScenarioFileBased(t *testing.T, dir string) (*config.Config, *sql.DB, string) {
+// loadConcurrencyTestDb creates an SQLite DB with TestSeed data for concurrency tests.
+func loadConcurrencyTestDb(t *testing.T) (*config.Config, *sql.DB) {
 	t.Helper()
-	cfg, err := config.Load(filepath.Join(dir, "config.json"))
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	seed, err := seedgen.Load(filepath.Join(dir, "seed.json"))
-	if err != nil {
-		t.Fatalf("load seed: %v", err)
+
+	cfg := &config.Config{
+		Version: 1,
+		DataSource: config.DataSourceConfig{
+			Driver: "sqlite",
+			DSN:    ":memory:",
+		},
+		Entities: []config.Entity{
+			{Name: "student", Table: "students", IDColumn: "id", Fields: []config.EntityField{
+				{Name: "id", Column: "id", Type: config.FieldTypeString, Nullable: boolPtr(false)},
+				{Name: "name", Column: "name", Type: config.FieldTypeString},
+				{Name: "group_id", Column: "group_id", Type: config.FieldTypeString},
+				{Name: "course", Column: "course", Type: config.FieldTypeInt},
+			}},
+			{Name: "group", Table: "groups", IDColumn: "id", Fields: []config.EntityField{
+				{Name: "id", Column: "id", Type: config.FieldTypeString, Nullable: boolPtr(false)},
+				{Name: "name", Column: "name", Type: config.FieldTypeString},
+				{Name: "speciality", Column: "speciality", Type: config.FieldTypeString},
+			}},
+		},
 	}
 
-	dbPath := t.TempDir() + "/data.db"
+	dbPath := t.TempDir() + "/concurrency.db"
 	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_journal_mode=WAL&_foreign_keys=on&_busy_timeout=5000", dbPath))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 
-	ddl, err := seedgen.GenerateDDL(cfg.Entities, "sqlite")
-	if err != nil {
-		t.Fatalf("generate DDL: %v", err)
-	}
 	cfg.DataSource.DSN = fmt.Sprintf("file:%s", dbPath)
-	if err := seedgen.ApplyWithDDL(context.Background(), sqlExecAdapter{db}, ddl, seed, seedgen.SQLitePlaceholder, "sqlite"); err != nil {
-		t.Fatalf("apply seed: %v", err)
+
+	schema := `
+CREATE TABLE IF NOT EXISTS groups (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    speciality TEXT
+);
+CREATE TABLE IF NOT EXISTS students (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    group_id TEXT,
+    course INTEGER,
+    FOREIGN KEY (group_id) REFERENCES groups (id)
+);
+`
+	if _, err := db.ExecContext(context.Background(), schema); err != nil {
+		t.Fatalf("create schema: %v", err)
 	}
-	return cfg, db, dbPath
+
+	for _, stmt := range []string{
+		`INSERT OR IGNORE INTO groups (id, name, speciality) VALUES ('g1', 'ИВТ-21', 'Информационные системы и технологии')`,
+		`INSERT OR IGNORE INTO groups (id, name, speciality) VALUES ('g2', 'ПИ-20', 'Программная инженерия')`,
+		`INSERT OR IGNORE INTO students (id, name, group_id, course) VALUES ('s1', 'Иван Петров Иванович', 'g1', 2)`,
+		`INSERT OR IGNORE INTO students (id, name, group_id, course) VALUES ('s2', 'Мария Сидорова Ивановна', 'g2', 3)`,
+	} {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			t.Fatalf("insert data: %v", err)
+		}
+	}
+
+	return cfg, db
 }
 
 func TestConcurrency_FileBased_HeavyLoad(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping heavy concurrent test in short mode")
 	}
-	dir := "../../../testdata/scenarios/sqlite-testseed"
-	cfg, db, dbPath := loadScenarioFileBased(t, dir)
+	cfg, db := loadConcurrencyTestDb(t)
 	defer db.Close() //nolint:errcheck
-	defer func() { _ = dbPath }()
 
 	ts := buildTestRouter(t, cfg, db)
 
@@ -133,9 +166,7 @@ func TestConcurrency_ConcurrentReadsOnDifferentIDs(t *testing.T) {
 		t.Skip("Skipping heavy concurrent test in short mode")
 	}
 
-	// Используем SQLite в tmp — он достаточно быстр, чтобы выдержать
-	// умеренную нагрузку параллельных reads через WAL.
-	_, db, _ := loadScenarioFileBased(t, "../../../testdata/scenarios/sqlite-testseed")
+	_, db := loadConcurrencyTestDb(t)
 	defer db.Close() //nolint:errcheck
 
 	var wg sync.WaitGroup
