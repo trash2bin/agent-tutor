@@ -310,20 +310,10 @@ func makeHandler(td toolDef, client *httpclient.Client, tenantID string) server.
 		}
 		slog.Info("Tool call", "tool", td.Name, "tenantID", actualTenantID)
 
-		// 2. Fetch current manifest for this tenant to resolve the endpoint
-		cfg, err := client.FetchConfigWithTenant(actualTenantID)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to resolve tenant config: %v", err)), nil
-		}
-
-		// 3. Dynamic endpoint resolution: find the path that corresponds to this tool name
+		// 2. The endpoint path is already resolved at tool registration time.
+		//    (td.Endpoint is set when the tool definition is built from config.)
+		//    No need to re-fetch the manifest for endpoint resolution.
 		endpoint := td.Endpoint
-		for _, ep := range cfg.Endpoints {
-			if deriveToolName(ep) == td.Name {
-				endpoint = ep.Path
-				break
-			}
-		}
 
 		args := make(map[string]any)
 		if request.Params.Arguments != nil {

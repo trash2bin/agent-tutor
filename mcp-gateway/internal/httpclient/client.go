@@ -19,6 +19,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/trash2bin/helperium/helperium-go/config"
@@ -28,9 +29,27 @@ type contextKey string
 
 const TenantIDKey contextKey = "x-tenant-id"
 
+// ── Manifest cache ──
+//
+// FetchConfigWithTenant is called on every stateless /mcp/message POST.
+// The underlying GET /mcp/manifest returns ~28KB JSON per tenant.
+// We cache it so repeated calls within the TTL window don't hit data-service.
+
+type cachedConfig struct {
+	cfg  *config.Config
+	exp  time.Time
+}
+
 type Client struct {
 	baseURL string
 	http    *http.Client
+
+	// manifestCache: per-tenant TTL cache for /mcp/manifest responses.
+	//   key: tenantID string (empty for bootstrapped/default)
+	//   value: cached config with expiration
+	manifestCache     map[string]cachedConfig
+	manifestCacheMu   sync.RWMutex
+	manifestCacheTTL  time.Duration
 }
 
 // New creates a new HTTP client for data-service.
@@ -55,11 +74,27 @@ func New() *Client {
 		}
 	}
 
+	// Custom transport with aggressive connection pooling.
+	// http.DefaultTransport defaults to MaxIdleConnsPerHost=2, which creates
+	// connection churn under concurrent load. We bump pooling aggressively
+	// since all requests go to local data-service.
+	tr := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+		MaxConnsPerHost:     0, // unlimited
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  false,
+		ForceAttemptHTTP2:   true,
+	}
+
 	return &Client{
-		baseURL: base,
+		baseURL:          base,
 		http: &http.Client{
-			Timeout: timeout,
+			Timeout:   timeout,
+			Transport: tr,
 		},
+		manifestCache:    make(map[string]cachedConfig),
+		manifestCacheTTL: 30 * time.Second,
 	}
 }
 // ── SSRF Protection ──
@@ -169,6 +204,14 @@ func (c *Client) FetchConfig() (*config.Config, error) {
 }
 
 func (c *Client) FetchConfigWithTenant(tenantID string) (*config.Config, error) {
+	// Check TTL cache first
+	c.manifestCacheMu.RLock()
+	if cached, ok := c.manifestCache[tenantID]; ok && time.Now().Before(cached.exp) {
+		c.manifestCacheMu.RUnlock()
+		return cached.cfg, nil
+	}
+	c.manifestCacheMu.RUnlock()
+
 	u := c.baseURL + "/mcp/manifest"
 
 	req, err := http.NewRequest("GET", u, nil)
@@ -196,7 +239,29 @@ func (c *Client) FetchConfigWithTenant(tenantID string) (*config.Config, error) 
 		return nil, fmt.Errorf("mcp: decode config: %w", err)
 	}
 
+	// Cache it
+	c.manifestCacheMu.Lock()
+	c.manifestCache[tenantID] = cachedConfig{
+		cfg: &cfg,
+		exp: time.Now().Add(c.manifestCacheTTL),
+	}
+	c.manifestCacheMu.Unlock()
+
 	return &cfg, nil
+}
+
+// InvalidateManifestCache clears the cached manifest for the given tenant (or all).
+// Called after a config rewrite to force a fresh fetch on the next tool call.
+func (c *Client) InvalidateManifestCache(tenantIDs ...string) {
+	c.manifestCacheMu.Lock()
+	defer c.manifestCacheMu.Unlock()
+	if len(tenantIDs) == 0 {
+		c.manifestCache = make(map[string]cachedConfig)
+		return
+	}
+	for _, id := range tenantIDs {
+		delete(c.manifestCache, id)
+	}
 }
 
 func (c *Client) Call(ctx context.Context, endpoint string, params map[string]any) (any, error) {
