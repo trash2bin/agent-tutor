@@ -17,11 +17,15 @@ from api_service.agent.mcp_client import MCPClient
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _make_conn(call_lock: asyncio.Lock | None = None) -> MagicMock:
-    """Build a mock _TenantConnection with a controlled call_lock."""
+def _make_conn(
+    call_lock: asyncio.Lock | None = None,
+    list_lock: asyncio.Lock | None = None,
+) -> MagicMock:
+    """Build a mock _TenantConnection with controlled locks."""
     conn = MagicMock()
     conn.tenant_id = "test-tenant"
     conn.call_lock = call_lock or asyncio.Lock()
+    conn.list_lock = list_lock or asyncio.Lock()
     conn.session = AsyncMock()
     return conn
 
@@ -37,12 +41,13 @@ async def _session_proxy(client: MCPClient, tenant_ids: list[str] | None = None)
 
 
 @pytest.mark.asyncio
-@patch("api_service.agent.mcp_client.CALL_LOCK_TIMEOUT", 0.05)
+@patch("api_service.agent.mcp_client.LOCK_ACQUIRE_TIMEOUT", 0.05)
+@patch("api_service.agent.mcp_client.TOOL_EXECUTION_TIMEOUT", 5.0)
 async def test_call_tool_lock_timeout():
     """call_tool should return error ToolResult when lock cannot be acquired."""
     client = MCPClient()
 
-    # A lock that is already held → acquire() blocks → triggers timeout
+    # A lock that is already held → acquire() blocks → triggers timeout on LOCK_ACQUIRE_TIMEOUT
     held_lock = asyncio.Lock()
     await held_lock.acquire()
 
@@ -54,7 +59,7 @@ async def test_call_tool_lock_timeout():
 
     assert result.ok is False
     assert result.error is not None
-    assert "Timeout" in result.error
+    assert "timed out" in result.error
     assert "test_tool" in result.reminder
 
 
@@ -82,7 +87,7 @@ async def test_call_tool_lock_acquires_normally():
 
 
 @pytest.mark.asyncio
-@patch("api_service.agent.mcp_client.CALL_LOCK_TIMEOUT", 0.05)
+@patch("api_service.agent.mcp_client.LOCK_ACQUIRE_TIMEOUT", 0.05)
 async def test_list_tools_lock_timeout():
     """list_tools should raise TimeoutError when lock cannot be acquired.
 
@@ -94,7 +99,7 @@ async def test_list_tools_lock_timeout():
     held_lock = asyncio.Lock()
     await held_lock.acquire()
 
-    conn = _make_conn(call_lock=held_lock)
+    conn = _make_conn(list_lock=held_lock)
     client._get_connection = AsyncMock(return_value=conn)  # type: ignore[method-assign]
 
     session = await _session_proxy(client)

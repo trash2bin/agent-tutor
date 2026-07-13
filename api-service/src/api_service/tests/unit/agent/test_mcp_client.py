@@ -18,13 +18,20 @@ from api_service.agent.mcp_client import MCPClient
 
 
 def _make_conn() -> MagicMock:
-    """Build a mock _TenantConnection with a mock session."""
+    """Build a mock _TenantConnection with a mock session.
+
+    Both ``call_lock`` and ``list_lock`` are mocked so that
+    ``async with`` context-manager calls succeed immediately.
+    """
     conn = MagicMock()
     conn.tenant_id = "test-tenant"
     conn.session = AsyncMock()
     conn.call_lock = MagicMock()
     conn.call_lock.__aenter__ = AsyncMock()
     conn.call_lock.__aexit__ = AsyncMock(return_value=None)
+    conn.list_lock = MagicMock()
+    conn.list_lock.__aenter__ = AsyncMock()
+    conn.list_lock.__aexit__ = AsyncMock(return_value=None)
     return conn
 
 

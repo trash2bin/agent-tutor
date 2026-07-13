@@ -48,8 +48,13 @@ from helperium_sdk.settings import settings
 logger = logging.getLogger("api_service.agent.mcp_client")
 
 # Timeout for acquiring the per-tenant call lock.
-# If a tool call hangs, this prevents subsequent calls from blocking forever.
-CALL_LOCK_TIMEOUT = 30.0
+# Kept short so a stuck tool does not block other calls for too long.
+LOCK_ACQUIRE_TIMEOUT = 10.0
+
+# Max wall-clock time for a single tool execution after the lock is held.
+# Separate from LOCK_ACQUIRE_TIMEOUT so a slow DB query does not starve
+# the lock for other callers.
+TOOL_EXECUTION_TIMEOUT = 15.0
 
 
 @dataclass(slots=True)
@@ -76,6 +81,7 @@ class _TenantConnection:
     http_ctx: Any  # the streamablehttp_client(...) async context manager
     session_ctx: Any  # the ClientSession(...) async context manager
     call_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    list_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def close(self) -> None:
         with contextlib.suppress(Exception):
@@ -185,15 +191,19 @@ class MCPClient:
             pass
 
     async def list_tools(self, session: "_SessionProxy") -> list[dict[str, Any]]:
-        """List available MCP tools for the tenant(s) over the live session."""
+        """List available MCP tools for the tenant(s) over the live session.
+
+        Uses its own ``list_lock`` so that ``list_tools`` never blocks
+        a concurrent ``call_tool`` and vice versa.
+        """
         conn = await self._get_connection(session.tenant_ids)
         try:
-            async with asyncio.timeout(CALL_LOCK_TIMEOUT):
-                async with conn.call_lock:
+            async with asyncio.timeout(LOCK_ACQUIRE_TIMEOUT):
+                async with conn.list_lock:
                     result = await conn.session.list_tools()
         except TimeoutError:
             logger.warning(
-                "[MCP] list_tools timed out waiting for call lock for tenants=%s",
+                "[MCP] list_tools timed out waiting for list lock for tenants=%s",
                 session.tenant_ids,
             )
             raise
@@ -210,8 +220,8 @@ class MCPClient:
                 session.tenant_ids,
             )
             conn = await self._reconnect(session.tenant_ids)
-            async with asyncio.timeout(CALL_LOCK_TIMEOUT):
-                async with conn.call_lock:
+            async with asyncio.timeout(LOCK_ACQUIRE_TIMEOUT):
+                async with conn.list_lock:
                     result = await conn.session.list_tools()
 
         return [
@@ -237,7 +247,7 @@ class MCPClient:
         """
         conn = await self._get_connection(session.tenant_ids)
         try:
-            async with asyncio.timeout(CALL_LOCK_TIMEOUT):
+            async with asyncio.timeout(LOCK_ACQUIRE_TIMEOUT):
                 async with conn.call_lock:
                     logger.info(
                         "[MCP] Calling tool %s for tenants=%s with args=%s",
@@ -245,25 +255,27 @@ class MCPClient:
                         session.tenant_ids,
                         arguments,
                     )
-                    result = await conn.session.call_tool(name, arguments)
+                    async with asyncio.timeout(TOOL_EXECUTION_TIMEOUT):
+                        result = await conn.session.call_tool(name, arguments)
         except TimeoutError:
             logger.warning(
-                "[MCP] call_tool %s timed out waiting for call lock for tenants=%s (timeout=%ss)",
+                "[MCP] call_tool %s timed out for tenants=%s (lock=%ss, exec=%ss)",
                 name,
                 session.tenant_ids,
-                CALL_LOCK_TIMEOUT,
+                LOCK_ACQUIRE_TIMEOUT,
+                TOOL_EXECUTION_TIMEOUT,
             )
             return ToolResult(
                 tool_content=json.dumps(
                     {
                         "ok": False,
-                        "error": f"Timeout waiting for tool lock after {CALL_LOCK_TIMEOUT}s",
+                        "error": f"Tool call timed out (lock timeout {LOCK_ACQUIRE_TIMEOUT}s, exec timeout {TOOL_EXECUTION_TIMEOUT}s)",
                     },
                     ensure_ascii=False,
                 ),
-                reminder=f"Инструмент {name} не выполнен: таймаут блокировки.",
+                reminder=f"Инструмент {name} не выполнен: таймаут.",
                 ok=False,
-                error=f"Timeout waiting for tool lock after {CALL_LOCK_TIMEOUT}s",
+                error="Tool call timed out",
             )
         except Exception as exc:
             if "Tool not found" in str(exc):
@@ -288,26 +300,30 @@ class MCPClient:
             )
             try:
                 conn = await self._reconnect(session.tenant_ids)
-                async with asyncio.timeout(CALL_LOCK_TIMEOUT):
+                async with asyncio.timeout(LOCK_ACQUIRE_TIMEOUT):
                     async with conn.call_lock:
-                        result = await conn.session.call_tool(name, arguments)
+                        async with asyncio.timeout(TOOL_EXECUTION_TIMEOUT):
+                            result = await conn.session.call_tool(name, arguments)
             except TimeoutError:
                 logger.warning(
-                    "[MCP] call_tool %s timed out waiting for call lock after reconnect for tenants=%s",
+                    "[MCP] call_tool %s timed out for tenants=%s"
+                    " after reconnect (lock=%ss, exec=%ss)",
                     name,
                     session.tenant_ids,
+                    LOCK_ACQUIRE_TIMEOUT,
+                    TOOL_EXECUTION_TIMEOUT,
                 )
                 return ToolResult(
                     tool_content=json.dumps(
                         {
                             "ok": False,
-                            "error": f"Timeout waiting for tool lock after reconnect ({CALL_LOCK_TIMEOUT}s)",
+                            "error": f"Tool call timed out after reconnect (lock timeout {LOCK_ACQUIRE_TIMEOUT}s, exec timeout {TOOL_EXECUTION_TIMEOUT}s)",
                         },
                         ensure_ascii=False,
                     ),
-                    reminder=f"Инструмент {name} не выполнен: таймаут блокировки после переподключения.",
+                    reminder=f"Инструмент {name} не выполнен: таймаут после переподключения.",
                     ok=False,
-                    error=f"Timeout waiting for tool lock after reconnect ({CALL_LOCK_TIMEOUT}s)",
+                    error="Tool call timed out after reconnect",
                 )
             except Exception as exc2:
                 logger.exception(
