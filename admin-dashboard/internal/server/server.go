@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/trash2bin/helperium/helperium-go/pkg/metrics"
+	"github.com/trash2bin/helperium/helperium-go/pkg/tracing"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -78,6 +79,9 @@ func New(opts Options) *Server {
 func (s *Server) Router() chi.Router {
 	r := chi.NewRouter()
 
+	// OpenTelemetry tracing middleware
+	r.Use(tracing.Middleware)
+
 	// Middleware
 	// Structured logging + Prometheus metrics
 	r.Use(func(next http.Handler) http.Handler {
@@ -86,11 +90,13 @@ func (s *Server) Router() chi.Router {
 			wr := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 			next.ServeHTTP(wr, r)
 			duration := time.Since(start).Milliseconds()
+			traceID := tracing.TraceIDFromContext(r.Context())
 			slog.Info("request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", wr.statusCode,
 				"duration_ms", duration,
+				"trace_id", traceID,
 			)
 			metrics.AdminRequestsTotal.WithLabelValues(r.URL.Path, strconv.Itoa(wr.statusCode)).Inc()
 		})

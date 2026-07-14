@@ -82,7 +82,9 @@ def benchmark_config(benchmark_tmp_dir: Path) -> RagConfig:
 def embedding_service_impl(benchmark_config: RagConfig):
     """Реальный SentenceTransformer (только если RAG_BENCHMARK_REAL=1)."""
     if RUN_REAL:
-        logger.info("Loading real embedding model for benchmark (this may take a while)...")
+        logger.info(
+            "Loading real embedding model for benchmark (this may take a while)..."
+        )
         return SentenceTransformerEmbedding(benchmark_config)
     else:
         # Возвращаем None — будем использовать mock
@@ -92,7 +94,9 @@ def embedding_service_impl(benchmark_config: RagConfig):
 class MockEmbedding:
     """Мок эмбеддингов — возвращает единичный вектор."""
 
-    def encode_batched(self, texts: list[str], mode: str = "passage") -> list[list[float]]:
+    def encode_batched(
+        self, texts: list[str], mode: str = "passage"
+    ) -> list[list[float]]:
         return [[1.0 / 384] * 384 for _ in texts]
 
 
@@ -162,9 +166,7 @@ def real_pipeline(
     chunker = TextChunker(benchmark_config)
     repo = DocumentRepository(conn, benchmark_config)
     vstore = (
-        ChromaDBVectorStore(benchmark_config, emb)
-        if RUN_REAL
-        else MockVectorStore()
+        ChromaDBVectorStore(benchmark_config, emb) if RUN_REAL else MockVectorStore()
     )
 
     pipeline = RAGPipeline(
@@ -262,8 +264,8 @@ if __name__ == "__main__":
             embedding_device="cpu",
             embedding_model="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
             chunker_type="recursive",
-        chunk_size=768,
-        chunk_overlap=160,
+            chunk_size=768,
+            chunk_overlap=160,
         )
 
         conn = sqlite3.connect(str(tmp / "benchmark.db"))
@@ -287,4 +289,5 @@ if __name__ == "__main__":
         print(f"\nBaseline saved to {Path(__file__).parent / 'baseline.json'}")
     finally:
         import shutil
+
         shutil.rmtree(tmp, ignore_errors=True)

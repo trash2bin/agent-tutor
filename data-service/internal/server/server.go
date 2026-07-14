@@ -18,6 +18,7 @@ import (
 
 	"github.com/trash2bin/helperium/helperium-go/config"
 	"github.com/trash2bin/helperium/helperium-go/pkg/metrics"
+	"github.com/trash2bin/helperium/helperium-go/pkg/tracing"
 )
 
 // ── Middleware ──
@@ -52,6 +53,7 @@ func StructuredLoggingMiddleware(next http.Handler) http.Handler {
 		metrics.DataRequestsTotal.WithLabelValues("all", r.Method, strconv.Itoa(wrapped.statusCode)).Inc()
 		metrics.DataRequestDuration.WithLabelValues("all", r.Method).Observe(float64(time.Since(start).Seconds()) * 1000)
 
+		traceID := tracing.TraceIDFromContext(r.Context())
 		slog.Info("request",
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -59,6 +61,7 @@ func StructuredLoggingMiddleware(next http.Handler) http.Handler {
 			"status", wrapped.statusCode,
 			"duration_ms", time.Since(start).Milliseconds(),
 			"correlation_id", correlationID,
+			"trace_id", traceID,
 		)
 	})
 }

@@ -119,6 +119,7 @@ async def test_admin_put_config_new_api_key(mock_state):
     assert data["embedding_api_key"] == "***"
     # Проверяем что ключ реально сохранён (прокси к config)
     from rag.service import state
+
     assert state.config.embedding_api_key == "sk-real-key"
 
 
@@ -126,6 +127,7 @@ async def test_admin_put_config_new_api_key(mock_state):
 async def test_admin_put_config_keep_masked_key(mock_state):
     """PUT с *** → ключ не меняется."""
     from rag.service import state
+
     state.config.embedding_api_key = "existing-key"
     with patch("rag.service.ADMIN_API_TOKEN", "super-secret"):
         async with AsyncClient(
@@ -146,6 +148,7 @@ async def test_admin_put_config_keep_masked_key(mock_state):
 async def test_admin_put_config_clear_api_key(mock_state):
     """PUT с пустой строкой → ключ очищается."""
     from rag.service import state
+
     state.config.embedding_api_key = "to-be-cleared"
     with patch("rag.service.ADMIN_API_TOKEN", "super-secret"):
         async with AsyncClient(

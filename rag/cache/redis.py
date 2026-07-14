@@ -27,8 +27,8 @@ class RedisCache(CacheProtocol):
 
     def __init__(self, redis_client: Any, ttl: int = 300) -> None:
         """Args:
-            redis_client: redis.Redis instance (синхронный)
-            ttl: время жизни записи в секундах
+        redis_client: redis.Redis instance (синхронный)
+        ttl: время жизни записи в секундах
         """
         self._redis = redis_client
         self._ttl = ttl

@@ -35,7 +35,9 @@ def mock_embedding():
     """Provides a mocked EmbeddingProtocol implementation."""
 
     class MockEmbedding(EmbeddingProtocol):
-        def encode_batched(self, texts: list[str], mode: str = "passage") -> list[list[float]]:
+        def encode_batched(
+            self, texts: list[str], mode: str = "passage"
+        ) -> list[list[float]]:
             return [[0.1] * 384 for _ in texts]
 
     return MockEmbedding()

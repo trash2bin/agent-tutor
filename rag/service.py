@@ -49,10 +49,13 @@ from rag.prometheus_metrics import (
     rag_search_duration,
     rag_import_duration,
     rag_cache_entries,
-
 )
+from helperium_sdk.tracing import setup_opentelemetry, instrument_fastapi, shutdown as otel_shutdown
 
 logger = logging.getLogger("rag.service")
+
+# OpenTelemetry setup
+setup_opentelemetry("rag-service")
 
 # === Конфигурация сервиса (env) ===
 
@@ -110,9 +113,17 @@ state = ServiceState()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan для корректного shutdown."""
+    # OTel FastAPI instrumentation
+    try:
+        instrument_fastapi(app, "rag-service")
+    except Exception as exc:
+        logger.warning("FastAPI instrumentation failed: %s", exc)
+
     yield
+
     logger.info("Shutting down RAG service...")
     state.close()
+    otel_shutdown()
 
 
 app = FastAPI(
@@ -122,7 +133,6 @@ app = FastAPI(
     lifespan=lifespan,
     swagger_ui_parameters={"tryItOutEnabled": True},
 )
-
 
 
 # CORS middleware
@@ -136,7 +146,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_methods=["GET", "POST", "PUT", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Admin-Token", "X-Tenant-ID", "X-Correlation-ID"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-Admin-Token",
+        "X-Tenant-ID",
+        "X-Correlation-ID",
+    ],
 )
 
 
@@ -506,7 +522,7 @@ async def admin_get_config(request: Request) -> AdminConfigResponse:
         "Применяет новые параметры конфигурации RAG. "
         "После обновления сбрасывает pipeline — новый pipeline создастся "
         "при следующем вызове get_pipeline() с обновлённым конфигом. "
-        "embedding_api_key: \"***\" = оставить текущий, пустая строка = очистить, "
+        'embedding_api_key: "***" = оставить текущий, пустая строка = очистить, '
         "новое значение = применить."
     ),
 )
@@ -598,8 +614,8 @@ async def admin_get_stats(request: Request) -> AdminStatsResponse:
     # Обновляем метрики кэша
     pipeline = state.get_pipeline()
     try:
-        if hasattr(pipeline, '_cache') and pipeline._cache is not None:
-            if hasattr(pipeline._cache, '_cache'):
+        if hasattr(pipeline, "_cache") and pipeline._cache is not None:
+            if hasattr(pipeline._cache, "_cache"):
                 rag_cache_entries.set(len(pipeline._cache._cache))
     except Exception:
         pass

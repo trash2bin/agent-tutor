@@ -24,10 +24,19 @@ class TestDemoSettingsDefaults:
     очищаем ключи из .env для изоляции.
     """
 
-    _CLEAN_ENV = {k: v for k, v in os.environ.items()
-                   if k not in ("DEFAULT_TENANT_ID", "DEMO_TENANTS",
-                                "WEB_ORIGIN", "CORS_ALLOW_ORIGINS",
-                                "MISTRAL_API_KEY", "MISTRAL_MODEL")}
+    _CLEAN_ENV = {
+        k: v
+        for k, v in os.environ.items()
+        if k
+        not in (
+            "DEFAULT_TENANT_ID",
+            "DEMO_TENANTS",
+            "WEB_ORIGIN",
+            "CORS_ALLOW_ORIGINS",
+            "MISTRAL_API_KEY",
+            "MISTRAL_MODEL",
+        )
+    }
 
     def test_core_defaults(self):
         from demo.settings import DemoSettings

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+
 # Тесты запускаются через `uv run pytest` из корня репо — cwd == repo root.
 # Тесты запускаются через `uv run pytest` из корня репо — cwd == repo root.
 def _find_project_root() -> Path:
@@ -17,12 +18,11 @@ def _find_project_root() -> Path:
         p = p.parent
     raise RuntimeError(f"Cannot find specs/ from {__file__}")
 
+
 SPEC_PATH = _find_project_root() / "specs" / "rag.openapi.yaml"
 
 
 def test_openapi_spec_matches_generated():
-
-
     """Проверяет, что specs/rag.openapi.yaml соответствует тому,
     что генерирует FastAPI из кода rag/service.py.
 

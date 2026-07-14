@@ -20,6 +20,21 @@ import sys
 import structlog
 
 
+def _add_trace_id(
+    logger: logging.Logger, method_name: str, event_dict: structlog.types.EventDict
+) -> structlog.types.EventDict:
+    """Structlog processor: inject trace_id from the current OTel span."""
+    try:
+        from helperium_sdk.tracing import get_current_trace_id
+
+        tid = get_current_trace_id()
+        if tid:
+            event_dict["trace_id"] = tid
+    except Exception:
+        pass
+    return event_dict
+
+
 def configure_logging(log_level: str | None = None) -> None:
     """Configure structured JSON logging.
 
@@ -37,6 +52,7 @@ def configure_logging(log_level: str | None = None) -> None:
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
+            _add_trace_id,
             structlog.dev.ConsoleRenderer()
             if os.getenv("STRUCTLOG_CONSOLE")
             else structlog.processors.JSONRenderer(),

@@ -37,6 +37,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/trash2bin/helperium/helperium-go/pkg/cors"
+	"github.com/trash2bin/helperium/helperium-go/pkg/tracing"
 	"github.com/trash2bin/helperium/mcp-gateway/internal/httpclient"
 	gwserver "github.com/trash2bin/helperium/mcp-gateway/internal/server"
 	"github.com/trash2bin/helperium/mcp-gateway/internal/tools"
@@ -182,6 +183,9 @@ func main() {
 	slog.SetDefault(slog.New(logHandler))
 
 	slog.Info("prometheus metrics initialized")
+
+	tracing.Setup("mcp-gateway")
+	defer tracing.Shutdown()
 
 	globalClient = httpclient.New()
 	r := buildRouter()
@@ -336,6 +340,9 @@ func buildRouter() *chi.Mux {
 	// stack trace in the logs instead of a silently dropped connection.
 	r.Use(chimiddleware.Recoverer)
 
+	// OpenTelemetry tracing middleware
+	r.Use(tracing.Middleware)
+
 	// Auth middleware — check Authorization: Bearer <token> on all routes
 	// except /health. If MCP_API_KEY env is empty, auth is skipped.
 	r.Use(authMiddleware)
@@ -343,7 +350,8 @@ func buildRouter() *chi.Mux {
 	// Global request logger to debug routing issues
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			slog.Info("INCOMING REQUEST", "method", r.Method, "path", r.URL.Path, "tenant", r.Header.Get("X-Tenant-ID"))
+			traceID := tracing.TraceIDFromContext(r.Context())
+		slog.Info("INCOMING REQUEST", "method", r.Method, "path", r.URL.Path, "tenant", r.Header.Get("X-Tenant-ID"), "trace_id", traceID)
 			next.ServeHTTP(w, r)
 		})
 	})

@@ -7,7 +7,6 @@ composite PK, driver-specific quoting and type mapping.
 
 from __future__ import annotations
 
-from typing import Optional
 
 from .models import Entity, EntityField, FieldType, RelationKind
 

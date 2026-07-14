@@ -264,6 +264,82 @@ services:
       - helperium-net
     <<: *restart
 
+  # ──────────────────────────────────────────────────────────────────
+  # TRACING (profile: tracing)
+  # Поднять:  docker compose --profile tracing up -d
+  # Tempo UI: http://127.0.0.1:3200
+  # Логи сервисов содержат traceID для поиска в Tempo
+  # ──────────────────────────────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    profiles:
+      - monitoring
+      - tracing
+    ports:
+      - "127.0.0.1:4318:4318"
+    volumes:
+      - ./docker/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    depends_on:
+      - tempo
+    networks:
+      - helperium-net
+    <<: *restart
+
+  tempo:
+    image: grafana/tempo:latest
+    profiles:
+      - monitoring
+      - tracing
+    ports:
+      - "127.0.0.1:3200:3200"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:9095:9095"
+    volumes:
+      - ./docker/tempo/config.yaml:/etc/tempo/config.yaml:ro
+      - tempo_data:/tmp/tempo
+    command: -config.file=/etc/tempo/config.yaml
+    networks:
+      - helperium-net
+    <<: *restart
+
+  # ──────────────────────────────────────────────────────────────────
+  # LOGGING (profile: logging)
+  # Поднять:  docker compose --profile logging up -d
+  # Loki UI: http://127.0.0.1:3100
+  # Promtail собирает JSON-логи из stdout/stderr каждого контейнера
+  # ────────────────────���─────────────────────────────────────────────
+  loki:
+    image: grafana/loki:latest
+    profiles:
+      - monitoring
+      - logging
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./docker/loki/config.yaml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - helperium-net
+    <<: *restart
+
+  promtail:
+    image: grafana/promtail:latest
+    profiles:
+      - monitoring
+      - logging
+    volumes:
+      - ./docker/promtail/config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./.data/logs:/var/log/helperium:ro
+    command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      - loki
+    networks:
+      - helperium-net
+    <<: *restart
+
 volumes:
   app_data:
     driver: local
@@ -299,6 +375,8 @@ volumes:
   caddy_config:
   prometheus_data:
   grafana_data:
+  tempo_data:
+  loki_data:
 
 networks:
   helperium-net:

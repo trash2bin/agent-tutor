@@ -1,8 +1,8 @@
 go 1.26.5
 
 use (
-	./helperium-go
-	./data-service
-	./mcp-gateway
 	./admin-dashboard
+	./data-service
+	./helperium-go
+	./mcp-gateway
 )

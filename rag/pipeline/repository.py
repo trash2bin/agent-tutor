@@ -60,11 +60,14 @@ class DocumentRepository:
         if is_sqlite:
             self._lock = threading.RLock()
         else:
+
             class _DummyLock:
                 def __enter__(self) -> _DummyLock:
                     return self
+
                 def __exit__(self, *_: object) -> None:
                     return None
+
             self._lock = _DummyLock()
 
     @property
@@ -296,7 +299,8 @@ class DocumentRepository:
             cursor.close()
 
             chunk_ids, chunk_texts, chunk_metadatas = self._insert_chunks(
-                document_id, chunks,
+                document_id,
+                chunks,
             )
 
             if vector_store:
@@ -481,7 +485,9 @@ class DocumentRepository:
                     discipline_id,
                     None,
                     created_at,
-                    json.dumps({"generated": True, "indexed": False}, ensure_ascii=False),
+                    json.dumps(
+                        {"generated": True, "indexed": False}, ensure_ascii=False
+                    ),
                 ),
             )
             cursor.execute(

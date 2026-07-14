@@ -114,8 +114,10 @@ class RAGPipeline:
             return []
 
         # Проверяем кэш
-        if hasattr(self, '_cache') and self._cache is not None:
-            cached = self._cache.get_cached_search(normalized_query, discipline_id, limit)
+        if hasattr(self, "_cache") and self._cache is not None:
+            cached = self._cache.get_cached_search(
+                normalized_query, discipline_id, limit
+            )
             if cached is not None:
                 rag_cache_hits.inc()
                 return cached
@@ -147,7 +149,7 @@ class RAGPipeline:
             )
 
         # Сохраняем в кэш
-        if hasattr(self, '_cache') and self._cache is not None:
+        if hasattr(self, "_cache") and self._cache is not None:
             self._cache.set_cached_search(normalized_query, discipline_id, result)
 
         return result

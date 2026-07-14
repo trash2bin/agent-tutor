@@ -40,8 +40,16 @@ async def test_cache_hit_counter_incremented(pipeline, mock_cache):
     """При cache hit rag_cache_hits.inc() вызывается."""
     # Настраиваем кэш: вернёт результат при любом запросе
     mock_cache.get_cached_search.return_value = [
-        RagSearchResult(document_id="d1", document_title="T", source_path="p",
-                        chunk_id="c1", chunk_index=0, page=1, score=0.9, content="hit")
+        RagSearchResult(
+            document_id="d1",
+            document_title="T",
+            source_path="p",
+            chunk_id="c1",
+            chunk_index=0,
+            page=1,
+            score=0.9,
+            content="hit",
+        )
     ]
     pipeline._cache = mock_cache
 
@@ -61,8 +69,16 @@ async def test_cache_miss_counter_incremented(pipeline, mock_cache):
 
     # Vector store возвращает результат
     pipeline.vector_store.search.return_value = [
-        RagSearchResult(document_id="d1", document_title="T", source_path="p",
-                        chunk_id="c1", chunk_index=0, page=1, score=0.9, content="miss")
+        RagSearchResult(
+            document_id="d1",
+            document_title="T",
+            source_path="p",
+            chunk_id="c1",
+            chunk_index=0,
+            page=1,
+            score=0.9,
+            content="miss",
+        )
     ]
 
     with (
@@ -81,8 +97,16 @@ async def test_cache_disabled_no_counter(pipeline, mock_cache):
     """Когда кэш выключен, счётчики cache не вызываются."""
     pipeline._cache = None
     pipeline.vector_store.search.return_value = [
-        RagSearchResult(document_id="d1", document_title="T", source_path="p",
-                        chunk_id="c1", chunk_index=0, page=1, score=0.9, content="data")
+        RagSearchResult(
+            document_id="d1",
+            document_title="T",
+            source_path="p",
+            chunk_id="c1",
+            chunk_index=0,
+            page=1,
+            score=0.9,
+            content="data",
+        )
     ]
 
     with (

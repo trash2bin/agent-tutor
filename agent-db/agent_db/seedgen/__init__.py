@@ -15,8 +15,8 @@ Usage (from tests/e2e/helpers.py or CLI)::
 
 from . import models
 from . import ddl
-from . import apply
-from . import materialize
+from . import apply as _apply_module
+from . import materialize as _materialize_module
 
 from .ddl import generate_ddl
 from .apply import apply_with_ddl, apply
@@ -33,6 +33,6 @@ __all__ = [
     "ScenarioConfig",
     "models",
     "ddl",
-    "apply",
-    "materialize",
+    "_apply_module",
+    "_materialize_module",
 ]

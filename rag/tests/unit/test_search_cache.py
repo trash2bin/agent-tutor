@@ -115,7 +115,8 @@ class TestCacheProtocol:
 
         # At least one should be evicted
         hits = sum(
-            1 for k in ["key1", "key2", "key3"]
+            1
+            for k in ["key1", "key2", "key3"]
             if tiny_cache.get_cached_search(k, None, 5) is not None
         )
         assert hits <= 2, "TTLCache should evict old entries"

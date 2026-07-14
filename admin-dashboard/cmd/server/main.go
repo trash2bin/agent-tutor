@@ -11,6 +11,7 @@ import (
 
 	"github.com/trash2bin/helperium/admin-dashboard/internal/server"
 	"github.com/trash2bin/helperium/helperium-go/pkg/metrics"
+	"github.com/trash2bin/helperium/helperium-go/pkg/tracing"
 )
 
 func main() {
@@ -28,6 +29,8 @@ func main() {
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
 	metrics.RegisterMetrics()
+	tracing.Setup("admin-dashboard")
+	defer tracing.Shutdown()
 
 	addr := flag.String("addr", envOrDefault("LISTEN_ADDR", ":8085"), "Listen address")
 	dataSvcURL := flag.String("data-service", envOrDefault("DATA_SERVICE_URL", "http://127.0.0.1:8084"), "Data service base URL")

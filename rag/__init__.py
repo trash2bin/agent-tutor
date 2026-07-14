@@ -77,6 +77,7 @@ def create_rag_pipeline(
     # Выбор провайдера эмбеддингов
     if config.embedding_provider == "litellm":
         from rag.embedding.litellm_provider import LiteLLMEmbedding
+
         embedding_service = LiteLLMEmbedding(config)
     else:
         embedding_service = SentenceTransformerEmbedding(config)
@@ -102,6 +103,7 @@ def create_rag_pipeline(
     # Подключаем кэш, если включён
     if config.cache_enabled:
         from rag.cache.local import LocalTTLCache
+
         pipeline._cache = LocalTTLCache(
             maxsize=config.cache_maxsize,
             ttl=config.cache_ttl,

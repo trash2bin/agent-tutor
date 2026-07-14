@@ -33,6 +33,12 @@ components:
             type: string
           title: Provider Priority
           type: array
+        system_prompt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Per-agent system prompt override
+          title: System Prompt
         tenant_ids:
           description: Tenant IDs for this agent
           items:
@@ -95,6 +101,12 @@ components:
             type: string
           title: Provider Priority
           type: array
+        system_prompt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Per-agent system prompt override
+          title: System Prompt
         tenant_ids:
           description: Tenant IDs
           items:
@@ -145,6 +157,12 @@ components:
           - type: 'null'
           description: Provider names in priority order (from ProviderStore)
           title: Provider Priority
+        system_prompt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Per-agent system prompt override
+          title: System Prompt
         tenant_ids:
           anyOf:
           - items:

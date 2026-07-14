@@ -176,7 +176,6 @@ def materialize_all(all_scenarios: bool, force: bool):
 @click.option("--port", default=8084, help="Port for data-service")
 def serve(scenario: str, port: int):
     """Run data-service for a scenario (foreground)."""
-    config = get_scenario_config(scenario)
     config_path = SCENARIOS_DIR / scenario / "config.json"
 
     click.echo(f"🚀 Serving {scenario} on :{port}")
@@ -536,8 +535,6 @@ def _run_sse_chat_tests(tenants: list[str]):
             # ── Diagnostic summary ───────────────────────────
             has_errors = len(errors) > 0
             has_response = bool(full_response.strip())
-            has_tool_result = len(tool_results) > 0
-
             click.echo("  ├─ 📊 Summary ────────────────────────────────")
             click.echo(f"  │  Tool calls:  {len(tool_calls_list)}")
             click.echo(f"  │  Tool results: {len(tool_results)}")
@@ -1433,8 +1430,6 @@ def _run_mcp_composite_tests():
     click.echo("  │")
 
     # Verify
-    has_uni = "tenant-uni__list_student" in tool_names
-    has_shop = "tenant-shop__list_product" in tool_names
     expected_tools = ["tenant-uni__list_student", "tenant-shop__list_product"]
 
     ok = True

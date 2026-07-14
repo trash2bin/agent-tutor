@@ -16,6 +16,7 @@ dependencies = [
     "docling>=2.0.0",
     "chonkie[semantic]>=1.0.0",
     "cachetools>=5.5.0",
+    "opentelemetry-instrumentation-fastapi>=0.52b0",
 ]
 
 [project.optional-dependencies]

@@ -79,8 +79,15 @@ from api_service.guardrails import get_guard_checker
 from api_service.spending import get_spending_checker
 from api_service.provider_store import get_provider_store
 from api_service.error_messages import classify_error
+from helperium_sdk.tracing import (
+    setup_opentelemetry,
+    instrument_fastapi,
+    add_span_attributes,
+    shutdown as otel_shutdown,
+)
 
 configure_logging()
+setup_opentelemetry("api-service")
 logger = logging.getLogger("api_service.server")
 
 # Enable debug logging for agent if DEMO_DEBUG is set
@@ -347,6 +354,12 @@ def _event_payload(event_type: str, data: AgentEventData) -> dict[str, Any] | No
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan — инициализация и cleanup агента."""
+    # Startup: OTel FastAPI instrumentation (after routes are registered)
+    try:
+        instrument_fastapi(app, "api-service")
+    except Exception as exc:
+        logger.warning("FastAPI instrumentation failed: %s", exc)
+
     # Startup: прогреваем агента
     logger.info("Warming up LLM agent...")
     try:
@@ -365,6 +378,13 @@ async def lifespan(app: FastAPI):
             await agent.mcp_client.close()
     except Exception as exc:
         logger.warning("MCP client close failed: %s", exc)
+    # Flush OTel spans before exit
+    try:
+        otel_shutdown()
+    except Exception as exc:
+        logger.warning("OTel shutdown failed: %s", exc)
+
+    logger.info("Shutdown complete")
 
 
 # Create the API application
@@ -377,6 +397,8 @@ app = FastAPI(
 
 # Prometheus metrics (must be before middleware, at module level)
 init_metrics(app)
+# OpenTelemetry FastAPI instrumentation (after all routes/middleware are registered)
+# Called in lifespan startup to ensure routes are decorated first
 
 
 @app.get("/metrics", include_in_schema=False)
@@ -440,9 +462,8 @@ async def add_embed_security_headers(
         response.headers["X-Frame-Options"] = "DENY"
         # Cache static assets
         if request.url.path.endswith((".js", ".css")):
-            # Dev: no cache so widget updates reflect immediately
-            # Production: set EMBED_DIR and/or reverse proxy adds its own Cache-Control
-            response.headers["Cache-Control"] = "no-cache"
+            # Widget JS/CSS — versioned by path, safe to cache 1 hour
+            response.headers["Cache-Control"] = "public, max-age=3600"
         else:
             # Non-asset embed files: short cache to avoid stale 404s
             response.headers.setdefault("Cache-Control", "no-cache")
@@ -456,6 +477,19 @@ async def add_correlation_id(
 ) -> Any:
     correlation_id = request.headers.get("x-correlation-id") or str(uuid4())
     request.state.correlation_id = correlation_id
+
+    # Enrich OTel span with request metadata
+    tenant_id = request.headers.get("X-Tenant-ID", "")
+    if tenant_id:
+        add_span_attributes({"tenant.id": tenant_id})
+    add_span_attributes(
+        {
+            "correlation_id": correlation_id,
+            "http.method": request.method,
+            "http.target": request.url.path,
+        }
+    )
+
     logger.info(
         "Request started",
         extra={

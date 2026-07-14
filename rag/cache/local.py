@@ -20,8 +20,8 @@ class LocalTTLCache(CacheProtocol):
 
     def __init__(self, maxsize: int = 256, ttl: int = 300) -> None:
         """Args:
-            maxsize: максимальное количество записей
-            ttl: время жизни записи в секундах
+        maxsize: максимальное количество записей
+        ttl: время жизни записи в секундах
         """
         self._cache: TTLCache[str, list] = TTLCache(maxsize=maxsize, ttl=ttl)
         self._lock = threading.RLock()

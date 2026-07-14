@@ -76,9 +76,15 @@ async def test_search_valid_query_still_works(mock_state):
     pipeline, _ = mock_state
     pipeline.search_documents.return_value = [
         RagSearchResult(
-            document_id="d1", document_title="T", source_path="p",
-            discipline_id="d1", chunk_id="c1", chunk_index=0,
-            page=1, score=0.9, content="stuff",
+            document_id="d1",
+            document_title="T",
+            source_path="p",
+            discipline_id="d1",
+            chunk_id="c1",
+            chunk_index=0,
+            page=1,
+            score=0.9,
+            content="stuff",
         )
     ]
     async with AsyncClient(

@@ -35,12 +35,15 @@ class TextChunker:
         """Фабрика стратегий."""
         if config.chunker_type == "semantic":
             from rag.chunker.semantic import SemanticChunkerStrategy
+
             return SemanticChunkerStrategy(config)
         elif config.chunker_type == "recursive":
             from rag.chunker.recursive import RecursiveChunkerStrategy
+
             return RecursiveChunkerStrategy(config)
         elif config.chunker_type == "sentence":
             from rag.chunker.sentence import SentenceChunkerStrategy
+
             return SentenceChunkerStrategy(config)
         else:
             logger.warning(
@@ -48,6 +51,7 @@ class TextChunker:
                 config.chunker_type,
             )
             from rag.chunker.semantic import SemanticChunkerStrategy
+
             return SemanticChunkerStrategy(config)
 
     def chunk_pages(self, pages: list[PageDict]) -> list[ChunkDict]:

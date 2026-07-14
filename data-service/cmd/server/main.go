@@ -41,8 +41,11 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/trash2bin/helperium/helperium-go/config"
 	"github.com/trash2bin/helperium/helperium-go/pkg/metrics"
+	"github.com/trash2bin/helperium/helperium-go/pkg/tracing"
 	"github.com/trash2bin/helperium/data-service/internal/configgen"
 	"github.com/trash2bin/helperium/data-service/internal/datasource"
 	"github.com/trash2bin/helperium/data-service/internal/server"
@@ -58,6 +61,8 @@ func main() {
 
 	server.InitLogger()
 	metrics.RegisterMetrics()
+	tracing.Setup("data-service")
+	defer tracing.Shutdown()
 
 	// ── Discover-режим: прочитать схему, сгенерировать конфиг и выйти ──
 	if *discoverFlag || os.Getenv("DS_DISCOVER") != "" {
@@ -177,8 +182,10 @@ func main() {
 	rootRouter := chi.NewRouter()
 	rootRouter.Use(server.RecoveryMiddleware)
 	rootRouter.Use(server.RequestIDMiddleware)
+	rootRouter.Use(tracing.Middleware)
 	rootRouter.Use(server.StructuredLoggingMiddleware)
 	rootRouter.Use(server.TenantIDMiddleware("X-Tenant-ID"))
+	rootRouter.Get("/metrics", promhttp.Handler().ServeHTTP)
 
 	// Mount admin endpoints separately to avoid routing conflicts
 	rootRouter.Mount("/admin", adminRouter)

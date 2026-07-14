@@ -18,7 +18,9 @@ class AdminConfigResponse(BaseModel):
         default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         description="Модель эмбеддингов",
     )
-    embedding_batch_size: int = Field(default=64, description="Размер батча эмбеддингов")
+    embedding_batch_size: int = Field(
+        default=64, description="Размер батча эмбеддингов"
+    )
     embedding_device: str = Field(default="cpu", description="Устройство: cpu | cuda")
     embedding_local_files_only: bool = Field(
         default=False, description="Только локальные файлы модели"
@@ -83,7 +85,7 @@ class AdminConfigUpdateRequest(BaseModel):
     embedding_api_key: str | None = Field(
         default=None,
         description=(
-            "API-ключ эмбеддингов. Если прислать \"***\" — оставить текущий. "
+            'API-ключ эмбеддингов. Если прислать "***" — оставить текущий. '
             "Если прислать пустую строку — очистить. Если прислать новый ключ — применить."
         ),
     )

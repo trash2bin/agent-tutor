@@ -7,3 +7,28 @@ datasources:
     url: http://host.docker.internal:9090
     isDefault: true
     editable: false
+
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://host.docker.internal:3200
+    isDefault: false
+    editable: false
+    jsonData:
+      httpMethod: GET
+      serviceMap:
+        datasourceUid: Prometheus
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://host.docker.internal:3100
+    isDefault: false
+    editable: false
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        - datasourceUid: Tempo
+          matcherRegex: "trace_id\\":\\"([a-f0-9]{32})"
+          name: TraceID
+          url: $${__value.raw}

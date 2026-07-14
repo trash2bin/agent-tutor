@@ -10,6 +10,7 @@ dependencies = [
     "starlette>=0.50.0",
     "pydantic>=2.0.0",
     "httpx>=0.28.0",
+    "opentelemetry-instrumentation-fastapi>=0.52b0",
 ]
 
 [project.scripts]

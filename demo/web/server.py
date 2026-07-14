@@ -36,6 +36,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from demo.settings import PROJECT_ROOT, settings
+from helperium_sdk.tracing import setup_opentelemetry, instrument_fastapi, add_span_attributes, shutdown as otel_shutdown
 
 # Configure logging
 logging.basicConfig(
@@ -43,6 +44,9 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("demo.web.server")
+
+# OpenTelemetry setup
+setup_opentelemetry("demo-web")
 
 
 STATIC_DIR = PROJECT_ROOT / "demo" / "web" / "static"
@@ -187,11 +191,18 @@ async def lifespan(app: FastAPI):
     if settings.api_bearer_token:
         logger.info("Bearer token configured")
 
+    # OTel FastAPI instrumentation
+    try:
+        instrument_fastapi(app, "demo-web")
+    except Exception as exc:
+        logger.warning("FastAPI instrumentation failed: %s", exc)
+
     yield
 
     # Shutdown
     logger.info("Web server shutting down")
     await http_client.aclose()
+    otel_shutdown()
 
 
 # Create FastAPI app
@@ -224,6 +235,17 @@ async def add_correlation_id(
 ) -> Any:
     correlation_id = request.headers.get("x-correlation-id") or str(uuid4())
     request.state.correlation_id = correlation_id
+
+    # Enrich OTel span with tenant context
+    tenant_id = request.headers.get("X-Tenant-ID", "")
+    if tenant_id:
+        add_span_attributes({"tenant.id": tenant_id})
+    add_span_attributes({
+        "correlation_id": correlation_id,
+        "http.method": request.method,
+        "http.target": request.url.path,
+    })
+
     response = await call_next(request)
     response.headers["X-Correlation-ID"] = correlation_id
     return response

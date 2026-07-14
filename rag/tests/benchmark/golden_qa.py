@@ -113,21 +113,21 @@ GOLDEN_DOCUMENTS: List[Tuple[str, str, str]] = [
         ),
     ),
     (
-            "DNS: система доменных имён",
-            "Компьютерные сети",
-            (
-                "DNS (Domain Name System) преобразует человекочитаемые доменные имена "
-                "(например, example.com) в IP-адреса. DNS — это распределённая иерархическая "
-                "система: корневые серверы → серверы верхнего уровня (.com, .ru) → "
-                "авторитетные серверы доменов. При вводе URL в браузере сначала проверяется "
-                "локальный кэш DNS, затем запрос идёт к рекурсивному резолверу (обычно "
-                "DNS провайдера), который последовательно опрашивает серверы, пока не "
-                "найдёт IP-адрес. DNS использует протокол UDP (порт 53) для запросов и "
-                "TCP для зонных передач. Типы записей: A (IPv4), AAAA (IPv6), CNAME (алиас), "
-                "MX (почта), TXT (произвольный текст). Безопасность: DNSSEC защищает от "
-                "подмены ответов, но внедрён не везде."
-            ),
+        "DNS: система доменных имён",
+        "Компьютерные сети",
+        (
+            "DNS (Domain Name System) преобразует человекочитаемые доменные имена "
+            "(например, example.com) в IP-адреса. DNS — это распределённая иерархическая "
+            "система: корневые серверы → серверы верхнего уровня (.com, .ru) → "
+            "авторитетные серверы доменов. При вводе URL в браузере сначала проверяется "
+            "локальный кэш DNS, затем запрос идёт к рекурсивному резолверу (обычно "
+            "DNS провайдера), который последовательно опрашивает серверы, пока не "
+            "найдёт IP-адрес. DNS использует протокол UDP (порт 53) для запросов и "
+            "TCP для зонных передач. Типы записей: A (IPv4), AAAA (IPv6), CNAME (алиас), "
+            "MX (почта), TXT (произвольный текст). Безопасность: DNSSEC защищает от "
+            "подмены ответов, но внедрён не везде."
         ),
+    ),
     # ── ML (2) ─────────────────────────────────────────────────────
     (
         "Деревья решений в машинном обучении",
@@ -276,18 +276,20 @@ def evaluate_retrieval(
             )
         except Exception as exc:
             logger.warning("Search failed for query %r: %s", query_text, exc)
-            results.append({
-                "query": query_text,
-                "expected": expected_titles,
-                "discipline": discipline_filter,
-                "found_titles": [],
-                "found_count": 0,
-                "recall@1": 0.0,
-                "recall@3": 0.0,
-                "recall@5": 0.0,
-                "mrr": 0.0,
-                "error": str(exc),
-            })
+            results.append(
+                {
+                    "query": query_text,
+                    "expected": expected_titles,
+                    "discipline": discipline_filter,
+                    "found_titles": [],
+                    "found_count": 0,
+                    "recall@1": 0.0,
+                    "recall@3": 0.0,
+                    "recall@5": 0.0,
+                    "mrr": 0.0,
+                    "error": str(exc),
+                }
+            )
             continue
 
         # Какие названия документов вернулись в top-5
@@ -324,17 +326,19 @@ def evaluate_retrieval(
         if n_found > 0:
             found_any += 1
 
-        results.append({
-            "query": query_text,
-            "expected": expected_titles,
-            "found_titles": result_titles,
-            "found_count": n_found,
-            "recall@1": recall_1,
-            "recall@3": recall_3,
-            "recall@5": recall_5,
-            "mrr": mrr_q,
-            "discipline": discipline_filter,
-        })
+        results.append(
+            {
+                "query": query_text,
+                "expected": expected_titles,
+                "found_titles": result_titles,
+                "found_count": n_found,
+                "recall@1": recall_1,
+                "recall@3": recall_3,
+                "recall@5": recall_5,
+                "mrr": mrr_q,
+                "discipline": discipline_filter,
+            }
+        )
 
     # Агрегированные метрики
     if total == 0:
@@ -683,5 +687,7 @@ GOLDEN_QUERIES: List[Tuple[str, List[str], Optional[str]]] = [
 if __name__ == "__main__":
     # Справка
     print("Модуль golden_qa — импортируй в тестах, не запускай напрямую.")
-    print(f"Датасет: {len(GOLDEN_DOCUMENTS)} документов, {len(GOLDEN_QUERIES)} запросов.")
+    print(
+        f"Датасет: {len(GOLDEN_DOCUMENTS)} документов, {len(GOLDEN_QUERIES)} запросов."
+    )
     print(f"Baseline: {BASELINE_PATH}")

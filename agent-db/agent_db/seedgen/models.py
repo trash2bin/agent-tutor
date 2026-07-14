@@ -10,8 +10,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
+from helperium_sdk.seed_models import (
+    StorageSeed as Seed,
+    StorageGroup as Group,
+    StorageStudent as Student,
+    StorageTeacher as Teacher,
+    StorageDiscipline as Discipline,
+    StorageScheduleEntry as ScheduleEntry,
+    StorageLesson as Lesson,
+    StorageGrade as Grade,
+)
+
 
 # ── FieldType (subset of helperium-go/config/types.go) ──
+
 
 class FieldType:
     STRING = "string"
@@ -31,6 +43,7 @@ class FieldType:
 
 # ── RelationKind ──
 
+
 class RelationKind:
     MANY_TO_ONE = "many_to_one"
     ONE_TO_MANY = "one_to_many"
@@ -38,6 +51,7 @@ class RelationKind:
 
 
 # ── Config models (used by seedgen) ──
+
 
 @dataclass
 class EntityField:
@@ -77,23 +91,10 @@ class DataSourceConfig:
 @dataclass
 class ScenarioConfig:
     """Top-level config from a scenario's config.json (seedgen-relevant subset)."""
+
     version: int = 1
     data_source: DataSourceConfig = field(default_factory=DataSourceConfig)
     entities: list[Entity] = field(default_factory=list)
-
-
-# ── Seed models (re-export from helperium-sdk for convenience) ──
-
-from helperium_sdk.seed_models import (
-    StorageSeed as Seed,
-    StorageGroup as Group,
-    StorageStudent as Student,
-    StorageTeacher as Teacher,
-    StorageDiscipline as Discipline,
-    StorageScheduleEntry as ScheduleEntry,
-    StorageLesson as Lesson,
-    StorageGrade as Grade,
-)
 
 
 # ── TestSeed (moved from data-service/internal/seedgen/testdata.go) ──
@@ -109,8 +110,11 @@ TestSeed = Seed(
         Discipline(id="d3", name="Веб-технологии", description="HTTP"),
     ],
     teachers=[
-        Teacher(id="t1", name="Оксана Ниловна Константинова",
-                disciplines=["Базы данных", "Веб-технологии"]),
+        Teacher(
+            id="t1",
+            name="Оксана Ниловна Константинова",
+            disciplines=["Базы данных", "Веб-технологии"],
+        ),
     ],
     students=[
         Student(id="s1", name="Иван Петров Иванович", group_id="g1", course=2),
@@ -118,40 +122,56 @@ TestSeed = Seed(
     ],
     schedule=[
         ScheduleEntry(
-            id="sch1", group_id="g1", day="Понедельник",
+            id="sch1",
+            group_id="g1",
+            day="Понедельник",
             lessons=[
                 Lesson(
                     discipline_id="d1",
                     discipline_name="Алгоритмы и структуры данных",
                     teacher_name="Оксана Ниловна Константинова",
-                    type="Лекция", room=301,
-                    time_slot="9:00-10:30", week_type="числитель",
+                    type="Лекция",
+                    room=301,
+                    time_slot="9:00-10:30",
+                    week_type="числитель",
                 ),
                 Lesson(
                     discipline_id="d2",
                     discipline_name="Базы данных",
                     teacher_name="Оксана Ниловна Константинова",
-                    type="Практика", room=205,
-                    time_slot="10:45-12:15", week_type="знаменатель",
+                    type="Практика",
+                    room=205,
+                    time_slot="10:45-12:15",
+                    week_type="знаменатель",
                 ),
             ],
         ),
         ScheduleEntry(
-            id="sch2", group_id="g1", day="Вторник",
+            id="sch2",
+            group_id="g1",
+            day="Вторник",
             lessons=[
                 Lesson(
                     discipline_id="d3",
                     discipline_name="Веб-технологии",
                     teacher_name="Другой Преподаватель",
-                    type="Лекция", room=310,
-                    time_slot="11:00-12:30", week_type="каждую",
+                    type="Лекция",
+                    room=310,
+                    time_slot="11:00-12:30",
+                    week_type="каждую",
                 ),
             ],
         ),
     ],
     grades=[
-        Grade(id="gr1", student_id="s1", discipline_id="d1", grade="5", date="2026-04-10"),
-        Grade(id="gr2", student_id="s1", discipline_id="d2", grade="4", date="2026-06-15"),
-        Grade(id="gr3", student_id="s2", discipline_id="d3", grade="3", date="2026-04-20"),
+        Grade(
+            id="gr1", student_id="s1", discipline_id="d1", grade="5", date="2026-04-10"
+        ),
+        Grade(
+            id="gr2", student_id="s1", discipline_id="d2", grade="4", date="2026-06-15"
+        ),
+        Grade(
+            id="gr3", student_id="s2", discipline_id="d3", grade="3", date="2026-04-20"
+        ),
     ],
 )

@@ -15,6 +15,7 @@ def redis_client():
     """Create a fakeredis client for testing."""
     pytest.importorskip("fakeredis")
     import fakeredis
+
     return fakeredis.FakeStrictRedis()
 
 

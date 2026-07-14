@@ -22,7 +22,6 @@ import logging
 import os
 import os.path
 import sqlite3
-from pathlib import Path
 from typing import Optional
 
 from .ddl import generate_ddl
@@ -51,33 +50,39 @@ def _load_config(path: str) -> ScenarioConfig:
     for e in entities_raw:
         fields = []
         for f in e.get("fields", []):
-            fields.append(EntityField(
-                name=f["name"],
-                column=f["column"],
-                type=f.get("type", "string"),
-                nullable=f.get("nullable"),
-                primary_key=f.get("primary_key"),
-                description=f.get("description", ""),
-            ))
+            fields.append(
+                EntityField(
+                    name=f["name"],
+                    column=f["column"],
+                    type=f.get("type", "string"),
+                    nullable=f.get("nullable"),
+                    primary_key=f.get("primary_key"),
+                    description=f.get("description", ""),
+                )
+            )
 
         relations = []
         for r in e.get("relations", []):
-            relations.append(Relation(
-                field=r["field"],
-                kind=r.get("kind", "many_to_one"),
-                table=r.get("table", ""),
-                local_fk=r.get("local_fk", ""),
-                target_fk=r.get("target_fk", ""),
-            ))
+            relations.append(
+                Relation(
+                    field=r["field"],
+                    kind=r.get("kind", "many_to_one"),
+                    table=r.get("table", ""),
+                    local_fk=r.get("local_fk", ""),
+                    target_fk=r.get("target_fk", ""),
+                )
+            )
 
-        entities.append(Entity(
-            name=e["name"],
-            table=e["table"],
-            id_column=e.get("id_column", ""),
-            fields=fields,
-            relations=relations,
-            description=e.get("description", ""),
-        ))
+        entities.append(
+            Entity(
+                name=e["name"],
+                table=e["table"],
+                id_column=e.get("id_column", ""),
+                fields=fields,
+                relations=relations,
+                description=e.get("description", ""),
+            )
+        )
 
     return ScenarioConfig(
         version=raw.get("version", 1),
@@ -94,6 +99,7 @@ def _load_seed(path: str) -> Optional[Seed]:
     if not os.path.isfile(path):
         return None
     from helperium_sdk.seed_models import StorageSeed
+
     with open(path, "r") as f:
         raw = _json.load(f)
     return StorageSeed.model_validate(raw)
@@ -173,7 +179,9 @@ def materialize(
     seed_path = os.path.join(abs_dir, "seed.json")
     seed = _load_seed(seed_path)
     if seed is not None:
-        logger.info("Loaded seed: %d groups, %d students", len(seed.groups), len(seed.students))
+        logger.info(
+            "Loaded seed: %d groups, %d students", len(seed.groups), len(seed.students)
+        )
     else:
         logger.info("No seed.json — schema only")
 
@@ -187,7 +195,9 @@ def materialize(
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
     else:
-        raise ValueError("PostgreSQL materialization not yet implemented in Python seedgen")
+        raise ValueError(
+            "PostgreSQL materialization not yet implemented in Python seedgen"
+        )
 
     try:
         apply_with_ddl(conn, ddl=ddl, seed=seed, driver=driver)

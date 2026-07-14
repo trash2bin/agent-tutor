@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json as _json
 import logging
-import sqlite3
 from typing import Any, Callable, Optional, Protocol
 
 from . import models
@@ -18,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── Placeholder helpers ──
+
 
 def _sqlite_placeholder(_: int) -> str:
     return "?"
@@ -29,7 +29,10 @@ def _postgres_placeholder(index: int) -> str:
 
 # ── INSERT builder ──
 
-def _build_insert(table: str, cols: list[str], driver: str, ph_fn: Callable[[int], str]) -> str:
+
+def _build_insert(
+    table: str, cols: list[str], driver: str, ph_fn: Callable[[int], str]
+) -> str:
     quoted = [f'"{c}"' for c in cols]
     phs = [ph_fn(i) for i in range(1, len(cols) + 1)]
     values = ", ".join(phs)
@@ -46,6 +49,7 @@ def _build_insert(table: str, cols: list[str], driver: str, ph_fn: Callable[[int
 
 # ── Connection abstraction ──
 
+
 class DBConnection(Protocol):
     def execute(self, sql: str, params: tuple = ()) -> Any: ...
     def executescript(self, script: str) -> None: ...
@@ -55,8 +59,13 @@ class DBConnection(Protocol):
 
 # ── Seed data inserters ──
 
-def _insert_groups(conn: DBConnection, groups: list[models.Group], driver: str,
-                   ph_fn: Callable[[int], str]) -> None:
+
+def _insert_groups(
+    conn: DBConnection,
+    groups: list[models.Group],
+    driver: str,
+    ph_fn: Callable[[int], str],
+) -> None:
     if not groups:
         return
     q = _build_insert("groups", ["id", "name", "speciality"], driver, ph_fn)
@@ -64,8 +73,12 @@ def _insert_groups(conn: DBConnection, groups: list[models.Group], driver: str,
         conn.execute(q, (g.id, g.name, g.speciality))
 
 
-def _insert_disciplines(conn: DBConnection, disciplines: list[models.Discipline],
-                        driver: str, ph_fn: Callable[[int], str]) -> None:
+def _insert_disciplines(
+    conn: DBConnection,
+    disciplines: list[models.Discipline],
+    driver: str,
+    ph_fn: Callable[[int], str],
+) -> None:
     if not disciplines:
         return
     q = _build_insert("disciplines", ["id", "name", "description"], driver, ph_fn)
@@ -73,8 +86,12 @@ def _insert_disciplines(conn: DBConnection, disciplines: list[models.Discipline]
         conn.execute(q, (d.id, d.name, d.description))
 
 
-def _insert_teachers(conn: DBConnection, teachers: list[models.Teacher],
-                     driver: str, ph_fn: Callable[[int], str]) -> None:
+def _insert_teachers(
+    conn: DBConnection,
+    teachers: list[models.Teacher],
+    driver: str,
+    ph_fn: Callable[[int], str],
+) -> None:
     if not teachers:
         return
     q = _build_insert("teachers", ["id", "name", "disciplines_json"], driver, ph_fn)
@@ -83,8 +100,12 @@ def _insert_teachers(conn: DBConnection, teachers: list[models.Teacher],
         conn.execute(q, (t.id, t.name, disc_json))
 
 
-def _insert_students(conn: DBConnection, students: list[models.Student],
-                     driver: str, ph_fn: Callable[[int], str]) -> None:
+def _insert_students(
+    conn: DBConnection,
+    students: list[models.Student],
+    driver: str,
+    ph_fn: Callable[[int], str],
+) -> None:
     if not students:
         return
     q = _build_insert("students", ["id", "name", "group_id", "course"], driver, ph_fn)
@@ -92,39 +113,53 @@ def _insert_students(conn: DBConnection, students: list[models.Student],
         conn.execute(q, (s.id, s.name, s.group_id, s.course))
 
 
-def _insert_schedule(conn: DBConnection, schedule: list[models.ScheduleEntry],
-                     driver: str, ph_fn: Callable[[int], str]) -> None:
+def _insert_schedule(
+    conn: DBConnection,
+    schedule: list[models.ScheduleEntry],
+    driver: str,
+    ph_fn: Callable[[int], str],
+) -> None:
     if not schedule:
         return
-    q = _build_insert("schedule", ["id", "day", "group_id", "lessons_json"], driver, ph_fn)
+    q = _build_insert(
+        "schedule", ["id", "day", "group_id", "lessons_json"], driver, ph_fn
+    )
     for e in schedule:
-        lessons_json = _json.dumps([_lesson_to_dict(l) for l in e.lessons], ensure_ascii=False)
+        lessons_json = _json.dumps(
+            [_lesson_to_dict(les) for les in e.lessons], ensure_ascii=False
+        )
         conn.execute(q, (e.id, e.day, e.group_id, lessons_json))
 
 
-def _lesson_to_dict(l: models.Lesson) -> dict:
+def _lesson_to_dict(lesson: models.Lesson) -> dict:
     return {
-        "discipline_id": l.discipline_id,
-        "discipline_name": l.discipline_name,
-        "teacher_name": l.teacher_name,
-        "type": l.type,
-        "room": l.room,
-        "time_slot": l.time_slot,
-        "week_type": l.week_type,
+        "discipline_id": lesson.discipline_id,
+        "discipline_name": lesson.discipline_name,
+        "teacher_name": lesson.teacher_name,
+        "type": lesson.type,
+        "room": lesson.room,
+        "time_slot": lesson.time_slot,
+        "week_type": lesson.week_type,
     }
 
 
-def _insert_grades(conn: DBConnection, grades: list[models.Grade],
-                   driver: str, ph_fn: Callable[[int], str]) -> None:
+def _insert_grades(
+    conn: DBConnection,
+    grades: list[models.Grade],
+    driver: str,
+    ph_fn: Callable[[int], str],
+) -> None:
     if not grades:
         return
-    q = _build_insert("grades", ["id", "student_id", "discipline_id", "grade", "date"],
-                      driver, ph_fn)
+    q = _build_insert(
+        "grades", ["id", "student_id", "discipline_id", "grade", "date"], driver, ph_fn
+    )
     for g in grades:
         conn.execute(q, (g.id, g.student_id, g.discipline_id, g.grade, g.date))
 
 
 # ── DDL splitting ──
+
 
 def _split_ddl(ddl: str) -> list[str]:
     """Split multi-statement DDL into individual statements by ';'."""
@@ -137,6 +172,7 @@ def _split_ddl(ddl: str) -> list[str]:
 
 
 # ── Public API ──
+
 
 def apply_with_ddl(
     conn: DBConnection,
@@ -172,8 +208,12 @@ def apply_with_ddl(
 
     logger.info(
         "Seed applied: %d groups, %d students, %d teachers, %d disciplines, %d schedule, %d grades",
-        len(seed.groups), len(seed.students), len(seed.teachers),
-        len(seed.disciplines), len(seed.schedule), len(seed.grades),
+        len(seed.groups),
+        len(seed.students),
+        len(seed.teachers),
+        len(seed.disciplines),
+        len(seed.schedule),
+        len(seed.grades),
     )
 
 
