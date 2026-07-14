@@ -191,7 +191,6 @@ docker compose up -d db
 AGENT_TUTOR_TEST_PG=1 go test ./internal/server/tests/ -run TestCrossDriver -v
 
 # Integration (faker + PG)
-uv run python tests/integration/test_with_faker.py --students 50 --grades 200
 ```
 
 **Test helpers:** `internal/server/tests/scenario_loader_test.go` — `loadScenario()`, `buildTestRouter()` для in-memory httptest на pre-built data.db.

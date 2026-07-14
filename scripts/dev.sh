@@ -655,9 +655,9 @@ cmd_db_test() {
       func="TestScenario_BigTestseed|TestEdgeCases|TestCustomQueries|TestConcurrency|TestCrossDriver"
       ;;
     postgres-testseed)
-      echo "ℹ️  PostgreSQL-сценарий покрывается только интеграционным тестом:"
-      echo "    uv run python data-service/tests/integration/test_with_faker.py"
-      echo "   (нужен docker compose up -d db)"
+      echo "ℹ️  PostgreSQL-сценарий требует запущенного PostgreSQL."
+      echo "    docker compose up -d db"
+      echo "    uv run pytest tests/e2e/ -v --tb=short -k test_admin_lifecycle"
       exit 0
       ;;
     *)

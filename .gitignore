@@ -14,6 +14,7 @@ data-service/server
 data-service/seed-cli
 mcp-gateway/mcp-gateway
 mcp-gateway/main
+mcp-gateway/bin/
 /server
 /seed-cli
 *.exe

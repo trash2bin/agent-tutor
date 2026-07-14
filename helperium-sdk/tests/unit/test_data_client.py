@@ -6,7 +6,7 @@
 - DataServiceClientSync: health, get, list_all, close, context manager
 
 Запуск:
-    uv run pytest agent-tutor-sdk/tests/unit/test_data_client.py -v
+    uv run pytest helperium-sdk/tests/unit/test_data_client.py -v
 """
 
 from __future__ import annotations
