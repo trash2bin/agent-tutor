@@ -176,6 +176,16 @@ func (sr *statusRecorder) WriteHeader(code int) {
 	sr.ResponseWriter.WriteHeader(code)
 }
 
+// Flush implements http.Flusher for SSE streaming support.
+// Without this, middleware-wrapped SSE handlers fail with
+// "Streaming unsupported" because the type assertion w.(http.Flusher)
+// does not match statusRecorder even when the underlying writer flushes.
+func (sr *statusRecorder) Flush() {
+	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 type contextKey string
 
 const traceIDKey contextKey = "trace_id"
