@@ -547,7 +547,7 @@ data: {...}\n\n`
 
 | Сервис | Порт | Ответственность | Документация |
 |---|---|---|---|
-| **Data-service** (Go) | `:8084` | Generic CRUD/Query прокси. Интроспекция БД, генерация конфига, config hot-reload, write-tool approval flow, adapter registry. | [README](data-service/README.md) |
+| **Data-service** (Go) | `:8084` | Generic CRUD/Query прокси. Интроспекция БД, генерация конфига, config hot-reload, write-tool approval flow, adapter registry. | [README](data-service/README.md), [configgen](data-service/internal/configgen/README.md) |
 | **MCP-gateway** (Go) | `:8083` | MCP сервер (SSE/JSON-RPC). Динамическая генерация инструментов из data-service. Composite-режим для N tenant'ов. | [README](mcp-gateway/README.md) |
 | **Admin Dashboard** (Go) | `:8085` | Веб-интерфейс для администрирования: tenant CRUD, конфиги, тулы, RAG, агенты. Alpine.js UI. Зависит от data + api. | [README](admin-dashboard/README.md) |
 | **RAG** (Python) | `:8082` | Поиск по документам (ChromaDB), чанкинг, эмбеддинги (local/LiteLLM), кэш (Local/Redis), admin config API, Prometheus метрики, re-embedding pipeline. | [README](rag/README.md) |
