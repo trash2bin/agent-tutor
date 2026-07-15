@@ -51,7 +51,9 @@ def sse_session():
                 line = line_bytes.decode("utf-8", errors="replace")
                 if line.startswith("event: endpoint"):
                     seen_endpoint = True
-                elif line.startswith("data: ") and seen_endpoint and not endpoint_url[0]:
+                elif (
+                    line.startswith("data: ") and seen_endpoint and not endpoint_url[0]
+                ):
                     endpoint_url[0] = line[6:].strip()
                     ready.set()
                     session_ok[0] = True

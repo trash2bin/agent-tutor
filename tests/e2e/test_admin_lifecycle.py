@@ -65,7 +65,14 @@ def setup_module(module):
     # Clean up any stale tenant
     delete_tenant(_TENANT_ID)
 
-    scenario_config = root / "data-service" / "testdata" / "scenarios" / "sqlite-testseed" / "config.json"
+    scenario_config = (
+        root
+        / "data-service"
+        / "testdata"
+        / "scenarios"
+        / "sqlite-testseed"
+        / "config.json"
+    )
     base_config = json.loads(scenario_config.read_text())
 
     cfg = copy.deepcopy(base_config)
@@ -99,9 +106,7 @@ def test_list_tenants_includes_new():
     data = r.json()
     tenants_list = data.get("tenants", data)
     tids = [t["id"] for t in tenants_list] if isinstance(tenants_list, list) else []
-    assert _TENANT_ID in tids, (
-        f"Tenant {_TENANT_ID} not in list: {tids}"
-    )
+    assert _TENANT_ID in tids, f"Tenant {_TENANT_ID} not in list: {tids}"
 
 
 def test_tenant_accessible_via_api():
@@ -159,7 +164,9 @@ def test_stats_endpoint():
     )
     assert r.status_code == 200, f"Stats: {r.status_code}"
     data = r.json()
-    assert isinstance(data, (dict, list)), f"Stats: expected dict/list, got {type(data)}"
+    assert isinstance(data, (dict, list)), (
+        f"Stats: expected dict/list, got {type(data)}"
+    )
 
 
 def test_delete_tenant():
@@ -175,9 +182,7 @@ def test_deleted_tenant_unreachable():
         headers={"X-Tenant-ID": _TENANT_ID},
         timeout=10,
     )
-    assert r.status_code >= 400, (
-        f"Deleted tenant should error, got {r.status_code}"
-    )
+    assert r.status_code >= 400, f"Deleted tenant should error, got {r.status_code}"
 
 
 def test_tenant_removed_from_list():

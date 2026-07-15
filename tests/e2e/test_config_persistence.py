@@ -58,7 +58,12 @@ def setup_module(module):
     delete_tenant(_TENANT_ID)
 
     scenario_config = (
-        root / "data-service" / "testdata" / "scenarios" / "sqlite-testseed" / "config.json"
+        root
+        / "data-service"
+        / "testdata"
+        / "scenarios"
+        / "sqlite-testseed"
+        / "config.json"
     )
     base_config = json.loads(scenario_config.read_text())
     cfg = copy.deepcopy(base_config)
@@ -66,9 +71,7 @@ def setup_module(module):
     module._config = cfg
 
     result = register_tenant(_TENANT_ID, cfg)
-    assert result["status"] in (200, 201), (
-        f"Register {_TENANT_ID}: {result['status']}"
-    )
+    assert result["status"] in (200, 201), f"Register {_TENANT_ID}: {result['status']}"
 
 
 def teardown_module(module):
@@ -107,9 +110,7 @@ def test_tenant_serves_data():
         timeout=10,
     )
     assert r.status_code == 200, f"Data: {r.status_code}"
-    assert "Persist-Marker" in r.text, (
-        "Isolation marker not found in tenant data"
-    )
+    assert "Persist-Marker" in r.text, "Isolation marker not found in tenant data"
 
 
 def test_config_has_bak_file():

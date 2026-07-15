@@ -32,7 +32,13 @@ RPS = int(os.environ.get("STRESS_RPS", "50"))
 DURATION = int(os.environ.get("STRESS_DURATION", "30"))
 
 results = {
-    "config": {"rps": RPS, "duration": DURATION, "mcp": MCP, "data": DATA, "tenant": TENANT},
+    "config": {
+        "rps": RPS,
+        "duration": DURATION,
+        "mcp": MCP,
+        "data": DATA,
+        "tenant": TENANT,
+    },
     "tool_calls": [],
     "errors": [],
     "phases": {},
@@ -65,17 +71,22 @@ stop_flag = threading.Event()
 def do_tool_call(tool, args, session_id):
     global rate_limit_count, error_count
 
-    body = json.dumps({
-        "jsonrpc": "2.0", "id": hash(session_id) % 100000,
-        "method": "tools/call",
-        "params": {"name": tool, "arguments": args},
-    }).encode()
+    body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": hash(session_id) % 100000,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": args},
+        }
+    ).encode()
 
     start = time.perf_counter()
     try:
         req = urllib.request.Request(
             f"{MCP}/mcp/message?sessionId={session_id}",
-            data=body, headers=headers, method="POST",
+            data=body,
+            headers=headers,
+            method="POST",
         )
         resp = urllib.request.urlopen(req, timeout=30)
         data = resp.read()
@@ -129,10 +140,10 @@ def run_phase(name, rps, duration_sec):
     n_workers = min(rps, 200)  # cap at 200 workers
     # Each worker makes ~1 req/sec for target RPS
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"📊 Phase: {name}")
     print(f"    Target: {rps} RPS, Duration: {duration_sec}s, Workers: {n_workers}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     stop_flag.clear()
 
@@ -164,7 +175,9 @@ def run_phase(name, rps, duration_sec):
 
         print(f"\n    Results ({total} calls in {duration}s):")
         print(f"    Actual RPS:  {actual_rps:.1f}")
-        print(f"    Errors:      {error_count} ({error_count/max(total,1)*100:.1f}%)")
+        print(
+            f"    Errors:      {error_count} ({error_count / max(total, 1) * 100:.1f}%)"
+        )
         print(f"    Rate limited: {rate_limit_count}")
         print(f"    Latency:")
         print(f"      min:   {min(latencies):.1f}ms")
@@ -195,26 +208,32 @@ def run_phase(name, rps, duration_sec):
 
         # Detect bottlenecks from this phase
         if p95 > 100:
-            results["bottlenecks"].append({
-                "phase": name,
-                "metric": "p95 > 100ms",
-                "value_ms": p95,
-                "reason": "Latency spikes under concurrent load — suspect connection pool or serialized manifest fetch",
-            })
+            results["bottlenecks"].append(
+                {
+                    "phase": name,
+                    "metric": "p95 > 100ms",
+                    "value_ms": p95,
+                    "reason": "Latency spikes under concurrent load — suspect connection pool or serialized manifest fetch",
+                }
+            )
         if total < rps * duration * 0.5:
-            results["bottlenecks"].append({
-                "phase": name,
-                "metric": "throughput < 50% of target",
-                "value": f"{actual_rps:.0f}/{rps} RPS",
-                "reason": "Workers не поспевают за target RPS — thread pool упирается в блокировку",
-            })
+            results["bottlenecks"].append(
+                {
+                    "phase": name,
+                    "metric": "throughput < 50% of target",
+                    "value": f"{actual_rps:.0f}/{rps} RPS",
+                    "reason": "Workers не поспевают за target RPS — thread pool упирается в блокировку",
+                }
+            )
         if rate_limit_count > 0:
-            results["bottlenecks"].append({
-                "phase": name,
-                "metric": "rate limited",
-                "value": rate_limit_count,
-                "reason": "Rate limiter сработал — MCP_RATE_LIMIT_RPS надо поднять",
-            })
+            results["bottlenecks"].append(
+                {
+                    "phase": name,
+                    "metric": "rate limited",
+                    "value": rate_limit_count,
+                    "reason": "Rate limiter сработал — MCP_RATE_LIMIT_RPS надо поднять",
+                }
+            )
     else:
         print("\n    ❌ No successful calls!")
 
@@ -238,9 +257,9 @@ def phase_spike():
 
     n_workers = 200
     results_list = []
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"📊 Phase: SPIKE ({n_workers} concurrent calls)")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     stop_flag.clear()
     start = time.perf_counter()
@@ -272,8 +291,8 @@ def phase_spike():
         print(f"    Latency:")
         print(f"      min:   {min(latencies):.1f}ms")
         print(f"      p50:   {statistics.median(latencies):.1f}ms")
-        print(f"      p95:   {latencies[int(len(latencies)*0.95)]:.1f}ms")
-        print(f"      p99:   {latencies[int(len(latencies)*0.99)]:.1f}ms")
+        print(f"      p95:   {latencies[int(len(latencies) * 0.95)]:.1f}ms")
+        print(f"      p99:   {latencies[int(len(latencies) * 0.99)]:.1f}ms")
         print(f"      max:   {max(latencies):.1f}ms")
 
     results["phases"]["spike"] = {
@@ -288,9 +307,9 @@ def phase_spike():
 
 def check_post_stress():
     """Check MCP and data-service health after stress. Read metrics."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("📊 Post-stress: service health")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     for svc, url in [("MCP", MCP), ("DATA", DATA)]:
         try:
@@ -308,7 +327,11 @@ def check_post_stress():
             r = urllib.request.urlopen(f"{url}/metrics", timeout=5)
             text = r.read().decode()
             for line in text.split("\n"):
-                if line.startswith("mcp_rate") or line.startswith("data_requests_total") or line.startswith("data_db_query"):
+                if (
+                    line.startswith("mcp_rate")
+                    or line.startswith("data_requests_total")
+                    or line.startswith("data_db_query")
+                ):
                     parts = line.split()
                     if len(parts) >= 2:
                         print(f"    {parts[0]} = {parts[1]}")
@@ -360,14 +383,20 @@ if __name__ == "__main__":
             print(f"\n  {name}:")
             print(f"    Calls: {phase['total_calls']} | RPS: {phase['actual_rps']}")
             print(f"    p50={l['p50']}ms  p95={l['p95']}ms  p99={l['p99']}ms")
-            print(f"    Errors: {phase['errors']} ({phase['error_pct']}%) | Rate-limited: {phase['rate_limited']}")
+            print(
+                f"    Errors: {phase['errors']} ({phase['error_pct']}%) | Rate-limited: {phase['rate_limited']}"
+            )
         else:
-            print(f"\n  {name}: {phase['total_calls']} calls, {phase['actual_rps']} RPS")
+            print(
+                f"\n  {name}: {phase['total_calls']} calls, {phase['actual_rps']} RPS"
+            )
 
     if results["bottlenecks"]:
         print("\n  🐌 BOTTLENECKS:")
         for b in results["bottlenecks"]:
-            print(f"    🔴 [{b['phase']}] {b['metric']}: {b['value_ms'] if 'value_ms' in b else b.get('value','')} — {b['reason']}")
+            print(
+                f"    🔴 [{b['phase']}] {b['metric']}: {b['value_ms'] if 'value_ms' in b else b.get('value', '')} — {b['reason']}"
+            )
     else:
         print("\n  ✅ No bottlenecks!")
 

@@ -66,7 +66,14 @@ def setup_module(module):
     conn.commit()
     conn.close()
 
-    scenario_config = root / "data-service" / "testdata" / "scenarios" / "sqlite-testseed" / "config.json"
+    scenario_config = (
+        root
+        / "data-service"
+        / "testdata"
+        / "scenarios"
+        / "sqlite-testseed"
+        / "config.json"
+    )
     base_config = json.loads(scenario_config.read_text())
 
     cfg_a = copy.deepcopy(base_config)

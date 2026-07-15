@@ -72,6 +72,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
 # ── Project paths ──────────────────────────────────────────────────────────
 
+
 @pytest.fixture(scope="session")
 def project_root() -> Path:
     """Project root directory."""
@@ -94,6 +95,7 @@ def tenants_data_dir(project_root: Path) -> Path:
 
 
 # ── Service URLs ───────────────────────────────────────────────────────────
+
 
 @pytest.fixture(scope="session")
 def data_service_url() -> str:
@@ -126,12 +128,14 @@ def rag_url() -> str:
 
 # ── Auth ───────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture(scope="session")
 def admin_token() -> str | None:
     return os.environ.get("ADMIN_TOKEN") or os.environ.get("ADMIN_API_TOKEN")
 
 
 # ── LLM ────────────────────────────────────────────────────────────────────
+
 
 @pytest.fixture(scope="session")
 def llm_api_key() -> str | None:
@@ -145,6 +149,7 @@ def llm_model() -> str:
 
 
 # ── Health check (optional — doesn't block collection) ─────────────────────
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _check_services():
@@ -173,4 +178,6 @@ def _check_services():
                 fatal.append(f"{name} at {url} — {e}")
 
     if fatal:
-        pytest.skip("Required services unavailable:\n" + "\n".join(f"  {f}" for f in fatal))
+        pytest.skip(
+            "Required services unavailable:\n" + "\n".join(f"  {f}" for f in fatal)
+        )

@@ -98,7 +98,9 @@ def test_list_agents():
     )
     assert r.status_code == 200, f"List agents: {r.status_code}"
     data = r.json()
-    agents = data.get("agents", data.get("items", data if isinstance(data, list) else []))
+    agents = data.get(
+        "agents", data.get("items", data if isinstance(data, list) else [])
+    )
     names = [a.get("name", "") for a in agents] if isinstance(agents, list) else []
     assert _AGENT_NAME in names, f"Agent {_AGENT_NAME} not found in list: {names}"
 
@@ -218,9 +220,7 @@ def test_delete_agent():
             headers=_api_headers(),
             timeout=10,
         )
-        assert r.status_code in (200, 204), (
-            f"Delete agent {name}: {r.status_code}"
-        )
+        assert r.status_code in (200, 204), f"Delete agent {name}: {r.status_code}"
 
 
 def test_deleted_agent_gone():

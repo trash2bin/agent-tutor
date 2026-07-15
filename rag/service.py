@@ -50,7 +50,11 @@ from rag.prometheus_metrics import (
     rag_import_duration,
     rag_cache_entries,
 )
-from helperium_sdk.tracing import setup_opentelemetry, instrument_fastapi, shutdown as otel_shutdown
+from helperium_sdk.tracing import (
+    setup_opentelemetry,
+    instrument_fastapi,
+    shutdown as otel_shutdown,
+)
 
 logger = logging.getLogger("rag.service")
 

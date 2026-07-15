@@ -28,6 +28,7 @@ import requests
 
 # ── Paths (lazy, for import safety) ───────────────────────────────────────
 
+
 def project_root() -> Path:
     """Find project root by AGENTS.md marker."""
     env = os.environ.get("PROJECT_ROOT")
@@ -49,6 +50,7 @@ def tenants_data_dir() -> Path:
 
 
 # ── URLs ───────────────────────────────────────────────────────────────────
+
 
 def _env_url(key: str, default: str) -> str:
     return os.environ.get(key, default)
@@ -76,6 +78,7 @@ def demo_web_url() -> str:
 
 # ── Auth ───────────────────────────────────────────────────────────────────
 
+
 def admin_token() -> str | None:
     return os.environ.get("ADMIN_TOKEN") or os.environ.get("ADMIN_API_TOKEN")
 
@@ -92,6 +95,7 @@ def admin_headers() -> dict[str, str]:
 
 
 # ── Database seed ──────────────────────────────────────────────────────────
+
 
 def seed_database(
     db_path: Path,
@@ -123,10 +127,12 @@ def seed_database(
             # Fallback: still in data-service/testdata (before full migration)
             sc_dir = root / "data-service" / "testdata" / "scenarios" / scenario
         if not (sc_dir / "config.json").exists():
-            raise FileNotFoundError(f"Scenario not found: {scenario} "
-                                    f"(tried {sc_dir / 'config.json'})")
+            raise FileNotFoundError(
+                f"Scenario not found: {scenario} (tried {sc_dir / 'config.json'})"
+            )
 
         from agent_db.seedgen import materialize
+
         cfg = materialize(str(sc_dir), force=True, output_dsn=str(db_path))
         return cfg
 
@@ -140,38 +146,83 @@ def seed_database(
     # Use the old seed-cli path but with Python seedgen
     import json as _json
     from agent_db.seedgen import apply_with_ddl, generate_ddl
-    from agent_db.seedgen.models import (Entity, EntityField, FieldType,
-                                          DataSourceConfig, ScenarioConfig,
-                                          Relation)
+    from agent_db.seedgen.models import (
+        Entity,
+        EntityField,
+        FieldType,
+        DataSourceConfig,
+        ScenarioConfig,
+        Relation,
+    )
     import sqlite3
 
     with open(seed_path) as f:
         raw_seed = _json.load(f)
 
     from helperium_sdk.seed_models import StorageSeed
+
     seed = StorageSeed.model_validate(raw_seed)
 
     # Build minimal entities from seed data structure
     entities = [
-        Entity(name="group", table="groups", id_column="id",
-               fields=[EntityField(name=n, column=n, type=FieldType.STRING)
-                       for n in ["id", "name", "speciality"]]),
-        Entity(name="student", table="students", id_column="id",
-               fields=[EntityField(name=n, column=n,
-                                   type=FieldType.INT if n == "course" else FieldType.STRING)
-                       for n in ["id", "name", "group_id", "course"]]),
-        Entity(name="teacher", table="teachers", id_column="id",
-               fields=[EntityField(name=n, column=n, type=FieldType.STRING)
-                       for n in ["id", "name", "disciplines_json"]]),
-        Entity(name="discipline", table="disciplines", id_column="id",
-               fields=[EntityField(name=n, column=n, type=FieldType.STRING)
-                       for n in ["id", "name", "description"]]),
-        Entity(name="schedule", table="schedule", id_column="id",
-               fields=[EntityField(name=n, column=n, type=FieldType.STRING)
-                       for n in ["id", "day", "group_id", "lessons_json"]]),
-        Entity(name="grade", table="grades", id_column="id",
-               fields=[EntityField(name=n, column=n, type=FieldType.STRING)
-                       for n in ["id", "student_id", "discipline_id", "grade", "date"]]),
+        Entity(
+            name="group",
+            table="groups",
+            id_column="id",
+            fields=[
+                EntityField(name=n, column=n, type=FieldType.STRING)
+                for n in ["id", "name", "speciality"]
+            ],
+        ),
+        Entity(
+            name="student",
+            table="students",
+            id_column="id",
+            fields=[
+                EntityField(
+                    name=n,
+                    column=n,
+                    type=FieldType.INT if n == "course" else FieldType.STRING,
+                )
+                for n in ["id", "name", "group_id", "course"]
+            ],
+        ),
+        Entity(
+            name="teacher",
+            table="teachers",
+            id_column="id",
+            fields=[
+                EntityField(name=n, column=n, type=FieldType.STRING)
+                for n in ["id", "name", "disciplines_json"]
+            ],
+        ),
+        Entity(
+            name="discipline",
+            table="disciplines",
+            id_column="id",
+            fields=[
+                EntityField(name=n, column=n, type=FieldType.STRING)
+                for n in ["id", "name", "description"]
+            ],
+        ),
+        Entity(
+            name="schedule",
+            table="schedule",
+            id_column="id",
+            fields=[
+                EntityField(name=n, column=n, type=FieldType.STRING)
+                for n in ["id", "day", "group_id", "lessons_json"]
+            ],
+        ),
+        Entity(
+            name="grade",
+            table="grades",
+            id_column="id",
+            fields=[
+                EntityField(name=n, column=n, type=FieldType.STRING)
+                for n in ["id", "student_id", "discipline_id", "grade", "date"]
+            ],
+        ),
     ]
 
     ddl = generate_ddl(entities, "sqlite")
@@ -184,8 +235,10 @@ def seed_database(
     finally:
         conn.close()
 
-    return ScenarioConfig(entities=entities, data_source=DataSourceConfig(
-        driver="sqlite", dsn=str(db_path)))
+    return ScenarioConfig(
+        entities=entities,
+        data_source=DataSourceConfig(driver="sqlite", dsn=str(db_path)),
+    )
 
 
 def cleanup_db(*db_paths: Path) -> None:
@@ -200,6 +253,7 @@ def cleanup_db(*db_paths: Path) -> None:
 
 # ── Scenario config loading ────────────────────────────────────────────────
 
+
 def load_scenario_config(scenario: str) -> dict:
     """Load config.json for a scenario."""
     config_path = scenarios_dir() / scenario / "config.json"
@@ -209,6 +263,7 @@ def load_scenario_config(scenario: str) -> dict:
 
 
 # ── Tenant registration ────────────────────────────────────────────────────
+
 
 def register_tenant(
     tenant_id: str,
@@ -224,8 +279,11 @@ def register_tenant(
         headers=h,
         timeout=10,
     )
-    return {"status": resp.status_code, "body": resp.json() if resp.text else {},
-            "text": resp.text}
+    return {
+        "status": resp.status_code,
+        "body": resp.json() if resp.text else {},
+        "text": resp.text,
+    }
 
 
 def delete_tenant(tenant_id: str, service_url: str | None = None) -> int:
@@ -241,11 +299,17 @@ def delete_tenant(tenant_id: str, service_url: str | None = None) -> int:
 
 # ── MCP tool call (SSE protocol) ───────────────────────────────────────────
 
+
 class MCPCallResult:
     """Result of an MCP tool call over SSE."""
 
-    def __init__(self, success: bool, result: Any = None, error: str = "",
-                 session_ok: bool = True):
+    def __init__(
+        self,
+        success: bool,
+        result: Any = None,
+        error: str = "",
+        session_ok: bool = True,
+    ):
         self.success = success
         self.result = result
         self.error = error
@@ -305,7 +369,9 @@ def mcp_call(
                 line = line_bytes.decode("utf-8", errors="replace")
                 if line.startswith("event: endpoint"):
                     seen_endpoint = True
-                elif line.startswith("data: ") and seen_endpoint and not endpoint_url[0]:
+                elif (
+                    line.startswith("data: ") and seen_endpoint and not endpoint_url[0]
+                ):
                     endpoint_url[0] = line[6:].strip()
                     ready.set()
                 elif line.startswith("data: ") and endpoint_url[0]:
@@ -324,8 +390,9 @@ def mcp_call(
 
     ep = endpoint_url[0]
     if not ep:
-        return MCPCallResult(False, error="No MCP endpoint URL received",
-                             session_ok=False)
+        return MCPCallResult(
+            False, error="No MCP endpoint URL received", session_ok=False
+        )
 
     # 2. Call tool via JSON-RPC
     payload = {
@@ -355,8 +422,11 @@ def mcp_call(
                 return MCPCallResult(True, result=data["result"])
             if "error" in data:
                 err_info = data["error"]
-                err_msg = (err_info.get("message", str(err_info))[:300]
-                           if isinstance(err_info, dict) else str(err_info)[:300])
+                err_msg = (
+                    err_info.get("message", str(err_info))[:300]
+                    if isinstance(err_info, dict)
+                    else str(err_info)[:300]
+                )
                 return MCPCallResult(False, error=err_msg)
         except (json.JSONDecodeError, ValueError):
             pass
@@ -375,9 +445,11 @@ def mcp_call(
                         return MCPCallResult(True, result=chunk["result"])
                     if "error" in chunk:
                         err_info = chunk["error"]
-                        err_msg = (err_info.get("message", str(err_info))[:300]
-                                   if isinstance(err_info, dict)
-                                   else str(err_info)[:300])
+                        err_msg = (
+                            err_info.get("message", str(err_info))[:300]
+                            if isinstance(err_info, dict)
+                            else str(err_info)[:300]
+                        )
                         return MCPCallResult(False, error=err_msg)
             except json.JSONDecodeError:
                 pass
@@ -388,6 +460,7 @@ def mcp_call(
 
 
 # ── Config persistence check ────────────────────────────────────────────────
+
 
 def save_and_check_persistence(
     tenant_id: str,

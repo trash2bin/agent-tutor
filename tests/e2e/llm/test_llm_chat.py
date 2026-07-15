@@ -53,7 +53,9 @@ def setup_module(module):
     )
     if r.status_code == 200:
         data = r.json()
-        agents = data.get("agents", data.get("items", data if isinstance(data, list) else []))
+        agents = data.get(
+            "agents", data.get("items", data if isinstance(data, list) else [])
+        )
         existing = [a.get("name") for a in agents] if isinstance(agents, list) else []
         if "default" in existing:
             # Agent "default" already exists — use it
@@ -94,7 +96,9 @@ def setup_module(module):
         if r.status_code in (200, 201):
             module._llm_agent = _AGENT_NAME
         else:
-            print(f"  ⚠️  Could not create LLM agent ({r.status_code}), falling back to 'default'")
+            print(
+                f"  ⚠️  Could not create LLM agent ({r.status_code}), falling back to 'default'"
+            )
             module._llm_agent = "default"
     except Exception:
         print("  ⚠️  Could not create LLM agent, falling back to 'default'")
@@ -142,7 +146,9 @@ def _parse_sse_stream(response, idle_timeout: int = 12) -> dict:
     # Set idle timeout on the underlying socket
     try:
         # urllib3 chain: HTTPResponse._fp (http.client) .fp (SocketIO) ._sock
-        sock = getattr(getattr(getattr(response.raw, '_fp', None), 'fp', None), '_sock', None)  # type: ignore[union-attr]
+        sock = getattr(
+            getattr(getattr(response.raw, "_fp", None), "fp", None), "_sock", None
+        )  # type: ignore[union-attr]
         if sock is not None:
             sock.settimeout(idle_timeout)
     except (AttributeError, OSError):
@@ -181,7 +187,13 @@ def _parse_sse_stream(response, idle_timeout: int = 12) -> dict:
                 result["final_text"] += payload.get("text", "")
             elif ev_type == "done":
                 break
-    except (requests.ConnectionError, TimeoutError, _socket.timeout, _socket.error, OSError) as e:
+    except (
+        requests.ConnectionError,
+        TimeoutError,
+        _socket.timeout,
+        _socket.error,
+        OSError,
+    ) as e:
         # Socket timeout or connection closed = LLM finished or hung
         # If we got any events, treat it as success
         if not result["events"]:
@@ -204,8 +216,11 @@ class TestLLMChat:
                 "message": "Hello!",
                 "session_id": f"e2e-llm-{uuid.uuid4().hex[:8]}",
             },
-            headers={"X-Tenant-ID": "default", "Content-Type": "application/json",
-                     "User-Agent": "Mozilla/5.0 (compatible; HelperiumE2E/1.0)"},
+            headers={
+                "X-Tenant-ID": "default",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (compatible; HelperiumE2E/1.0)",
+            },
             timeout=30,
             stream=True,
         )
@@ -235,8 +250,11 @@ class TestLLMChat:
                 "message": "Hello from e2e test!",
                 "session_id": f"e2e-agent-{uuid.uuid4().hex[:8]}",
             },
-            headers={"X-Tenant-ID": "default", "Content-Type": "application/json",
-                     "User-Agent": "Mozilla/5.0 (compatible; HelperiumE2E/1.0)"},
+            headers={
+                "X-Tenant-ID": "default",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (compatible; HelperiumE2E/1.0)",
+            },
             timeout=30,
             stream=True,
         )
@@ -271,11 +289,14 @@ class TestLLMChat:
             f"{api_service_url()}/api/chat/{agent}",
             json={
                 "message": "Используй доступные инструменты, чтобы вывести список студентов. "
-                           "Если инструментов нет — просто ответь, что у тебя нет доступа к базе.",
+                "Если инструментов нет — просто ответь, что у тебя нет доступа к базе.",
                 "session_id": session_id,
             },
-            headers={"X-Tenant-ID": "default", "Content-Type": "application/json",
-                     "User-Agent": "Mozilla/5.0 (compatible; HelperiumE2E/1.0)"},
+            headers={
+                "X-Tenant-ID": "default",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (compatible; HelperiumE2E/1.0)",
+            },
             timeout=120,
             stream=True,
         )
@@ -288,7 +309,9 @@ class TestLLMChat:
 
         # Log everything for diagnostics
         has_tool_call = len(parsed["tool_calls"]) > 0
-        has_response = bool(parsed["final_text"].strip()) or len(parsed["tool_results"]) > 0
+        has_response = (
+            bool(parsed["final_text"].strip()) or len(parsed["tool_results"]) > 0
+        )
         has_errors = len(parsed["errors"]) > 0
 
         print(f"\n  📊 Session: {session_id}")
@@ -313,11 +336,11 @@ class TestLLMChat:
                 "LLM should have called at least one tool or produced a response"
             )
             if has_errors:
-                print(f"  ⚠️  Tools called OK but final response error (transient): {parsed['errors']}")
+                print(
+                    f"  ⚠️  Tools called OK but final response error (transient): {parsed['errors']}"
+                )
         elif has_response:
-            assert not has_errors, (
-                f"Errors despite response: {parsed['errors']}"
-            )
+            assert not has_errors, f"Errors despite response: {parsed['errors']}"
         else:
             # No tool call, no response, and errors → pipeline failure
             if has_errors:
@@ -334,8 +357,10 @@ class TestLLMChat:
                 "message": "OK",
                 "session_id": f"e2e-fallback-{uuid.uuid4().hex[:8]}",
             },
-            headers={"Content-Type": "application/json",
-                     "User-Agent": "Mozilla/5.0 (compatible; HelperiumE2E/1.0)"},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (compatible; HelperiumE2E/1.0)",
+            },
             timeout=10,
             stream=True,
         )

@@ -75,14 +75,24 @@ def setup_module(module):
         ],
         "endpoints": [
             {"method": "GET", "path": "/students", "op": "list", "entity": "student"},
-            {"method": "GET", "path": "/students/{id}", "op": "get_by_id",
-             "entity": "student"},
+            {
+                "method": "GET",
+                "path": "/students/{id}",
+                "op": "get_by_id",
+                "entity": "student",
+            },
         ],
         "mcp_tools": [
-            {"name": "list_student", "endpoint": "list /students",
-             "description": "List all students"},
-            {"name": "get_student", "endpoint": "get_by_id /students/{id}",
-             "description": "Get student by ID"},
+            {
+                "name": "list_student",
+                "endpoint": "list /students",
+                "description": "List all students",
+            },
+            {
+                "name": "get_student",
+                "endpoint": "get_by_id /students/{id}",
+                "description": "Get student by ID",
+            },
         ],
     }
 
@@ -103,8 +113,11 @@ def setup_module(module):
             {"method": "GET", "path": "/products", "op": "list", "entity": "product"},
         ],
         "mcp_tools": [
-            {"name": "list_product", "endpoint": "list /products",
-             "description": "List all products"},
+            {
+                "name": "list_product",
+                "endpoint": "list /products",
+                "description": "List all products",
+            },
         ],
     }
 
