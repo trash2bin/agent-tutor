@@ -10,10 +10,10 @@
 //   - Удалил endpoint из бэка → удали из контракта
 //   - Тест падает если endpoint не найден ни в одном контракте
 
-import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { existsSync, readdirSync, readFileSync } from 'fs';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { describe, expect, it } from 'vitest';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DOMAINS_DIR = join(__dirname, '../internal/server/static/js/domains');

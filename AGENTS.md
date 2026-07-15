@@ -565,6 +565,11 @@ data: {...}\n\n`
 - **Конфигурация**: [.env.example](.env.example) — 85 переменных окружения (~150 строк).
 - **API-контракты и config schema**: [specs/README.md](specs/README.md) — OpenAPI specs, JSON Schema валидация конфига data-service.
 - **Agent Store**: [api-service/src/api_service/agent_store.py](api-service/src/api_service/agent_store.py) — SQLite-регистр агентов с CRUD API.
+  - Таблица `global_config` (`agents.sqlite`) — key-valueystore для глобальных настроек (напр. `key="voice"` → JSON voice config).
+  - Методы: `get_global_config(key)`, `set_global_config(key, value)` в `SqliteAgentRepository`.
+- **Voice Config**: Хранится в `agents.sqlite` → `global_config` (key=`voice`), а не в отдельном JSON-файле.
+  - Путь к БД: `AGENT_DB_PATH` env var (fallback: `<session_db_dir>/agents.sqlite`).
+- **LLM Provider Prefixes**: `create_prioritized_client()` использует `KNOWN_PROVIDERS` из `litellm.provider_list` (динамически) вместо хардкода. Префикс модели добавляется автоматически если отсутствует (напр. `mistral/mistral-medium`). api_key передаётся как-is (пустая строка допустима для Ollama/локальных моделей).
 
 ### 🌐 Web Service — Multi-Tenancy Architecture
 
@@ -824,11 +829,12 @@ pre-commit run --all-files  # прогнать на всех файлах
 | `check-added-large-files` | pre-commit-hooks | Файлы >500KB в коммите |
 | `check-merge-conflict` | pre-commit-hooks | Маркеры merge conflict |
 | `gitleaks` | gitleaks `v8.24.0` | Секреты в коде |
-| `admin-dashboard-stale` | local | Бинарник admin-dashboard не старше `app.js` (забыл `go build`) |
-| `admin-dashboard-tests` | local | 24 vitest теста на `api()` + OpenAPI contract (при изменении `app.js`) |
+| `admin-dashboard-stale` | local | Бинарник admin-dashboard не старше `app.js` + domain-модулей (забыл `go build`) |
+| `admin-dashboard-tests` | local | vitest теста на `api()` + contract scan по domain-модулям (при изменении `app.js` или `js/domains/*.js`) |
 
 > Pre-commit — быстрый (`go vet`, не `golangci-lint` — он медленный). Полный линтинг только в CI.
 > Хуки admin-dashboard проверяют что бинарник свежий (`go build`) и JS тесты проходят.
+> При изменении domain-модулей (`js/domains/*.js`) хуки запускаются автоматически.
 
 ### 🔧 Линтеры — настройка и прогон
 
@@ -893,32 +899,68 @@ act --pull=false           # весь пайплайн
 Admin-dashboard — SPA на Alpine.js, вкомпилированная в Go-бинар через `//go:embed`.
 Источник багов: несоответствие между фронтом и API (формат ответа, валидация).
 
-**Три уровня защиты:**
+### Архитектура JS-модулей (v1.1.1)
+
+Моноолитический `app.js` (1166 строк) разбит на **10 domain-модулей** + 4 core-модуля:
+
+```
+admin-dashboard/internal/server/static/
+├── app.js                          # Точка входа, Alpine.start()
+├── js/
+│   ├── apiClient.js                # Обёртка fetch → Alpine.store('api')
+│   ├── store.js                    # Alpine.store() — глобальное состояние
+│   ├── core/
+│   │   ├── apiLogger.js            # Логирование API-вызовов + debug-панель
+│   │   ├── eventBus.js             # Простой pub/sub между модулями
+│   │   └── notify.js               # Toast-уведомления (ok/err)
+│   └── domains/
+│       ├── auth.js                 # Авторизация, токен
+│       ├── tenants.js              # CRUD tenant'ов
+│       ├── config.js               # Конфиги tenant'ов
+│       ├── tools.js                # MCP-инструменты, approval
+│       ├── rag.js                  # RAG-документы
+│       ├── agents.js               # CRUD агентов
+│       ├── abuse.js                # Anti-abuse настройки
+│       ├── emergency.js            # Big Red Button (Lockdown)
+│       ├── llm.js                  # LLM-провайдеры, модели
+│       └── voice.js                # STT/TTS провайдеры
+└── styles.css                      # CSS (включает toast + debug-panel стили)
+```
+
+**Auth bypass:** Go-сервер (`server.go`) пропускает авторизацию для `/static/` и `/js/`.
+
+### Три уровня защиты
 
 1. **JS unit-тесты** (`admin-dashboard/tests/api.test.js`, 16 тестов) — проверяют
    `api()` функцию: парсинг 200/204/422/401, Pydantic validation errors,
    сетевые ошибки. Mock'и, ~200ms.
 
-2. **Contract-тесты** (`admin-dashboard/tests/contract.test.js`, 8 тестов) — живые
-   запросы к работающему api-service через admin-dashboard прокси. Проверяют:
-   - OpenAPI spec: 204 без content-type, pattern на name, required поля
-   - Live 422 с Pydantic detail[] (формат ошибки)
-   - Live 204 No Content (без content-type заголовка)
-   - Live 404 для несуществующего агента
+2. **Contract-тесты** (`admin-dashboard/tests/contract.test.js`) — сканируют
+   все domain-модули (`js/domains/*.js`) и сверяют API-вызовы с **3 контрактными JSON**:
+   - `tests/contracts/api-endpoints.json` — api-service (agents, voice, llm, abuse, chat)
+   - `tests/contracts/rag-endpoints.json` — rag-service
+   - `tests/contracts/admin-endpoints.json` — Go proxy (tenants, config, tools)
 
-   Если тесты упали — значит api-service поменял контракт, и admin-dashboard
-   надо обновлять. Тесты пропускаются если сервисы не запущены.
+   Поддерживаются паттерны: `api('/api/...')`, `Alpine.store('api').get('/api/...')`,
+   `fetch('/api/...', {method:'POST'})`.
+
+   Если тест упал — endpoint не найден ни в одном контракте → добавь в нужный JSON.
+   Если удалил endpoint из бэка — удали из контракта.
 
 3. **Pre-commit хуки:**
-   - `admin-dashboard-stale` — не даёт закоммитить изменения в `app.js` без
+   - `admin-dashboard-stale` — не даёт закоммитить изменения в `app.js` / domain-модулях без
      пересборки бинарника (`go build`)
-   - `admin-dashboard-tests` — гоняет все 24 теста при изменении `app.js`
+   - `admin-dashboard-tests` — гоняет все vitest теста при изменении `app.js` или `js/domains/*.js`
 
 **Запуск:**
 ```bash
 make ci-admin                 # сборка + все тесты
 cd admin-dashboard/tests && npm test  # только тесты (без сборки)
 ```
+
+**Контракт-тесты (shell):** `scripts/check-admin-contract.sh` — парсит Go-хендлеры
+(`grep -rn`) + JS-вызовы (`extract-frontend-endpoints.js` по `app.js` + `js/domains/*.js`)
+и сверяет пересечение. Поддерживает `Alpine.store('api')` и raw `fetch()` паттерны.
 
 **OpenAPI контракт** — `specs/api.openapi.yaml` (автогенерация из FastAPI):
 ```bash

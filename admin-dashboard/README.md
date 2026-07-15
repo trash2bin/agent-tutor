@@ -112,14 +112,41 @@ admin-dashboard/
 │   ├── client.go                — HTTP-клиенты к data-service и RAG
 │   └── static/
 │       ├── index.html           — SPA на Alpine.js (встроен в бинар через embed)
-│       ├── app.js               — логика UI (Alpine.js компоненты)
-│       └── styles.css           — тёмная тема (GitHub-dark inspired)
+│       ├── app.js                — точка входа, Alpine.start()
+│       ├── styles.css           — тёмная тема + toast/debug-panel стили
+│       └── js/
+│           ├── apiClient.js     — обёртка fetch → Alpine.store('api')
+│           ├── store.js         — Alpine.store() — глобальное состояние
+│           ├── core/
+│           │   ├── apiLogger.js — логирование API-вызовов + debug-панель
+│           │   ├── eventBus.js  — pub/sub между модулями
+│           │   └── notify.js    — toast-уведомления (ok/err)
+│           └── domains/
+│               ├── auth.js      — авторизация, токен
+│               ├── tenants.js   — CRUD tenant'ов
+│               ├── config.js    — конфиги tenant'ов
+│               ├── tools.js     — MCP-инструменты, approval
+│               ├── rag.js       — RAG-документы
+│               ├── agents.js    — CRUD агентов
+│               ├── abuse.js     — anti-abuse настройки
+│               ├── emergency.js — Big Red Button (Lockdown)
+│               ├── llm.js       — LLM-провайдеры, модели
+│               └── voice.js     — STT/TTS провайдеры
+├── tests/
+│   ├── api.test.js              — unit-тесты api() функции (mock)
+│   ├── contract.test.js         — contract scan по domain-модулям
+│   └── contracts/
+│       ├── api-endpoints.json   — api-service endpoints
+│       ├── rag-endpoints.json   — rag-service endpoints
+│       └── admin-endpoints.json — Go proxy endpoints
 ├── Dockerfile                   — multistage: golang:1.24-alpine → scratch
 ├── go.mod / go.sum
 └── README.md
 ```
 
 Статика вкомпиливается в бинар через `//go:embed static/*` — сервис не требует внешних файлов при запуске.
+
+**Auth bypass:** `server.go` пропускает авторизацию для `/static/` и `/js/` (domain-модули загружаются без токена).
 
 ---
 
@@ -255,6 +282,7 @@ npm run test:coverage # с coverage
 Что тестируется:
 - `api()` — парсинг ответов сервера (200, 204, 422, 401, network errors)
 - Обработка Pydantic validation errors (человеческий текст, а не "Unprocessable Entity")
+- **Contract scan** — все domain-модули (`js/domains/*.js`) сверяются с 3 контрактными JSON (`tests/contracts/`). Поддерживаются паттерны: `api()`, `Alpine.store('api')`, `fetch()`.
 
 ### E2E (Playwright)
 

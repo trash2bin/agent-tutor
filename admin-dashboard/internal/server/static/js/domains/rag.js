@@ -47,7 +47,7 @@ window.RAG = {
           var docsResp = await Alpine.store('api').post('/api/rag/documents/list', { limit: 100 });
           this.ragDocs = docsResp.documents || [];
           this.ragDocsCount = docsResp.count != null ? docsResp.count : this.ragDocs.length;
-        } catch (e) {
+        } catch (_e) {
           this.ragDocs = [];
           this.ragDocsCount = 0;
         }

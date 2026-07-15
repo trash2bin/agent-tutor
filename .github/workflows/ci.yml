@@ -36,6 +36,17 @@ jobs:
         # have been upgraded. Check `make ci-audit` locally for details.
         run: uv audit --preview-features audit-command || true
 
+  lint-js:
+    name: JS lint (Biome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Biome lint
+        run: npx @biomejs/biome check --max-diagnostics=500
+
   test-python:
     name: Python tests
     runs-on: ubuntu-latest

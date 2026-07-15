@@ -76,7 +76,7 @@ document.addEventListener('alpine:init', function () {
     // Догнать запросы, выполненные до загрузки Alpine
     _catchUp: function () {
       if (window.__apiLog && window.__apiLog.length > 0) {
-        var self = this;
+        var _self = this;
         for (var i = window.__apiLog.length - 1; i >= 0; i--) {
           var e = window.__apiLog[i];
           var found = false;

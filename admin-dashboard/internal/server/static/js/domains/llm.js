@@ -36,7 +36,7 @@ window.Llm = {
         try {
           var res = await Alpine.store('api').get('/api/llm-provider-list');
           this.llmProviderList = res.providers || [];
-        } catch (e) {
+        } catch (_e) {
           this.llmProviderList = [];
         }
       },

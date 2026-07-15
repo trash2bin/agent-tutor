@@ -22,12 +22,17 @@ ci-test-py:
 
 ci-lint-go:
 	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-	golangci-lint run ./data-service/...
-	golangci-lint run ./mcp-gateway/...
+	$$(go env GOPATH)/bin/golangci-lint run ./data-service/...
+	$$(go env GOPATH)/bin/golangci-lint run ./mcp-gateway/...
 
 ci-test-go:
 	go test ./data-service/... -count=1 -timeout 180s
 	go test ./mcp-gateway/... -count=1 -timeout 180s
+
+ci-lint-js:
+	@echo "=== JS lint (biome) ==="
+	npx @biomejs/biome check --max-diagnostics=500
+	@echo "✅ JS lint OK"
 
 ci-admin:
 	@echo "=== Admin dashboard JS tests ==="
@@ -37,5 +42,5 @@ ci-admin:
 	./scripts/check-admin-contract.sh
 	@echo "✅ Admin dashboard OK"
 
-ci: ci-lint-py ci-audit ci-test-py ci-lint-go ci-test-go ci-admin
+ci: ci-lint-py ci-audit ci-test-py ci-lint-go ci-test-go ci-lint-js ci-admin
 	@echo "✅ CI passed locally"

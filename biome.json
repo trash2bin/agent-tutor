@@ -1,0 +1,58 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.4/schema.json",
+	"files": {
+		"includes": [
+			"admin-dashboard/internal/server/static/**/*.js",
+			"api-service/embed/**/*.js",
+			"demo/web/static/**/*.js",
+			"admin-dashboard/tests/**/*.js"
+		]
+	},
+	"javascript": {
+		"globals": [
+			"Alpine",
+			"fetch",
+			"EventSource",
+			"XMLHttpRequest",
+			"document",
+			"window",
+			"console",
+			"setTimeout",
+			"setInterval",
+			"clearTimeout",
+			"clearInterval",
+			"JSON",
+			"Date",
+			"Math",
+			"URL",
+			"URLSearchParams",
+			"FormData",
+			"AbortController",
+			"Headers",
+			"Request",
+			"Response",
+			"MutationObserver",
+			"IntersectionObserver",
+			"requestAnimationFrame",
+			"cancelAnimationFrame"
+		]
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "none",
+			"correctness": {
+				"noUnusedVariables": "warn",
+				"noUnusedImports": "warn",
+				"noUndeclaredVariables": "error",
+				"noUnreachable": "error"
+			},
+			"suspicious": {
+				"noDoubleEquals": "error"
+			}
+		}
+	},
+	"formatter": {
+		"enabled": false
+	}
+}

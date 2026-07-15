@@ -18,7 +18,7 @@ window.Tenants = {
         try {
           var resp = await Alpine.store('api').get('/api/tenants');
           this.tenants = resp.tenants || [];
-        } catch (e) {
+        } catch (_e) {
           // error handled in apiClient
         }
       },

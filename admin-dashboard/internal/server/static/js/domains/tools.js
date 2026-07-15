@@ -23,7 +23,7 @@ window.Tools = {
         if (!tenantId) return;
         try {
           this.manifest = await Alpine.store('api').get('/api/tenants/' + tenantId + '/manifest');
-        } catch (e) {
+        } catch (_e) {
           this.manifest = null;
         }
       },

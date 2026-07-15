@@ -630,7 +630,7 @@ function bindChat() {
   });
 }
 
-async function streamChat(message, target) {
+async function _streamChat(message, target) {
   target.classList.add("is-thinking");
   target.dataset.tools = "[]";
   target.dataset.saved = "false";
@@ -940,7 +940,7 @@ function addMessage(kind, text, options = {}) {
   return node;
 }
 
-function restoreChatHistory() {
+function _restoreChatHistory() {
   const storedMessages = readStoredMessages();
   if (!storedMessages.length) return;
   const messages = $("#messages");

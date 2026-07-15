@@ -392,13 +392,13 @@
     try {
       var stored = sessionStorage.getItem(SESSION_KEY);
       if (stored) return stored;
-    } catch (e) { /* ignore */ }
+    } catch (_e) { /* ignore */ }
     var id = window.crypto && window.crypto.randomUUID
       ? window.crypto.randomUUID()
       : 'sess-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
     try {
       sessionStorage.setItem(SESSION_KEY, id);
-    } catch (e) { /* ignore */ }
+    } catch (_e) { /* ignore */ }
     return id;
   }
 
@@ -408,20 +408,20 @@
       if (!raw) return [];
       var parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? parsed : [];
-    } catch (e) { return []; }
+    } catch (_e) { return []; }
   }
 
   function saveStoredMessages(msgs) {
     try {
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(msgs));
-    } catch (e) { /* ignore */ }
+    } catch (_e) { /* ignore */ }
   }
 
   function scrollToBottom(el) {
     if (el) el.scrollTop = el.scrollHeight;
   }
 
-  function isScrolledNearBottom(el) {
+  function _isScrolledNearBottom(el) {
     return el && (el.scrollHeight - el.scrollTop - el.clientHeight < 48);
   }
 
@@ -600,7 +600,7 @@
     var sessionId = getSessionId();
 
     // ── Pending retry state ──
-    var pendingMessage = null;
+    var _pendingMessage = null;
     var retryAttempts = {};
     var MAX_RETRIES = 3;
 
@@ -630,7 +630,7 @@
       if (storedAgent && CONFIG.agent !== storedAgent) {
         window.__agentTutorSetAgent(storedAgent);
       }
-    } catch(e) {}
+    } catch(_e) {}
 
     // ── Session storage helpers ──
     function readStored() {
@@ -831,7 +831,7 @@
 
             try {
               var payload = JSON.parse(line.slice(5).trim());
-            } catch (e) { return; }
+            } catch (_e) { return; }
 
             if (targetNode.classList.contains('at-thinking')) {
               targetNode.classList.remove('at-thinking');
@@ -865,7 +865,7 @@
                   ? 'Не удалось получить ответ.' : 'No response.');
               }
               var toolNames = [];
-              try { toolNames = JSON.parse(targetNode.dataset.tools || '[]'); } catch (e) { /* ignore */ }
+              try { toolNames = JSON.parse(targetNode.dataset.tools || '[]'); } catch (_e) { /* ignore */ }
               appendStored('assistant', targetNode.dataset.raw || '', toolNames);
               targetNode.dataset.saved = 'true';
               scrollToBottom(messagesEl);
@@ -936,7 +936,7 @@
           messagesEl.appendChild(rateMsg);
           scrollToBottom(messagesEl);
 
-          pendingMessage = message;
+          _pendingMessage = message;
           scheduleRetry(message, delay * 1000);
           return;
         }
@@ -1030,7 +1030,7 @@
     // ── Voice Input ──
     var mediaRecorder = null;
     var micChunks = [];
-    var micStream = null;
+    var _micStream = null;
     var micTimerInterval = null;
     var micStartTime = 0;
     var micDuration = 0;
@@ -1053,7 +1053,7 @@
 
       navigator.mediaDevices.getUserMedia({ audio: true })
         .then(function (stream) {
-          micStream = stream;
+          _micStream = stream;
           micChunks = [];
 
           var mimeType = 'audio/webm;codecs=opus';
@@ -1069,7 +1069,7 @@
 
           mediaRecorder.onstop = function () {
             stream.getTracks().forEach(function (t) { t.stop(); });
-            micStream = null;
+            _micStream = null;
             ui.micBtn.classList.remove('at-mic-recording');
             ui.micTimer.classList.remove('at-mic-timer-visible');
             if (micTimerInterval) { clearInterval(micTimerInterval); micTimerInterval = null; }
@@ -1190,7 +1190,7 @@
         audio.play().catch(function () {
           // Autoplay blocked — user needs to interact first
         });
-      } catch (e) {
+      } catch (_e) {
         // Invalid base64
       }
     }

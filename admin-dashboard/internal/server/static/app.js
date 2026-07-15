@@ -122,7 +122,7 @@ function dashboard() {
       try {
         this.dashboard = await Alpine.store('api').get('/api/dashboard');
         Alpine.store('ui').dataService = this.dashboard.data_service || '';
-      } catch (e) {
+      } catch (_e) {
         // error handled in apiClient
       }
     },
