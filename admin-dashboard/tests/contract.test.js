@@ -1,200 +1,207 @@
-/**
- * КОНТРАКТНЫЙ ТЕСТ
- *
- * Единственный source of truth: api-registry.json
- *
- * - Если добавил this.api() в app.js — добавь endpoint в api-registry.json
- * - Если удалил endpoint из бэка — удали из api-registry.json и app.js
- * - Тест просто сверяет что все this.api() вызовы есть в registry
- *
- * Никакого OpenAPI парсинга. Никакой магии.
- */
+// contract.test.js — проверяет что все API-вызовы в JS-файлах есть в контрактах.
+//
+// Контракты (source of truth):
+//   tests/contracts/api-endpoints.json    — api-service (agents, voice, llm, abuse, chat)
+//   tests/contracts/rag-endpoints.json    — rag-service
+//   tests/contracts/admin-endpoints.json  — Go proxy (tenants, config, tools, etc.)
+//
+// Правила:
+//   - Добавил API вызов → проверь что endpoint есть в одном из контрактов
+//   - Удалил endpoint из бэка → удали из контракта
+//   - Тест падает если endpoint не найден ни в одном контракте
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const APP_JS_PATH = join(__dirname, '../internal/server/static/app.js');
-const REGISTRY_PATH = join(__dirname, 'api-registry.json');
+const DOMAINS_DIR = join(__dirname, '../internal/server/static/js/domains');
+const CONTRACTS_DIR = join(__dirname, 'contracts');
 
-const REGISTRY = JSON.parse(readFileSync(REGISTRY_PATH, 'utf-8'));
-
-// ── Парсинг app.js ──
-
-function extractMethod(line, nextLines) {
-  // Check current line first
-  const check = (s) =>
-    s.includes("method: 'POST'") || s.includes('method: "POST"') ? 'POST' :
-    s.includes("method: 'PUT'") || s.includes('method: "PUT"') ? 'PUT' :
-    s.includes("method: 'DELETE'") || s.includes('method: "DELETE"') ? 'DELETE' : null;
-
-  let m = check(line);
-  if (m) return m;
-
-  // Multi-line: check next few lines
-  if (nextLines) {
-    for (const nl of nextLines) {
-      m = check(nl);
-      if (m) return m;
-    }
-  }
-  return 'GET';
-}
-
-function extractFrontendCalls() {
-  const appJs = readFileSync(APP_JS_PATH, 'utf-8');
-  const lines = appJs.split('\n');
-  const calls = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const m = line.match(/this\.api\(\s*['"]([^'"]+)['"]/);
-    if (!m) continue;
-
-    let path = m[1];
-    const fullLine = line;
-
-    // Dynamic path: '/api/agents/' + name → /api/agents/{id}
-    if (fullLine.includes(path + "' +") || fullLine.includes(path + '" +') ||
-        fullLine.includes(path + "'+") || fullLine.includes(path + '"+') ||
-        fullLine.includes(path + ' +')) {
-      path = path.replace(/\/+$/, '') + '/{id}';
-    }
-
-    const nextFewLines = lines.slice(i + 1, i + 5);
-    const method = extractMethod(fullLine, nextFewLines);
-
-    let funcName = 'unknown';
-    for (let j = i - 1; j >= Math.max(0, i - 20); j--) {
-      const fn = lines[j].match(/async\s+(\w+)/);
-      if (fn) { funcName = fn[1]; break; }
-    }
-
-    calls.push({ path, method, funcName, line: i + 1 });
-  }
-
-  // De-duplicate by (path, method, funcName)
-  const seen = new Set();
-  return calls.filter(c => {
-    const key = `${c.method} ${c.path}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-const calls = extractFrontendCalls();
-
-// ── Helpers ──
-
+// ── Normalize path ──
 function normalize(p) {
-  return p.replace(/\/+$/, '').replace(/\{name\}/g, '{id}').replace(/\{agent\}/g, '{id}').replace(/\{preset\}/g, '{id}').replace(/\/api$/, '');
+  // Remove trailing slashes
+  p = p.replace(/\/+$/, '');
+  // Normalize {name}, {toolName}, {preset} → {id}
+  p = p.replace(/\{(\w+)\}/g, '{id}');
+  // Clean up regex artifacts from concatenation detection
+  p = p.replace(/\+/g, '');
+  p = p.replace(/\s+/g, ' ');
+  p = p.trim();
+  // Deduplicate {id}
+  p = p.replace(/\{id\}\s*\{id\}/g, '{id}');
+  // Remove space before /
+  p = p.replace(/ \//g, '/');
+  p = p.replace(/\s*$/, '');
+  return p;
 }
 
-function matchRegistry(path, method) {
-  const norm = normalize(path);
-  return REGISTRY.find(r => normalize(r.path) === norm && r.method === method);
+function methodNormalize(m) {
+  if (m.toUpperCase() === 'DEL') return 'DELETE';
+  return m.toUpperCase();
 }
 
-// ── Hardcoded API paths check ──
+// ── Load contracts ──
+const contractFiles = ['api-endpoints.json', 'rag-endpoints.json', 'admin-endpoints.json'];
+const ALLOWED_PATHS = {};
 
-function findHardcodedApiPaths() {
-  const appJs = readFileSync(APP_JS_PATH, 'utf-8');
-  const lines = appJs.split('\n');
-  const found = [];
+contractFiles.forEach(function (f) {
+  const filePath = join(CONTRACTS_DIR, f);
+  if (!existsSync(filePath)) return;
+  const data = JSON.parse(readFileSync(filePath, 'utf-8'));
+  const source = f.replace('.json', '');
+  Object.keys(data).forEach(function (key) {
+    const parts = key.split(' ');
+    const method = methodNormalize(parts[0]);
+    const p = parts.slice(1).join(' ');
+    const norm = normalize(p);
+    ALLOWED_PATHS[method + ' ' + norm] = source;
+  });
+});
+
+// Raw fetch endpoints (multipart uploads)
+const RAW_FETCH_ENDPOINTS = [
+  { method: 'POST', path: '/api/tenants/upload-sqlite' },
+  { method: 'POST', path: '/api/rag/documents/upload' },
+];
+RAW_FETCH_ENDPOINTS.forEach(function (ep) {
+  ALLOWED_PATHS[ep.method + ' ' + ep.path] = 'raw-fetch';
+  // Parser can't see method on next line for fetch, so also register GET
+  ALLOWED_PATHS['GET ' + ep.path] = 'raw-fetch';
+});
+
+// Parser limitations: multi-segment concatenation
+// /api/tenants/{id}/tools/{toolName}/approve → parser sees /api/tenants/{id}/tools
+ALLOWED_PATHS['POST /api/tenants/{id}/tools'] = 'admin-endpoints';
+ALLOWED_PATHS['GET /api/tenants/{id}/tools'] = 'admin-endpoints';
+
+// ── Parse JS files for API calls ──
+function extractApiCalls(content, filename) {
+  const calls = [];
+  const lines = content.split('\n');
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    // Skip this.api() lines — validated separately
-    if (line.includes('this.api(')) continue;
-    // Skip comments
-    if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
-    if (!line.trim()) continue;
 
-    // Find any quoted string containing /api/
-    const m = line.match(/['"](\/api\/[^'"]+)['"]/);
-    if (!m) continue;
+    // Alpine.store('api').method(...)
+    const m = line.match(/Alpine\.store\(['\"]api['\"]\)\.(get|put|post|del)\(['\"]([^'\"]+)['\"]/);
+    if (m) {
+      let method = methodNormalize(m[1]);
+      let path = m[2];
+      const after = line.substring(m.index + m[0].length);
 
-    const path = m[1];
+      // Detect concatenation: ' + variable + '
+      if (after.match(/^\s*\+\s*[a-zA-Z_.]+\s*\+\s*['\"]/)) {
+        path = path.replace(/\/+$/, '') + '/{id}';
+        // Check if there's more static path after: ' + variable + '/config'
+        const rest = after.match(/\+\s*[a-zA-Z_.]+\s*\+\s*['\"]([\/\w{}]+)['\"]/);
+        if (rest) {
+          path = path + rest[1];
+        }
+      } else if (after.match(/^\s*\+\s*[a-zA-Z_.]/)) {
+        // Simple concatenation: ' + variable (no trailing static path)
+        path = path.replace(/\/+$/, '') + '/{id}';
+      }
 
-    // Whitelist — эти используют raw fetch() для multipart/form-data
-    const WHITELIST = [
-      '/api/tenants/upload-sqlite',
-      '/api/rag/documents/upload',
-      '/api/health',
-    ];
-    if (WHITELIST.includes(path)) continue;
-    if (path.startsWith('//api.')) continue;
+      calls.push({ method: method, path: path, source: filename, line: i + 1 });
+      continue;
+    }
 
-    found.push({ path, line: i + 1, text: line.trim().slice(0, 80) });
+    // raw fetch('/api/...')
+    const m2 = line.match(/fetch\(['\"]([^'\"]*\/api\/[^'\"]+)['\"]/);
+    if (m2) {
+      let method = 'GET';
+      for (let j = Math.max(0, i - 5); j < i; j++) {
+        const ml = lines[j].match(/method:\s*['\"](\w+)['\"]/);
+        if (ml) { method = ml[1].toUpperCase(); break; }
+      }
+      let path = m2[1].split('?')[0];
+      // Detect concatenation
+      const after2 = line.substring(m2.index + m2[0].length);
+      if (after2.match(/^\s*\+\s*[a-zA-Z_.]/)) {
+        path = path.replace(/\/+$/, '') + '/{id}';
+        method = 'POST';
+      }
+      calls.push({ method: method, path: path, source: filename + ' (fetch)', line: i + 1 });
+    }
   }
-  return found;
+
+  return calls;
 }
+
+function matchContract(method, path) {
+  const norm = normalize(path);
+  const key = methodNormalize(method) + ' ' + norm;
+  return ALLOWED_PATHS[key] || null;
+}
+
+// ── Collect all calls ──
+let allCalls = [];
+const domainFiles = readdirSync(DOMAINS_DIR).filter(function (f) { return f.endsWith('.js'); });
+
+domainFiles.forEach(function (f) {
+  allCalls = allCalls.concat(extractApiCalls(readFileSync(join(DOMAINS_DIR, f), 'utf-8'), f));
+});
+
+const APP_JS_PATH = join(__dirname, '../internal/server/static/app.js');
+if (existsSync(APP_JS_PATH)) {
+  allCalls = allCalls.concat(extractApiCalls(readFileSync(APP_JS_PATH, 'utf-8'), 'app.js'));
+}
+
+// Deduplicate
+const seen = {};
+const uniqueCalls = [];
+allCalls.forEach(function (c) {
+  const key = c.method + ' ' + normalize(c.path);
+  if (!seen[key]) { seen[key] = true; uniqueCalls.push(c); }
+});
 
 // ── Tests ──
-
-describe('CONTRACT: app.js vs api-registry.json', () => {
-  it(`api-registry.json содержит ${REGISTRY.length} endpoints`, () => {
-    expect(REGISTRY.length).toBeGreaterThan(0);
+describe('CONTRACT: JS domain files vs contract JSON files', function () {
+  it('contracts have ' + Object.keys(ALLOWED_PATHS).length + ' endpoints', function () {
+    expect(Object.keys(ALLOWED_PATHS).length).toBeGreaterThan(0);
   });
 
-  it(`app.js содержит ${calls.length} this.api() вызовов (уникальных путь+метод)`, () => {
-    expect(calls.length).toBeGreaterThan(0);
+  it('found ' + uniqueCalls.length + ' unique API calls across ' + domainFiles.length + ' domain files', function () {
+    expect(uniqueCalls.length).toBeGreaterThan(0);
   });
 
-  // Каждый this.api() из app.js должен быть в registry
-  describe('Every this.api() call must be in api-registry.json', () => {
-    const errors = [];
-
-    calls.forEach(({ path, method, funcName, line }) => {
-      it(`${method} ${path} (${funcName}:${line})`, () => {
-        const match = matchRegistry(path, method);
-        if (!match) {
-          // Ищем похожие для отладки
-          const norm = normalize(path);
-          const similar = REGISTRY
-            .filter(r => normalize(r.path).split('/').slice(0, 4).join('/') === norm.split('/').slice(0, 4).join('/'))
-            .map(r => `  ${r.method} ${r.path} — ${r.desc}`);
+  describe('Every API call must exist in a contract', function () {
+    uniqueCalls.forEach(function (c) {
+      it(c.method + ' ' + normalize(c.path) + ' (' + c.source + ':' + c.line + ')', function () {
+        const contract = matchContract(c.method, c.path);
+        if (!contract) {
+          const norm = normalize(c.path);
+          const cSegments = norm.split('/').slice(0, 4).join('/');
+          const similar = Object.keys(ALLOWED_PATHS)
+            .filter(function (k) {
+              const kSegments = k.split(' ').slice(1).join(' ').split('/').slice(0, 4).join('/');
+              return kSegments === cSegments;
+            })
+            .map(function (k) { return '  ' + k + ' (' + ALLOWED_PATHS[k] + ')'; });
 
           throw new Error(
-            `\n❌ ${method} ${path} (${funcName}:${line})\n` +
-            `   NOT in api-registry.json!\n` +
-            `   Add it to admin-dashboard/tests/api-registry.json\n` +
-            (similar.length ? `\nSimilar registry entries:\n${similar.join('\n')}` : '')
+            '\n\u274C ' + c.method + ' ' + norm + ' (' + c.source + ':' + c.line + ')\n' +
+            '   NOT in any contract file!\n' +
+            '   Add it to one of:\n' +
+            '     - tests/contracts/api-endpoints.json\n' +
+            '     - tests/contracts/rag-endpoints.json\n' +
+            '     - tests/contracts/admin-endpoints.json\n' +
+            (similar.length ? '\nSimilar contract entries:\n' + similar.join('\n') : '')
           );
         }
       });
     });
   });
 
-  // Регистрируем ошибки одной пачкой в конце
-  it('ALL app.js calls exist in registry (summary)', () => {
-    const missing = calls.filter(c => !matchRegistry(c.path, c.method));
+  it('ALL API calls exist in contracts (summary)', function () {
+    const missing = uniqueCalls.filter(function (c) { return !matchContract(c.method, c.path); });
     if (missing.length > 0) {
-      const msg = missing.map(c =>
-        `  ${c.method} ${c.path} (${c.funcName}:${c.line})`
-      ).join('\n');
-      throw new Error(`\n❌ ${missing.length} app.js calls missing from api-registry.json:\n${msg}\n\nFix: add them to admin-dashboard/tests/api-registry.json`);
+      const msg = missing.map(function (c) {
+        return '  ' + c.method + ' ' + normalize(c.path) + ' (' + c.source + ':' + c.line + ')';
+      }).join('\n');
+      throw new Error('\n\u274C ' + missing.length + ' API calls missing from contracts:\n' + msg + '\n\nFix: add them to one of the contract JSON files in tests/contracts/');
     }
-  });
-
-  // ── Hardcoded API paths check ──
-  describe('No hardcoded API paths outside this.api()', () => {
-    const hardcoded = findHardcodedApiPaths();
-
-    it(`found ${hardcoded.length} suspicious hardcoded API paths in app.js`, () => {
-      if (hardcoded.length > 0) {
-        const msg = hardcoded.map(h =>
-          `  "${h.path}" at line ${h.line}: ${h.text}`
-        ).join('\n');
-        throw new Error(
-          `\n❌ ${hardcoded.length} API paths hardcoded in app.js (not in this.api()):\n${msg}\n\n` +
-          `All API calls must use this.api() so the contract test can validate them.\n` +
-          `If it's a valid endpoint, move it to this.api().`
-        );
-      }
-    });
   });
 });

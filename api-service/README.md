@@ -8,6 +8,7 @@
 - Формирует системный промпт + Persona агента
 - Управляет MCP-клиентом (подключение к mcp-gateway:8083)
 - Хранит историю диалогов (SQLite: `demo_sessions.sqlite`)
+- Хранит глобальный voice config (SQLite: `agents.sqlite`, таблица `global_config`)
 - Пишет полный бэклог взаимодействий (JSONL в `backlog/`)
 - Проксирует SSE-стрим от агента к Web
 
@@ -212,6 +213,7 @@ curl -X POST http://localhost:8081/api/agents \
 | `MISTRAL_API_KEY` | — | Ключ Mistral (альтернатива Ollama) |
 | `MISTRAL_MODEL` | `mistral/mistral-small` | Модель Mistral |
 | `DEMO_SESSION_DB_PATH` | `./demo_sessions.sqlite` | Путь к БД сессий |
+| `AGENT_DB_PATH` | `<session_db_dir>/agents.sqlite` | Путь к БД агентов + global config |
 | `BACKLOG_DIR` | `./backlog` | Директория бэклогов |
 | `BACKLOG_RETENTION_DAYS` | `30` | Дней хранения бэклогов |
 | `DEMO_HISTORY_TURNS` | `8` | Кол-во ходов в контексте |
@@ -264,6 +266,7 @@ uv run pytest api-service/src/api_service/tests/ -v
 | 401 на `/api/chat` | Не передан `X-Tenant-ID` | Добавить заголовок `X-Tenant-ID: <tenant-id>` |
 | SSE обрывается / нет tool calls | LLM не вызывает инструменты | Проверить системный промпт, capabilities модели, логи `DEMO_DEBUG=1` |
 | `demo_sessions.sqlite` locked | Остался процесс от прошлого запуска | `pkill -f "demo.api" && rm -f demo_sessions.sqlite* backlog/*.jsonl` |
+| Голосовой конфиг | Voice config хранится в `agents.sqlite` → `global_config` (key=`voice`), а не в отдельном JSON-файле |
 
 ### Быстрый smoke-тест
 ```bash

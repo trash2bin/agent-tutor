@@ -500,8 +500,12 @@ def create_prioritized_client(provider_names: list[str]) -> LLMClient:
     Create an LLM client with LiteLLM Router for per-agent prioritized providers.
 
     Looks up each provider name from the global ProviderStore.
-    Only enabled providers with non-empty model and api_key are included,
+    Only enabled providers with a non-empty model are included,
     in the order specified by ``provider_names``.
+
+    No heuristics for any provider — model names, api keys and api bases
+    are passed through as-is. LiteLLM handles everything (Ollama prefix,
+    default API base, no-key fallback).
 
     When none of the named providers are valid, falls back to ``create_client()``.
     """
@@ -528,22 +532,41 @@ def create_prioritized_client(provider_names: list[str]) -> LLMClient:
         # Get full provider data (not masked) from internal dict
         raw = store.all_providers_raw.get(name, {})
         api_key = raw.get("api_key", "")
-        if not api_key:
-            logger.warning("[PRIORITY] Provider '%s' has no api_key — skipping", name)
-            continue
+
+        # LiteLLM Router requires a provider prefix in the model name
+        # (e.g. "mistral/mistral-medium", "ollama_chat/...", "deepseek/...").
+        # Use KNOWN_PROVIDERS from litellm (not hardcoded) — falls back to
+        # raw_provider field if litellm can't enumerate providers.
+        from api_service.provider_store import KNOWN_PROVIDERS
+
+        known_prefixes = (
+            tuple(p + "/" for p in KNOWN_PROVIDERS) if KNOWN_PROVIDERS else ()
+        )
+        raw_provider = provider_data.get("provider", "")
+        if not model.startswith(known_prefixes) and raw_provider:
+            model = f"{raw_provider}/{model}"
+        elif not model.startswith(known_prefixes) and not raw_provider:
+            logger.warning(
+                "[PRIORITY] Provider '%s': model '%s' has no known prefix "
+                "and no provider field — LiteLLM may not route correctly",
+                name,
+                model,
+            )
 
         entry: dict[str, Any] = {
             "model_name": name,
             "litellm_params": {
                 "model": model,
-                "api_key": api_key,
+                "api_key": api_key or "",
                 "timeout": 600,
                 "temperature": 0.5,
             },
         }
+
         api_base = raw.get("api_base", "") or provider_data.get("api_base", "")
         if api_base:
-            entry["litellm_params"]["api_base"] = api_base
+            entry["litellm_params"]["api_base"] = api_base.rstrip("/")
+
         model_list.append(entry)
 
     if not model_list:

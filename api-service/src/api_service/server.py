@@ -1190,8 +1190,28 @@ async def chat_voice_endpoint(
     try:
         stt_result = await stt_engine.transcribe(audio_bytes)
     except RuntimeError as exc:
+        logger.error(
+            "Voice: STT failed provider=%s session=%s error=%s",
+            resolved_config.stt_providers[0].name
+            if resolved_config.stt_providers
+            else "none",
+            session_id,
+            exc,
+        )
         return StreamingResponse(
-            _single_error(f"Speech recognition failed: {exc}"),
+            _single_error(classify_error(exc, lang or "ru")),
+            media_type="text/event-stream",
+        )
+    except Exception as exc:
+        logger.exception(
+            "Voice: STT unexpected error provider=%s session=%s",
+            resolved_config.stt_providers[0].name
+            if resolved_config.stt_providers
+            else "none",
+            session_id,
+        )
+        return StreamingResponse(
+            _single_error(classify_error(exc, lang or "ru")),
             media_type="text/event-stream",
         )
 

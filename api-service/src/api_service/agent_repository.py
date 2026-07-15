@@ -154,6 +154,10 @@ class SqliteAgentRepository(AgentRepository):
       system_prompt TEXT — кастомный system prompt для агента (опционально, plaintext)
       created_at   TEXT — ISO timestamp
       updated_at   TEXT — ISO timestamp
+
+    Таблица `global_config`:
+      key   TEXT PRIMARY KEY — имя конфига (напр. "voice")
+      value TEXT NOT NULL — JSON-значение конфига
     """
 
     def __init__(self, db_path: str) -> None:
@@ -183,6 +187,12 @@ class SqliteAgentRepository(AgentRepository):
                         voice_config TEXT,
                         created_at   TEXT NOT NULL,
                         updated_at   TEXT NOT NULL
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS global_config (
+                        key   TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
                     )
                 """)
                 conn.commit()
@@ -410,6 +420,33 @@ class SqliteAgentRepository(AgentRepository):
                 cur = conn.execute("DELETE FROM agents WHERE name = ?", (name,))
                 conn.commit()
                 return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    # ── Global Config (key-value store) ──
+
+    def get_global_config(self, key: str) -> dict | None:
+        """Get a global config value by key. Returns None if missing."""
+        with self._lock:
+            conn = self._conn()
+            try:
+                row = conn.execute(
+                    "SELECT value FROM global_config WHERE key = ?", (key,)
+                ).fetchone()
+                return _parse_config(row["value"]) if row else None
+            finally:
+                conn.close()
+
+    def set_global_config(self, key: str, value: dict) -> None:
+        """Set a global config value by key (UPSERT)."""
+        with self._lock:
+            conn = self._conn()
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO global_config (key, value) VALUES (?, ?)",
+                    (key, _json_or_none(value)),
+                )
+                conn.commit()
             finally:
                 conn.close()
 

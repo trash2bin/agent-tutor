@@ -180,7 +180,11 @@ class TTSEngine:
         self.fallback_enabled = fallback_enabled
 
     async def synthesize(self, text: str) -> TTSResult:
-        """Synthesize speech. Tries providers in order, fallback if enabled."""
+        """Synthesize speech. Tries providers in order, fallback if enabled.
+
+        Always raises ``AllProvidersFailed`` (a ``RuntimeError``) on failure —
+        never propagates the original provider exception type.
+        """
         errors: list[Exception] = []
         for provider in self.providers:
             try:
@@ -188,7 +192,7 @@ class TTSEngine:
             except Exception as exc:
                 errors.append(exc)
                 if not self.fallback_enabled:
-                    raise
+                    raise AllProvidersFailed(errors) from exc
         raise AllProvidersFailed(errors)
 
     @classmethod

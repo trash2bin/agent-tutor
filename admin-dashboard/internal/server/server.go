@@ -226,7 +226,8 @@ func authMiddleware(token string) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if strings.HasPrefix(path, "/static/") {
+			if strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/js/") {
+				// Static assets and domain JS modules bypass auth
 				next.ServeHTTP(w, r)
 				return
 			}

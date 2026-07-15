@@ -15,6 +15,7 @@ Built-in providers:
 from __future__ import annotations
 
 import io
+import logging
 import time
 from typing import Protocol
 
@@ -78,14 +79,40 @@ class LiteLLMSTTProvider:
         if self.api_base:
             kwargs["api_base"] = self.api_base
 
-        t0 = time.monotonic()
-        response = await litellm.atranscription(
-            model=self.model,
-            file=("audio.webm", io.BytesIO(audio_bytes), "audio/webm"),
-            **kwargs,
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "STT transcribe call provider=%s model=%s api_key=%s api_base=%s size=%d",
+            self.name,
+            self.model,
+            "***SET***" if self.api_key else "NONE",
+            self.api_base or "default (api.openai.com)",
+            len(audio_bytes),
         )
+
+        t0 = time.monotonic()
+        try:
+            response = await litellm.atranscription(
+                model=self.model,
+                file=("audio.webm", io.BytesIO(audio_bytes), "audio/webm"),
+                **kwargs,
+            )
+        except Exception as exc:
+            logger.error(
+                "STT transcribe failed provider=%s elapsed=%.2fs error=%s",
+                self.name,
+                time.monotonic() - t0,
+                exc,
+            )
+            raise
+
         elapsed = time.monotonic() - t0
         text = getattr(response, "text", "") or ""
+        logger.info(
+            "STT transcribe ok provider=%s elapsed=%.2fs chars=%d",
+            self.name,
+            elapsed,
+            len(text),
+        )
         return STTResult(
             text=text.strip(),
             duration_seconds=elapsed,
@@ -178,7 +205,11 @@ class STTEngine:
         self.fallback_enabled = fallback_enabled
 
     async def transcribe(self, audio_bytes: bytes) -> STTResult:
-        """Transcribe audio. Tries providers in order, fallback if enabled."""
+        """Transcribe audio. Tries providers in order, fallback if enabled.
+
+        Always raises ``AllProvidersFailed`` (a ``RuntimeError``) on failure —
+        never propagates the original provider exception type.
+        """
         errors: list[Exception] = []
         for provider in self.providers:
             try:
@@ -186,7 +217,7 @@ class STTEngine:
             except Exception as exc:
                 errors.append(exc)
                 if not self.fallback_enabled:
-                    raise
+                    raise AllProvidersFailed(errors) from exc
         raise AllProvidersFailed(errors)
 
     @classmethod

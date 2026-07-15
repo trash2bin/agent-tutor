@@ -1,32 +1,50 @@
 #!/usr/bin/env node
-// extract-frontend-endpoints.js — парсит app.js и выводит METHOD /api/path
-// для всех вызовов api() с учётом строковой конкатенации '+' и template literals.
+// extract-frontend-endpoints.js — парсит JS-файлы и выводит METHOD /api/path
+// для всех API-вызовов с учётом строковой конкатенации '+' и template literals.
 //
-// Алгоритм (v4 — финальный, правильный):
-//   Для каждого api()-вызова:
-//     1. METHOD из {method:'...'} или GET.
-//     2. Вычленить фрагменты пути между первым строковым аргументом и запятой (вторым аргументом).
-//     3. Каждый не-строковой токен заменять на '*', строковые добавлять как есть.
-//     4. Вывести METHOD + итоговый путь.
+// Поддерживаемые паттерны:
+//   1. api('/api/...', {method:'PUT'})        — legacy app.js
+//   2. Alpine.store('api').get('/api/...')    — domain files
+//   3. fetch('/api/...', {method:'POST'})     — raw fetch (multipart)
 //
-// Пример: api('/api/tenants/' + this.id + '/config', {method:'PUT'})
-//   → фрагменты: '/api/tenants/'  '+'  this.id  '+'  '/config'  ','
-//   → путь: /api/tenants/*/config  METHOD: PUT
-//
-// Пример: api('/api/llm-config')
-//   → путь: /api/llm-config  METHOD: GET
+// Использование: node extract-frontend-endpoints.js file1.js file2.js ...
 'use strict';
 
 const fs = require('fs');
-const app = fs.readFileSync(process.argv[2] || 'admin-dashboard/internal/server/static/app.js', 'utf8');
+const files = process.argv.slice(2);
+if (!files.length) {
+  files.push('admin-dashboard/internal/server/static/app.js');
+}
 
 function extractEndpoints(src) {
   const endpoints = [];
+
+  function parsePathTokens(firstArg) {
+    const tokens = firstArg.match(/(?:['"`][^'"`]+['"`])|(?:[^'"`\s\+]+)|(?:\+)/g) || [];
+    let path = '';
+    for (const tok of tokens) {
+      if (tok === '+') continue;
+      if ((tok.startsWith("'") && tok.endsWith("'")) ||
+          (tok.startsWith('"') && tok.endsWith('"')) ||
+          (tok.startsWith('`') && tok.endsWith('`'))) {
+        let inner = tok.slice(1, -1);
+        inner = inner.replace(/\$\{[^}]+\}/g, '*');
+        path += inner;
+      } else {
+        path += '*';
+      }
+    }
+    path = path.replace(/\/\*+/g, '/*');
+    path = path.replace(/\/\*\//g, '/*/');
+    path = path.replace(/\/\//g, '/');
+    return path;
+  }
+
+  // --- Pattern 1: api(...) — legacy app.js ---
   const apiRe = /api\s*\(/g;
   let m;
   while ((m = apiRe.exec(src))) {
     const start = m.index + m[0].length;
-    // Найти парную закрывающую скобку
     let depth = 1;
     let i = start;
     while (depth > 0 && i < src.length) {
@@ -36,64 +54,72 @@ function extractEndpoints(src) {
     }
     const rawBody = src.slice(start, i - 1).replace(/\n/g, ' ');
 
-    // 1) METHOD
     let method = 'GET';
     const methodM = /method\s*:\s*['"]([A-Z]+)['"]/.exec(rawBody);
     if (methodM) method = methodM[1];
 
-    // 2) Путь — разбираем первый аргумент api() до запятой (или до конца первого аргумента)
-    //
-    // Берём всё от начала до первой запятой, которая НЕ внутри объекта/строки.
-    // Но проще: берём первый аргумент — первый токен до запятой или до { (второй аргумент).
-    // Если rawBody = '/api/tenants/' + this.id + '/config', {method:'PUT'}
-    // то первый аргумент = '/api/tenants/' + this.id + '/config'
     const commaIdx = rawBody.indexOf(',');
-    // Ищем где заканчивается первый аргумент:
-    //   • запятая перед {method:...} (или перед body:)
-    //   • если нет запятой — один аргумент, весь rawBody это путь
     let firstArg = commaIdx >= 0 ? rawBody.slice(0, commaIdx) : rawBody;
 
-    // Парсим firstArg на токены:
-    //   string_literal, template_literal, '+', variable/expression
-    // Токены разделены пробелами и '+'.
-    // Упрощённый парсер: разбиваем по '+' и пробелам, для каждого токена:
-    //   если это строка / template literal в кавычках → добавляем содержимое
-    //   иначе → добавляем '*'
-    const tokens = firstArg.match(/(?:['"`][^'"`]+['"`])|(?:[^'"`\s\+]+)|(?:\+)/g) || [];
-    let path = '';
-    for (const tok of tokens) {
-      if (tok === '+') continue;
-      // Проверяем: строковой литерал / template literal?
-      if ((tok.startsWith("'") && tok.endsWith("'")) ||
-          (tok.startsWith('"') && tok.endsWith('"')) ||
-          (tok.startsWith('`') && tok.endsWith('`'))) {
-        // Содержимое без кавычек
-        let inner = tok.slice(1, -1);
-        // Заменить ${...} на *
-        inner = inner.replace(/\$\{[^}]+\}/g, '*');
-        path += inner;
-      } else {
-        // Переменная / выражение → '*'
-        path += '*';
-      }
-    }
-
-    // Финальная чистка
-    path = path.replace(/\/\*+/g, '/*');         // двойные звёзды → одна
-    path = path.replace(/\/\*\//g, '/*/');       // чистка
-    path = path.replace(/\/\/+/g, '/');          // двойные слеши
-
-    // Отфильтровать мусор (определение функции api(url, options), пустой вызов api())
+    const path = parsePathTokens(firstArg);
     if (path === '*' || path === '' || !path.startsWith('/api/')) continue;
-
     endpoints.push({ method, path });
   }
+
+  // --- Pattern 2: Alpine.store('api').method('/api/...') — domain files ---
+  const alpineRe = /Alpine\.store\(['"]api['"]\)\.(get|put|post|del)\s*\(/g;
+  while ((m = alpineRe.exec(src))) {
+    const method = m[1].toUpperCase() === 'DEL' ? 'DELETE' : m[1].toUpperCase();
+    const start = m.index + m[0].length;
+    let depth = 1;
+    let i = start;
+    while (depth > 0 && i < src.length) {
+      if (src[i] === '(') depth++;
+      else if (src[i] === ')') depth--;
+      i++;
+    }
+    const rawBody = src.slice(start, i - 1).replace(/\n/g, ' ');
+
+    const commaIdx = rawBody.indexOf(',');
+    let firstArg = commaIdx >= 0 ? rawBody.slice(0, commaIdx) : rawBody;
+
+    const path = parsePathTokens(firstArg);
+    if (path === '*' || path === '' || !path.startsWith('/api/')) continue;
+    endpoints.push({ method, path });
+  }
+
+  // --- Pattern 3: raw fetch('/api/...') ---
+  const fetchRe = /fetch\s*\(['"]([^'"]*\/api\/[^'"]+)['"]/g;
+  while ((m = fetchRe.exec(src))) {
+    let path = m[1].split('?')[0];
+    let method = 'GET';
+    // Look backwards for method (before fetch call)
+    const before = src.slice(Math.max(0, m.index - 300), m.index);
+    const methodMBack = /method\s*:\s*['"]([A-Z]+)['"]/.exec(before);
+    if (methodMBack) method = methodMBack[1];
+    // Look forwards too — method: 'POST' is often inside the options arg
+    if (method === 'GET') {
+      const afterFetch = src.slice(m.index, m.index + 300);
+      const methodMFwd = /method\s*:\s*['"]([A-Z]+)['"]/.exec(afterFetch);
+      if (methodMFwd) method = methodMFwd[1];
+    }
+
+    if (!path.startsWith('/api/')) continue;
+    endpoints.push({ method, path });
+  }
+
   return endpoints;
 }
 
-const eps = extractEndpoints(app);
+// Process all files, deduplicate
+const allEndpoints = [];
+for (const file of files) {
+  const src = fs.readFileSync(file, 'utf8');
+  allEndpoints.push(...extractEndpoints(src));
+}
+
 const dedup = {};
-for (const ep of eps) {
+for (const ep of allEndpoints) {
   const key = ep.method + ' ' + ep.path;
   if (!dedup[key]) dedup[key] = 0;
   dedup[key]++;

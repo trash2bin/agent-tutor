@@ -2,22 +2,26 @@
 
 Provides functional API for loading/saving/resolving voice config
 as Pydantic VoiceConfig models.
+
+Backed by SQLite (global_config table in agents.sqlite).
 """
 
 from __future__ import annotations
 
 import copy
-import json
 import logging
 import os
+import threading
 from pathlib import Path
-from threading import Lock
 
 from helperium_sdk.api.models import VoiceAgentConfig, VoiceConfig
 from api_service.audio.stt_engine import LiteLLMSTTProvider, LocalSTTProvider
 from api_service.audio.tts_engine import LiteLLMTTSProvider, LocalTTSProvider
+from api_service.agent_repository import SqliteAgentRepository
 
 logger = logging.getLogger(__name__)
+
+_GLOBAL_CONFIG_KEY = "voice"
 
 DEFAULT_VOICE_CONFIG_DICT: dict = {
     "enabled": True,
@@ -50,82 +54,48 @@ DEFAULT_VOICE_CONFIG_DICT: dict = {
 }
 
 
-class VoiceConfigStore:
-    """Thread-safe JSON-backed voice configuration store."""
+def _get_db_path() -> str:
+    """Resolve the agents.sqlite path the same way AgentStore does."""
+    from helperium_sdk.settings import settings
 
-    def __init__(self, db_path: str = "") -> None:
-        if not db_path:
-            try:
-                from helperium_sdk.settings import settings
-
-                db_path = str(
-                    Path(settings.session_db_path).parent / "voice_config.json"
-                )
-            except Exception:
-                db_path = str(
-                    Path(
-                        os.environ.get("SESSION_DB_PATH", ".data/sessions/sessions.db")
-                    ).parent
-                    / "voice_config.json"
-                )
-        self._path = db_path
-        self._lock = Lock()
-        self._config = self._load()
-
-    def _load(self) -> dict:
-        try:
-            if os.path.exists(self._path):
-                with open(self._path) as f:
-                    return json.load(f)
-        except Exception as exc:
-            logger.warning("Failed to load voice config from %s: %s", self._path, exc)
-        return copy.deepcopy(DEFAULT_VOICE_CONFIG_DICT)
-
-    def _save(self) -> None:
-        os.makedirs(os.path.dirname(self._path), exist_ok=True)
-        with open(self._path, "w") as f:
-            json.dump(self._config, f, indent=2, ensure_ascii=False)
-
-    def get(self) -> dict:
-        """Return a copy of the current voice config as a plain dict."""
-        with self._lock:
-            return copy.deepcopy(self._config)
-
-    def update(self, config: dict) -> None:
-        """Replace the entire voice config and persist."""
-        with self._lock:
-            self._config = config
-            self._save()
+    return os.environ.get(
+        "AGENT_DB_PATH",
+        str(Path(settings.session_db_path).parent / "agents.sqlite"),
+    )
 
 
-# Singleton
-_voice_config_store: VoiceConfigStore | None = None
-_voice_config_lock = Lock()
+# Singleton repo — shares the same SQLite file as SqliteAgentRepository
+_repo: SqliteAgentRepository | None = None
+_repo_lock = threading.Lock()
 
 
-def get_voice_config_store() -> VoiceConfigStore:
-    """Get or create the singleton VoiceConfigStore."""
-    global _voice_config_store
-    if _voice_config_store is None:
-        with _voice_config_lock:
-            if _voice_config_store is None:
-                _voice_config_store = VoiceConfigStore()
-    return _voice_config_store
+def _get_repo() -> SqliteAgentRepository:
+    global _repo
+    if _repo is None:
+        with _repo_lock:
+            if _repo is None:
+                _repo = SqliteAgentRepository(_get_db_path())
+    return _repo
 
 
 # ── Provider builders ──
 
 
 def build_stt_providers(config):
-    """Build STT provider instances from a Pydantic VoiceConfig object."""
+    """Build STT provider instances from a Pydantic VoiceConfig object.
+
+    Falls back to ``OPENAI_API_KEY`` env var when ``api_key`` is not set
+    in the stored config (matching the pattern in ``llm_client.py``).
+    """
     providers = []
     for p in config.stt_providers:
         if not p.enabled:
             continue
         if p.provider == "litellm":
+            api_key = p.api_key or os.environ.get("OPENAI_API_KEY")
             providers.append(
                 LiteLLMSTTProvider(
-                    name=p.name, model=p.model, api_key=p.api_key, api_base=p.api_base
+                    name=p.name, model=p.model, api_key=api_key, api_base=p.api_base
                 )
             )
         elif p.provider == "local":
@@ -161,15 +131,17 @@ def build_tts_providers(config):
 
 def load_voice_config() -> VoiceConfig:
     """Load the current voice config as a Pydantic VoiceConfig model."""
-    store = get_voice_config_store()
-    raw = store.get()
+    repo = _get_repo()
+    raw = repo.get_global_config(_GLOBAL_CONFIG_KEY)
+    if raw is None:
+        raw = copy.deepcopy(DEFAULT_VOICE_CONFIG_DICT)
     return VoiceConfig(**raw)
 
 
 def save_voice_config(config: VoiceConfig) -> None:
     """Persist a VoiceConfig model to the store."""
-    store = get_voice_config_store()
-    store.update(config.model_dump(mode="json"))
+    repo = _get_repo()
+    repo.set_global_config(_GLOBAL_CONFIG_KEY, config.model_dump(mode="json"))
 
 
 def resolve_voice_config(

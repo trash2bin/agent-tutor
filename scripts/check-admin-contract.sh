@@ -52,13 +52,22 @@ sort -u "$GO_RAW" | norm | sort -u > "$GO_NORM"
 
 # ---------------------------------------------------------------------------
 # 2. Фронтовые вызовы — через JS-парсер extract-frontend-endpoints.js
+#    Сканирует app.js + все js/domains/*.js
 # ---------------------------------------------------------------------------
 if [ ! -f "$EXTRACTOR" ]; then
   echo "❌ Скрипт $EXTRACTOR не найден" >&2
   exit 2
 fi
 
-node "$EXTRACTOR" "$APP" > "$JS_RAW" 2>/dev/null
+DOMAINS_DIR="$SERVER_DIR/static/js/domains"
+JS_FILES=("$APP")
+if [ -d "$DOMAINS_DIR" ]; then
+  for f in "$DOMAINS_DIR"/*.js; do
+    [ -f "$f" ] && JS_FILES+=("$f")
+  done
+fi
+
+node "$EXTRACTOR" "${JS_FILES[@]}" > "$JS_RAW" 2>/dev/null
 [ -s "$JS_RAW" ] || { echo "⚠️  фронтовые вызовы не извлечены" >&2; }
 
 norm < "$JS_RAW" | sort -u > "$JS_NORM"

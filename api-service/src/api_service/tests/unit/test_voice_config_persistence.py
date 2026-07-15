@@ -5,12 +5,15 @@
 и сервер не должен перезаписывать существующий ключ пустотой.
 
 Related: api-service/src/api_service/server.py update_voice_config()
+
+Voice config теперь хранится в SQLite (таблица global_config в agents.sqlite).
 """
 
 from __future__ import annotations
 
 import importlib
 import json
+import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,28 +33,25 @@ def _save_original_session_db_path() -> None:
 
 @pytest.fixture(autouse=True)
 def _restore_settings():
-    """Restore global session_db_path after each test to avoid cross-test contamination."""
+    """Restore global env after each test to avoid cross-test contamination."""
     yield
     if _ORIGINAL_SESSION_DB_PATH:
         import helperium_sdk.settings as sdk_settings
 
         sdk_settings.settings.session_db_path = _ORIGINAL_SESSION_DB_PATH
-        # Reset VoiceConfigStore singleton too
+        # Reset voice config repo singleton too
         import api_service.audio.voice_config as vc_mod
 
-        vc_mod._voice_config_store = None
+        vc_mod._repo = None
 
 
 def _get_app(monkeypatch, tmp_path):
-    """Load app with voice config pointing to a temp file."""
-    # VoiceConfigStore вычисляет путь как:
-    #   Path(settings.session_db_path).parent / "voice_config.json"
-    # settings — единожды созданный модульный синглтон.
-    # Устанавливаем путь напрямую, а не через monkeypatch.setenv.
+    """Load app with voice config pre-seeded in a temp SQLite DB."""
     voice_dir = tmp_path / "sessions"
-    voice_path = voice_dir / "voice_config.json"
+    voice_dir.mkdir(parents=True, exist_ok=True)
+    agents_db = voice_dir / "agents.sqlite"
 
-    # Write initial config with a real key
+    # Seed global_config table with initial voice config
     initial = {
         "enabled": True,
         "stt_providers": [
@@ -81,26 +81,36 @@ def _get_app(monkeypatch, tmp_path):
         "min_voice_interval_seconds": 10,
         "max_voice_duration_seconds": 120,
     }
-    voice_path.parent.mkdir(parents=True, exist_ok=True)
-    voice_path.write_text(json.dumps(initial, indent=2))
+    conn = sqlite3.connect(str(agents_db))
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS global_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO global_config (key, value) VALUES (?, ?)",
+        ("voice", json.dumps(initial)),
+    )
+    conn.commit()
+    conn.close()
 
-    # Set session_db_path directly on the shared singleton — monkeypatch.setenv
-    # won't affect already-imported `settings` objects.
+    # Point session_db_path so agents.sqlite lands in our temp dir
     import helperium_sdk.settings as sdk_settings
 
     sdk_settings.settings.session_db_path = str(voice_dir / "sessions.db")
 
-    # Clear VoiceConfigStore singleton so it re-reads settings on next get()
+    # Set AGENT_DB_PATH explicitly so voice_config finds it
+    monkeypatch.setenv("AGENT_DB_PATH", str(agents_db))
+
+    # Reset voice config repo singleton so it re-creates from temp path
     import api_service.audio.voice_config as vc_mod
 
-    vc_mod._voice_config_store = None
+    vc_mod._repo = None
 
     import api_service.server as sv
 
     if hasattr(sv, "app"):
         del sv.app
     importlib.reload(sv)
-    return sv.app, voice_path
+    return sv.app
 
 
 class TestVoiceConfigKeyPreservation:
@@ -108,7 +118,7 @@ class TestVoiceConfigKeyPreservation:
 
     def test_put_empty_api_key_does_not_erase_stt_key(self, monkeypatch, tmp_path):
         """PUT с пустым api_key не удаляет STT ключ."""
-        app, voice_path = _get_app(monkeypatch, tmp_path)
+        app = _get_app(monkeypatch, tmp_path)
         with TestClient(app) as client:
             # PUT с пустым api_key (фронт присылает маскированное поле)
             put_resp = client.put(
@@ -163,7 +173,7 @@ class TestVoiceConfigKeyPreservation:
 
     def test_put_empty_api_key_does_not_erase_tts_key(self, monkeypatch, tmp_path):
         """PUT с пустым api_key не удаляет TTS ключ."""
-        app, voice_path = _get_app(monkeypatch, tmp_path)
+        app = _get_app(monkeypatch, tmp_path)
         with TestClient(app) as client:
             put_resp = client.put(
                 "/api/voice-config",
@@ -215,7 +225,7 @@ class TestVoiceConfigKeyPreservation:
 
     def test_put_new_api_key_can_override(self, monkeypatch, tmp_path):
         """PUT с НОВЫМ api_key должен обновлять ключ (это intentional update)."""
-        app, voice_path = _get_app(monkeypatch, tmp_path)
+        app = _get_app(monkeypatch, tmp_path)
         with TestClient(app) as client:
             put_resp = client.put(
                 "/api/voice-config",
@@ -249,7 +259,7 @@ class TestVoiceConfigKeyPreservation:
 
     def test_persistence_across_calls(self, monkeypatch, tmp_path):
         """Изменения voice config сохраняются между GET/PUT запросами."""
-        app, voice_path = _get_app(monkeypatch, tmp_path)
+        app = _get_app(monkeypatch, tmp_path)
         with TestClient(app) as client:
             # 1. Устанавливаем ключ
             client.put(
