@@ -100,6 +100,77 @@ func (b *Builder) BuildFind(entity Entity, searchField, value string) (Query, er
 	return q, nil
 }
 
+// BuildFilter собирает SELECT с фильтрацией по нескольким полям.
+// Поддерживает LIKE-поиск для string-полей и exact match для int/float/bool.
+// Поддерживает limit/offset для пагинации.
+//
+// filterCols — список колонок для фильтрации (имена колонок БД).
+// filterVals — значения фильтров (порядок соответствует filterCols).
+// filterOps  — типы операций: "like" для string, "eq" для чисел/bool.
+//
+// Пример:
+//   filterCols: ["name", "status", "city"]
+//   filterVals: ["Ivan", "active", "Moscow"]
+//   filterOps:  ["like", "eq", "eq"]
+//
+// Результат:
+//   SELECT ... FROM customers WHERE "name" LIKE ? AND "status" = ? AND "city" = ?
+//   Args: ["%Ivan%", "active", "Moscow"]
+func (b *Builder) BuildFilter(entity Entity, filterCols []string, filterVals []any, filterOps []string) (Query, error) {
+	if entity.Table == "" {
+		return Query{}, &QueryError{
+			Op:     "BuildFilter",
+			Reason: "entity has empty Table",
+		}
+	}
+
+	cols := buildColumnList(b.adapter, entity)
+	var conditions []string
+	var args []any
+	phIdx := 1
+
+	for i, colName := range filterCols {
+		if i >= len(filterVals) || i >= len(filterOps) {
+			break
+		}
+
+		// Найти колонку в entity
+		column, ok := b.columnFor(entity, colName)
+		if !ok {
+			continue // пропускаем неизвестные колонки
+		}
+
+		val := filterVals[i]
+		op := filterOps[i]
+
+		ph := b.adapter.TranslatePlaceholder(phIdx)
+
+		switch op {
+		case "like":
+			// LIKE-поиск с экранированием wildcards
+			s, ok := val.(string)
+			if !ok {
+				continue
+			}
+			escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(s)
+			args = append(args, "%"+escaped+"%")
+			conditions = append(conditions, b.adapter.QuoteIdentifier(column)+" LIKE "+ph)
+			phIdx++
+		case "eq":
+			args = append(args, val)
+			conditions = append(conditions, b.adapter.QuoteIdentifier(column)+" = "+ph)
+			phIdx++
+		}
+	}
+
+	q := Query{SQL: `SELECT ` + cols + ` FROM ` + b.adapter.QuoteIdentifier(entity.Table)}
+	if len(conditions) > 0 {
+		q.SQL += ` WHERE ` + strings.Join(conditions, ` AND `)
+	}
+	q.Args = args
+	return q, nil
+}
+
 // BuildList собирает SELECT всех колонок сущности.
 //
 // whereClause — сырая строка фильтра ("status = ? AND tenant_id = ?"),

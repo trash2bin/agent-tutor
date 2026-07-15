@@ -24,6 +24,12 @@ func ListHandler(c *Context, entityName string) http.HandlerFunc {
 			return
 		}
 
+		// Pagination
+		limit, offset := readPagination(r)
+		countSQL := countQuery(query.SQL)
+		total := runCountQuery(c.DB, countSQL, query.Args)
+		query.SQL = appendPagination(query.SQL, limit, offset)
+
 		rows, err := c.DB.QueryContext(r.Context(), query.SQL, query.Args...)
 		if err != nil {
 			RespondError(w, http.StatusInternalServerError, "db_error", err.Error())
@@ -39,6 +45,7 @@ func ListHandler(c *Context, entityName string) http.HandlerFunc {
 			return
 		}
 
+		setPaginationHeaders(w, total, limit, offset)
 		RespondJSON(w, http.StatusOK, results)
 	}
 }

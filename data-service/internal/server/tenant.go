@@ -854,7 +854,7 @@ func (ts *TenantStore) adminConfigVersionsHandler(w http.ResponseWriter, r *http
 	handlers.RespondJSON(w, http.StatusOK, versions)
 }
 
-func (ts *TenantStore) adminRewriteHandler(adapter datasource.Adapter, _ string) http.HandlerFunc {
+func (ts *TenantStore) adminRewriteHandler(_ datasource.Adapter, _ string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		inst := ts.resolveTenant(r)
 		if inst == nil {
@@ -863,9 +863,11 @@ func (ts *TenantStore) adminRewriteHandler(adapter datasource.Adapter, _ string)
 			return
 		}
 
-		if adapter == nil {
+		// Resolve the correct adapter for this tenant's driver (SQLite, PostgreSQL, etc.)
+		adapter, ok := ts.registry.Get(string(inst.Config.DataSource.Driver))
+		if !ok || adapter == nil {
 			handlers.RespondError(w, http.StatusServiceUnavailable, "unavailable",
-				"introspection adapter not available")
+				fmt.Sprintf("adapter not available for driver %q", inst.Config.DataSource.Driver))
 			return
 		}
 
@@ -917,12 +919,20 @@ func (ts *TenantStore) adminRewriteHandler(adapter datasource.Adapter, _ string)
 	}
 }
 
-func (ts *TenantStore) adminDiscoverHandler(adapter datasource.Adapter) http.HandlerFunc {
+func (ts *TenantStore) adminDiscoverHandler(_ datasource.Adapter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		inst := ts.resolveTenant(r)
 		if inst == nil {
 			handlers.RespondError(w, http.StatusBadRequest, "missing_tenant",
 				"please specify a tenant identifier via X-Tenant-ID header or ?tenant= query parameter")
+			return
+		}
+
+		// Resolve the correct adapter for this tenant's driver (SQLite, PostgreSQL, etc.)
+		adapter, ok := ts.registry.Get(string(inst.Config.DataSource.Driver))
+		if !ok || adapter == nil {
+			handlers.RespondError(w, http.StatusServiceUnavailable, "unavailable",
+				fmt.Sprintf("adapter not available for driver %q", inst.Config.DataSource.Driver))
 			return
 		}
 

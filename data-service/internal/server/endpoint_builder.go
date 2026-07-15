@@ -172,6 +172,16 @@ func NewRouterFromConfig(ts *TenantStore, cfg *config.Config, db runtime.Adapter
 				return nil, fmt.Errorf("endpoint %q: op list requires entity", ep.Path)
 			}
 			h = handlers.ListHandler(ctx, ep.Entity)
+		case "distinct":
+			if ep.Entity == "" {
+				return nil, fmt.Errorf("endpoint %q: op distinct requires entity", ep.Path)
+			}
+			h = handlers.DistinctHandler(ctx, ep.Entity)
+		case "count":
+			if ep.Entity == "" {
+				return nil, fmt.Errorf("endpoint %q: op count requires entity", ep.Path)
+			}
+			h = handlers.CountHandler(ctx, ep.Entity)
 		case "custom_query":
 			if ep.QueryID == "" {
 				return nil, fmt.Errorf("endpoint %q: op custom_query requires query_id", ep.Path)

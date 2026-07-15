@@ -73,16 +73,18 @@ func TestScenario_BigTestseed(t *testing.T) {
 	})
 
 	t.Run("find_students_by_name_first", func(t *testing.T) {
-		// Поиск по подстроке "Иванов" — endpoint find возвращает 1 объект или массив.
-		// (Зависит от того, есть ли конфиг-флаг, всегда возвращающий 1.)
-		status, _ := getJSON[map[string]any](t, ts.URL+"/students?name=%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2")
+		// Поиск по подстроке "Иванов" — возвращает массив совпадений.
+		status, results := getJSON[[]map[string]any](t, ts.URL+"/students?full_name=%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2")
 		if status != 200 {
 			t.Errorf("find: status=%d", status)
+		}
+		if len(results) == 0 {
+			t.Errorf("expected at least 1 student with 'Иванов'")
 		}
 	})
 
 	t.Run("find_students_by_name_nonexistent", func(t *testing.T) {
-		status, _ := getJSON[map[string]string](t, ts.URL+"/students?name=НеизвестныйНикогдаНеСуществовал")
+		status, _ := getJSON[map[string]string](t, ts.URL+"/students?full_name=НеизвестныйНикогдаНеСуществовал")
 		if status != 404 {
 			t.Errorf("expected 404 for non-existing name, got %d", status)
 		}
@@ -90,10 +92,13 @@ func TestScenario_BigTestseed(t *testing.T) {
 
 	t.Run("find_teachers_by_name", func(t *testing.T) {
 		// В big-testseed конфиге нет /teachers/{id}, только /teachers (find).
-		// find возвращает объект с дисциплинами для одного совпадения.
-		status, _ := getJSON[map[string]any](t, ts.URL+"/teachers?name=%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2")
+		// find возвращает массив совпадений.
+		status, results := getJSON[[]map[string]any](t, ts.URL+"/teachers?full_name=%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2")
 		if status != 200 {
 			t.Errorf("find teacher: status=%d", status)
+		}
+		if len(results) == 0 {
+			t.Errorf("expected at least 1 teacher with 'Иванов'")
 		}
 	})
 
@@ -266,7 +271,7 @@ func TestScenario_BigTestseed_NoPanicsOnRandomQueries(t *testing.T) {
 		{"/students/s1", 200},
 		{"/students/s500", 200},
 		{"/students/s99999", 404},
-		{"/teachers?name=%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2", 200},
+		{"/teachers?full_name=%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2", 200},
 		{"/groups/g1", 404},          // get_by_id не описан в конфиге
 		{"/groups/g1/schedule", 200}, // custom_query с g1
 		{"/students/s1/grades", 200},
@@ -276,7 +281,7 @@ func TestScenario_BigTestseed_NoPanicsOnRandomQueries(t *testing.T) {
 		{"/grades", 200},
 		{"/schedule", 200},
 		{"/disciplines", 200},
-		{"/students?name=Неизвестный", 404},
+		{"/students?full_name=Неизвестный", 404},
 	}
 
 	for _, tc := range tests {

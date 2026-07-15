@@ -42,7 +42,7 @@ func (m HTTPMethod) Valid() bool {
 	return false
 }
 
-// Op — реализация endpoint'а (builtin, get_by_id, find, list, custom_query).
+// Op — реализация endpoint'а (builtin, get_by_id, find, list, custom_query, distinct).
 type Op string
 
 const (
@@ -52,12 +52,14 @@ const (
 	OpFind            Op = "find"
 	OpList            Op = "list"
 	OpCustomQuery     Op = "custom_query"
+	OpDistinct        Op = "distinct"
+	OpCount           Op = "count"
 )
 
 // Valid проверяет, что op входит в whitelist.
 func (o Op) Valid() bool {
 	switch o {
-	case OpBuiltinHealth, OpBuiltinStats, OpGetByID, OpFind, OpList, OpCustomQuery:
+	case OpBuiltinHealth, OpBuiltinStats, OpGetByID, OpFind, OpList, OpCustomQuery, OpDistinct, OpCount:
 		return true
 	}
 	return false

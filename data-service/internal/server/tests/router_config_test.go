@@ -84,13 +84,16 @@ func TestNewRouterFromConfig_NotFound(t *testing.T) {
 func TestNewRouterFromConfig_FindStudent(t *testing.T) {
 	ts := newTestServer(t)
 
-	status, body := getJSON[map[string]any](t, ts.URL+"/students?name=%D0%98%D0%B2%D0%B0%D0%BD+%D0%9F%D0%B5%D1%82%D1%80%D0%BE%D0%B2+%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2%D0%B8%D1%87")
+	status, body := getJSON[[]map[string]any](t, ts.URL+"/students?full_name=%D0%98%D0%B2%D0%B0%D0%BD+%D0%9F%D0%B5%D1%82%D1%80%D0%BE%D0%B2+%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2%D0%B8%D1%87")
 
 	if status != 200 {
 		t.Errorf("expected 200, got %d; body=%v", status, body)
 	}
-	if body["full_name"] == "" {
-		t.Errorf("expected non-empty full_name, got %v", body["full_name"])
+	if len(body) == 0 {
+		t.Errorf("expected at least 1 result")
+	}
+	if body[0]["full_name"] == "" {
+		t.Errorf("expected non-empty full_name, got %v", body[0]["full_name"])
 	}
 }
 

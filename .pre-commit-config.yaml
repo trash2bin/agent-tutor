@@ -10,6 +10,15 @@ repos:
 
   - repo: local
     hooks:
+      - id: biome-js
+        name: Biome JS lint
+        entry: npx @biomejs/biome check
+        language: system
+        files: ^(admin-dashboard/internal/server/static/.*\.js|api-service/embed/.*\.js|demo/web/static/.*\.js)$
+        pass_filenames: false
+
+  - repo: local
+    hooks:
       - id: pyright
         name: Pyright type check
         entry: bash -c 'pyright api-service/src/api_service/agent/'

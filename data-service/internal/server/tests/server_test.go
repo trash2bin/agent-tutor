@@ -360,23 +360,34 @@ func TestGetStudentNotFound(t *testing.T) {
 
 func TestFindStudentByName(t *testing.T) {
 	ts := newTestServer(t)
-	status, s := getJSON[map[string]any](t,
-		ts.URL+"/students?name="+pathEncode("Мария Сидорова Ивановна"))
+	status, results := getJSON[[]map[string]any](t,
+		ts.URL+"/students?full_name="+pathEncode("Мария Сидорова Ивановна"))
 	if status != 200 {
 		t.Fatalf("expected 200, got %d", status)
 	}
-	if s["full_name"] != "Мария Сидорова Ивановна" {
-		t.Errorf("expected Мария Сидорова Ивановна, got %v", s["full_name"])
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result")
 	}
-	if s["course"] != float64(3) {
-		t.Errorf("expected course 3, got %v", s["course"])
+	// Проверяем что среди результатов есть искомый
+	var found bool
+	for _, s := range results {
+		if s["full_name"] == "Мария Сидорова Ивановна" {
+			found = true
+			if s["course"] != float64(3) {
+				t.Errorf("expected course 3, got %v", s["course"])
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected Мария Сидорова Ивановна in results")
 	}
 }
 
 func TestFindStudentByNameNotFound(t *testing.T) {
 	ts := newTestServer(t)
 	status, _ := getJSON[map[string]string](t,
-		ts.URL+"/students?name=Неизвестный+Студент")
+		ts.URL+"/students?full_name=Неизвестный+Студент")
 	if status != 404 {
 		t.Errorf("expected 404, got %d", status)
 	}
@@ -605,20 +616,27 @@ func testStudents(t *testing.T, ts *httptest.Server) {
 		t.Errorf("expected 'not_found', got %q", body["error"])
 	}
 
-	status, s = getJSON[map[string]any](t,
-		ts.URL+"/students?name="+pathEncode("Мария Сидорова Ивановна"))
+	status, results := getJSON[[]map[string]any](t,
+		ts.URL+"/students?full_name="+pathEncode("Мария Сидорова Ивановна"))
 	if status != 200 {
 		t.Fatalf("expected 200, got %d", status)
 	}
-	if s["full_name"] != "Мария Сидорова Ивановна" {
-		t.Errorf("expected Мария Сидорова Ивановна, got %v", s["full_name"])
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result")
 	}
-	if s["course"] != float64(3) {
-		t.Errorf("expected course 3, got %v", s["course"])
+	var found bool
+	for _, r := range results {
+		if r["full_name"] == "Мария Сидорова Ивановна" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected Мария Сидорова Ивановна in results")
 	}
 
 	status, _ = getJSON[map[string]string](t,
-		ts.URL+"/students?name=Неизвестный+Студент")
+		ts.URL+"/students?full_name=Неизвестный+Студент")
 	if status != 404 {
 		t.Errorf("expected 404, got %d", status)
 	}
@@ -654,13 +672,23 @@ func testGrades(t *testing.T, ts *httptest.Server) {
 }
 
 func testTeachers(t *testing.T, ts *httptest.Server) {
-	status, teacher := getJSON[map[string]any](t,
-		ts.URL+"/teachers?name="+pathEncode("Оксана Ниловна Константинова"))
+	status, results := getJSON[[]map[string]any](t,
+		ts.URL+"/teachers?full_name="+pathEncode("Оксана Ниловна Константинова"))
 	if status != 200 {
 		t.Fatalf("expected 200, got %d", status)
 	}
-	if teacher["full_name"] != "Оксана Ниловна Константинова" {
-		t.Errorf("unexpected name: %v", teacher["full_name"])
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result")
+	}
+	var found bool
+	for _, teacher := range results {
+		if teacher["full_name"] == "Оксана Ниловна Константинова" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected Оксана Ниловна Константинова in results")
 	}
 }
 

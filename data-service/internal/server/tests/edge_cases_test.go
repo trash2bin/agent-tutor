@@ -82,7 +82,7 @@ func TestEdgeCases_QueryParams(t *testing.T) {
 	t.Run("empty_name_query", func(t *testing.T) {
 		// Документированное поведение: пустой name возвращает 200 со списком всех
 		// (фильтр игнорируется). Не 404. Тест проверяет что статус не 5xx.
-		resp, err := http.Get(ts.URL + "/students?name=")
+		resp, err := http.Get(ts.URL + "/students?full_name=")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,14 +99,14 @@ func TestEdgeCases_QueryParams(t *testing.T) {
 		// в production (file-based или PG) таких проблем нет, плюс добавляется
 		// middleware лимита URL. Тест просто фиксирует поведение, не fail.
 		longQ := strings.Repeat("a", 65536)
-		status, _ := getJSON[map[string]any](t, ts.URL+"/students?name="+url.QueryEscape(longQ))
+		status, _ := getJSON[map[string]any](t, ts.URL+"/students?full_name="+url.QueryEscape(longQ))
 		t.Logf("very_long_query: status=%d (5xx OK на in-memory)", status)
 	})
 
 	t.Run("unicode_query", func(t *testing.T) {
 		// Поиск с эмодзи и юникодом
 		status, _ := getJSON[map[string]any](t,
-			ts.URL+"/students?name="+url.QueryEscape("🎉ПриветМир"))
+			ts.URL+"/students?full_name="+url.QueryEscape("🎉ПриветМир"))
 		if status != 404 {
 			t.Errorf("expected 404 for unicode, got %d", status)
 		}
@@ -114,7 +114,7 @@ func TestEdgeCases_QueryParams(t *testing.T) {
 
 	t.Run("null_bytes_in_query", func(t *testing.T) {
 		status, _ := getJSON[map[string]any](t,
-			ts.URL+"/students?name="+url.QueryEscape("test%00null"))
+			ts.URL+"/students?full_name="+url.QueryEscape("test%00null"))
 		if status >= 500 {
 			t.Errorf("null bytes: 5xx, got %d", status)
 		}

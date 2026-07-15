@@ -21,7 +21,7 @@ func MCPManifestHandler(cfg *config.Config) http.HandlerFunc {
 	// Предварительная генерация MCPTools — только один раз при старте
 	tools := cfg.MCPTools
 	if len(tools) == 0 {
-		tools = configgen.GenerateMCPTools(cfg.Endpoints)
+		tools = configgen.GenerateMCPTools(cfg.Endpoints, cfg.Entities)
 	}
 	// Определяем read-only режим
 	readOnly := cfg.DataSource.ReadOnly != nil && *cfg.DataSource.ReadOnly

@@ -4,10 +4,17 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 )
 
-// FindHandler обрабатывает поиск по полю (напр. /students?name=...).
-// Если параметр поиска не передан — fallback на список всех записей.
+// FindHandler обрабатывает поиск по полям (напр. /students?name=...&course=3).
+// Поддерживает множественную фильтрацию: все непустые query-параметры
+// применяются как WHERE-условия (AND).
+//
+// Поведение:
+//   - Если нет активных фильтров → fallback на список всех записей (массив)
+//   - Если 1 фильтр (search field) → старое поведение: один объект или 404
+//   - Если несколько фильтров → массив результатов (включая пустой [])
 func FindHandler(c *Context, entityName, searchField, queryParam string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		entity, ok := c.Resolver.Resolve(entityName)
@@ -18,20 +25,72 @@ func FindHandler(c *Context, entityName, searchField, queryParam string) http.Ha
 
 		translate := asPlaceholderFunc(c.Adapter)
 
-		paramName := queryParam
-		if paramName == "" {
-			paramName = searchField
+		// Собираем все непустые query-параметры как фильтры
+		var filterCols []string
+		var filterVals []any
+		var filterOps []string
+
+		// Known filter params: все колонки entity (кроме PK)
+		for _, f := range entity.Fields {
+			if f.PrimaryKey {
+				continue
+			}
+			val := r.URL.Query().Get(f.Name)
+			if val == "" {
+				continue
+			}
+
+			// Validate value length
+			if err := ValidateSearchValue(val); err != nil {
+				RespondError(w, http.StatusBadRequest, "validation_error",
+					fmt.Sprintf("param %q: %v", f.Name, err))
+				return
+			}
+
+			filterCols = append(filterCols, f.Name)
+
+			// Определяем тип операции по типу поля
+			switch f.Type {
+			case "int":
+				if intVal, err := strconv.ParseInt(val, 10, 64); err == nil {
+					filterVals = append(filterVals, intVal)
+					filterOps = append(filterOps, "eq")
+				} else {
+					RespondError(w, http.StatusBadRequest, "validation_error",
+						fmt.Sprintf("param %q: expected integer, got %q", f.Name, val))
+					return
+				}
+			case "float":
+				if floatVal, err := strconv.ParseFloat(val, 64); err == nil {
+					filterVals = append(filterVals, floatVal)
+					filterOps = append(filterOps, "eq")
+				} else {
+					RespondError(w, http.StatusBadRequest, "validation_error",
+						fmt.Sprintf("param %q: expected number, got %q", f.Name, val))
+					return
+				}
+			default:
+				// string, bool, datetime — LIKE поиск
+				filterVals = append(filterVals, val)
+				filterOps = append(filterOps, "like")
+			}
 		}
 
-		value := r.URL.Query().Get(paramName)
-		if value == "" {
-			// Fallback — список всех записей (с row_filter)
+		// Если нет активных фильтров — fallback на список всех записей
+		if len(filterCols) == 0 {
 			tenantWhere, tenantArgs := tenantFilter(entityName, c.Auth, c.tenantID(r), 0, translate)
 			query, err := c.Builder.BuildList(entity, tenantWhere, tenantArgs)
 			if err != nil {
 				RespondError(w, http.StatusInternalServerError, "query_error", err.Error())
 				return
 			}
+
+			// Pagination
+			limit, offset := readPagination(r)
+			countSQL := countQuery(query.SQL)
+			total := runCountQuery(c.DB, countSQL, query.Args)
+			query.SQL = appendPagination(query.SQL, limit, offset)
+
 			rows, err := c.DB.QueryContext(r.Context(), query.SQL, query.Args...)
 			if err != nil {
 				RespondError(w, http.StatusInternalServerError, "db_error", err.Error())
@@ -45,20 +104,13 @@ func FindHandler(c *Context, entityName, searchField, queryParam string) http.Ha
 				RespondError(w, http.StatusInternalServerError, "mapping_error", err.Error())
 				return
 			}
-			// DEBUG LOG
-			fmt.Printf("[DATA-SERVICE] FindHandler result count: %d\n", len(results))
+			setPaginationHeaders(w, total, limit, offset)
 			RespondJSON(w, http.StatusOK, results)
 			return
 		}
 
-		// Validate search value length before building query
-		if err := ValidateSearchValue(value); err != nil {
-			RespondError(w, http.StatusBadRequest, "validation_error", err.Error())
-			return
-		}
-
-		// BuildFind с row_filter: формируем where clause из find + tenant
-		query, err := c.Builder.BuildFind(entity, searchField, value)
+		// BuildFilter с множественными условиями
+		query, err := c.Builder.BuildFilter(entity, filterCols, filterVals, filterOps)
 		if err != nil {
 			RespondError(w, http.StatusInternalServerError, "query_error", err.Error())
 			return
@@ -71,6 +123,12 @@ func FindHandler(c *Context, entityName, searchField, queryParam string) http.Ha
 			query.Args = append(query.Args, tenantArgs...)
 		}
 
+		// Pagination
+		limit, offset := readPagination(r)
+		countSQL := countQuery(query.SQL)
+		total := runCountQuery(c.DB, countSQL, query.Args)
+		query.SQL = appendPagination(query.SQL, limit, offset)
+
 		rows, err := c.DB.QueryContext(r.Context(), query.SQL, query.Args...)
 		if err != nil {
 			RespondError(w, http.StatusInternalServerError, "db_error", err.Error())
@@ -78,7 +136,18 @@ func FindHandler(c *Context, entityName, searchField, queryParam string) http.Ha
 		}
 		defer rows.Close() //nolint:errcheck
 
-		if !rows.Next() {
+		results, err := c.Builder.MapRows(rows, func(rows *sql.Rows) (map[string]any, error) {
+			return c.Builder.MapRow(rows, entity)
+		}, 10000)
+		if err != nil {
+			RespondError(w, http.StatusInternalServerError, "mapping_error", err.Error())
+			return
+		}
+
+		setPaginationHeaders(w, total, limit, offset)
+
+		// Если результат пустой — 404
+		if len(results) == 0 {
 			RespondJSON(w, http.StatusNotFound, map[string]string{
 				"error":   "not_found",
 				"message": "resource not found",
@@ -86,12 +155,7 @@ func FindHandler(c *Context, entityName, searchField, queryParam string) http.Ha
 			return
 		}
 
-		row, err := c.Builder.MapRow(rows, entity)
-		if err != nil {
-			RespondError(w, http.StatusInternalServerError, "mapping_error", err.Error())
-			return
-		}
-
-		RespondJSON(w, http.StatusOK, row)
+		// Всегда возвращаем массив для консистентности
+		RespondJSON(w, http.StatusOK, results)
 	}
 }
