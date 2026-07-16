@@ -716,9 +716,26 @@ func (s *Server) tenantConfigGetHandler(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) tenantConfigPutHandler(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	// Set X-Tenant-ID so data-service resolves the right tenant
-	r.Header.Set("X-Tenant-ID", id)
-	s.proxyToDataService(w, r, "/admin/config")
+	// Read body and decode to avoid json.Marshal(io.Reader) garbage
+	body, err := io.ReadAll(r.Body)
+	defer r.Body.Close()
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "read_error", err.Error())
+		return
+	}
+	var payload any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	result, status, err := s.proxyPostToDataService("/admin/config?tenant="+id, payload, id)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "upstream_error", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(result)
 }
 
 func (s *Server) tenantManifestHandler(w http.ResponseWriter, r *http.Request) {

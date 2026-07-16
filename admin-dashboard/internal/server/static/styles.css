@@ -1687,7 +1687,7 @@ code:not(.code-block code) {
 /* ── API Toast Container ── */
 .api-toast-container {
   position: fixed;
-  top: 12px;
+  bottom: 12px;
   right: 12px;
   z-index: 10000;
   display: flex;
@@ -1855,4 +1855,215 @@ code:not(.code-block code) {
   max-height: 300px;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.card-desc {
+  margin-top: -8px;
+  margin-bottom: 12px;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 4px;
+  gap: 2px;
+}
+
+.chip-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--danger);
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.chip input {
+  color: var(--text);
+  font-size: 16px;
+  padding: 4px 6px;
+}
+
+/* Configgen inputs: skip rules, prefixes, plurals */
+.configgen-table input {
+  font-size: 16px;
+  padding: 6px 8px;
+}
+
+/* Prefix preview: shows before/after entity names */
+.prefix-preview {
+  margin-top: 12px;
+}
+
+.prefix-preview-grid {
+  margin-top: 6px;
+  padding: 8px;
+  background: var(--bg);
+  border-radius: 4px;
+}
+
+.prefix-preview-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 13px;
+}
+
+.prefix-preview-before {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  min-width: 160px;
+}
+
+.prefix-preview-arrow {
+  color: var(--primary);
+}
+
+.prefix-preview-after {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Configgen tabs */
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+
+.tab {
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab-active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+
+.tab-content {
+  min-height: 100px;
+}
+
+.configgen-workflow {
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.configgen-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.configgen-step.final {
+  border-left: 3px solid var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, var(--bg));
+}
+
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.configgen-details {
+  margin-bottom: 12px;
+}
+
+.default-rules-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+  margin-top: 6px;
+  padding: 8px;
+  background: var(--bg);
+  border-radius: 4px;
+}
+
+.default-rule-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.default-rule-toggle {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.default-rule-row code {
+  min-width: 100px;
+}
+
+.config-summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 24px;
+}
+
+.cfg-stat {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.cfg-stat-full {
+  grid-column: 1 / -1;
+}
+
+.cfg-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cfg-val {
+  font-size: 13px;
+}
+
+.cfg-stat .badge {
+  margin-right: 4px;
 }
