@@ -211,7 +211,7 @@ func (PostgresAdapter) Introspect(ctx context.Context, database Conn) (*Schema, 
 		  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
 	`
 
-	type descRef struct{ schema, table, column, description string }
+	type descRef struct{ schema, table, column string }
 	descMap := make(map[string]map[string]string) // [schema.table][column]desc
 	{
 		dRows, err := database.QueryContext(ctx, descSQL)

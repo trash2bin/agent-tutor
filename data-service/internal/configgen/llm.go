@@ -128,10 +128,6 @@ func GenerateSchemaForLLM(schema *datasource.Schema, cfg *config.Config) *Schema
 	if len(displayPrefixes) == 0 {
 		displayPrefixes = DefaultDisplayPrefixes()
 	}
-	customPlurals := cfg.CustomPlurals
-	if customPlurals == nil {
-		customPlurals = make(map[string]string)
-	}
 	if schema == nil {
 		return &SchemaForLLM{Entities: []LLMEntity{}}
 	}

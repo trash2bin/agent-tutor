@@ -79,9 +79,7 @@ func TestSqliteAdapter_DefaultPragmas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect %q: %v", dbPath, err)
 	}
-	defer conn.Close()
-
-	// Создаём таблицы с FK
+	defer func() { _ = conn.Close() }()
 	_, err = conn.ExecContext(ctx, `CREATE TABLE parent (id INTEGER PRIMARY KEY)`)
 	if err != nil {
 		t.Fatalf("create parent: %v", err)
@@ -110,7 +108,7 @@ func TestSqliteAdapter_ConcurrentReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Создаём таблицу с данными
 	_, err = conn.ExecContext(ctx, `CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)`)
