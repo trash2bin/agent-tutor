@@ -48,7 +48,7 @@
   };
 
   if (!CONFIG.agent) {
-    console.error('[AgentTutor] Missing data-agent attribute');
+    console.error('[Helperium Widget] Missing data-agent attribute');
     return;
   }
 
@@ -73,13 +73,16 @@
     '  --accent: ' + cfg.accent + ';',
     '  --accent-strong: ' + cfg.accent + ';',
     '  --ink: #1e293b;',
-    '  --muted: #64748b;',
+    '  --ink-light: #475569;',
+    '  --muted: #94a3b8;',
     '  --line: #e2e8f0;',
     '  --panel: #ffffff;',
     '  --rose: #e11d48;',
     '  --blue: #2563eb;',
-    '  --shadow: 0 18px 50px rgba(23, 32, 38, 0.14);',
-    '  --radius: 8px;',
+    '  --shadow-panel: 0 20px 60px rgba(23, 32, 38, 0.18);',
+    '  --shadow-trigger: 0 4px 16px rgba(15, 118, 110, 0.35);',
+    '  --radius: 10px;',
+    '  --radius-lg: 14px;',
     '  --trigger-offset-bottom: ' + cfg.triggerOffsetBottom + ';',
     '  --panel-width: ' + cfg.width + ';',
     '  --panel-height: ' + cfg.height + ';',
@@ -98,6 +101,7 @@
     '  color: #1e293b;',
     '}',
     '',
+    /* ── Trigger Button ── */
     '.at-trigger {',
     '  position: fixed;',
     '  bottom: var(--trigger-offset-bottom);',
@@ -108,65 +112,107 @@
     '  background: var(--accent);',
     '  color: white;',
     '  cursor: pointer;',
-    '  box-shadow: var(--shadow);',
+    '  box-shadow: var(--shadow-trigger);',
     '  z-index: 2147483647;',
     '  font-size: 24px;',
     '  display: flex;',
     '  align-items: center;',
     '  justify-content: center;',
-    '  transition: opacity 0.2s, transform 0.2s;',
+    '  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s;',
     '  padding: 0;',
     '}',
-    '.at-trigger:hover { opacity: 0.9; transform: scale(1.05); }',
+    '.at-trigger::after {',
+    '  content: "";',
+    '  position: absolute;',
+    '  inset: -3px;',
+    '  border-radius: 50%;',
+    '  background: var(--accent);',
+    '  opacity: 0;',
+    '  animation: at-pulse-ring 2.5s ease-out infinite;',
+    '}',
+    '@keyframes at-pulse-ring {',
+    '  0% { transform: scale(1); opacity: 0.35; }',
+    '  70% { transform: scale(1.35); opacity: 0; }',
+    '  100% { transform: scale(1.35); opacity: 0; }',
+    '}',
+    '.at-trigger:hover { transform: scale(1.08) translateY(-1px); box-shadow: 0 6px 24px rgba(15, 118, 110, 0.45); }',
     '.at-trigger.at-right { right: var(--trigger-offset-bottom); }',
     '.at-trigger.at-left { left: var(--trigger-offset-bottom); }',
-    '.at-trigger svg { width: 28px; height: 28px; fill: currentColor; }',
+    '.at-trigger svg { width: 26px; height: 26px; position: relative; z-index: 1; }',
     '',
+    /* ── Chat Panel ── */
     '.at-panel {',
     '  position: fixed;',
     '  bottom: var(--trigger-offset-bottom);',
     '  width: var(--panel-width);',
     '  height: var(--panel-height);',
-    '  display: grid;',
-    '  grid-template-rows: auto 1fr auto;',
+    '  display: flex;',
+    '  flex-direction: column;',
     '  overflow: hidden;',
     '  background: var(--panel);',
     '  border: 1px solid var(--line);',
-    '  border-radius: var(--radius);',
-    '  box-shadow: var(--shadow);',
+    '  border-radius: var(--radius-lg);',
+    '  box-shadow: var(--shadow-panel);',
     '  z-index: 2147483646;',
-    '  transition: opacity 0.2s, transform 0.2s;',
+    '  transition: opacity 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);',
+    '  transform-origin: bottom var(--position, right);',
     '}',
-    '.at-panel.at-right { right: var(--trigger-offset-bottom); }',
-    '.at-panel.at-left { left: var(--trigger-offset-bottom); }',
+    '.at-panel.at-right { right: var(--trigger-offset-bottom); --position: right; }',
+    '.at-panel.at-left { left: var(--trigger-offset-bottom); --position: left; }',
     '.at-panel.at-hidden {',
     '  opacity: 0;',
-    '  transform: translateY(10px) scale(0.96);',
+    '  transform: translateY(12px) scale(0.94);',
     '  pointer-events: none;',
     '}',
     '',
+    /* ── Header ── */
     '.at-head {',
     '  display: flex;',
     '  justify-content: space-between;',
     '  gap: 12px;',
     '  align-items: center;',
     '  padding: 14px 14px 12px;',
-    '  border-bottom: 1px solid var(--line);',
     '  background: var(--header-bg);',
+    '  color: white;',
+    '  flex-shrink: 0;',
     '  ' + headDisplay,
     '}',
     '.at-head-info strong { display: block; font-size: 15px; font-weight: 600; }',
-    '.at-head-info span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }',
+    '.at-head-info span { display: block; margin-top: 2px; font-size: 12px; opacity: 0.75; }',
+    '.at-head-status {',
+    '  display: flex;',
+    '  align-items: center;',
+    '  gap: 5px;',
+    '  margin-top: 2px;',
+    '  font-size: 11px;',
+    '  opacity: 0.85;',
+    '}',
+    '.at-head-status .at-dot {',
+    '  width: 7px; height: 7px;',
+    '  border-radius: 50%;',
+    '  background: #22c55e;',
+    '  animation: at-dot-pulse 2s ease-in-out infinite;',
+    '}',
+    '@keyframes at-dot-pulse {',
+    '  0%, 100% { opacity: 1; transform: scale(1); }',
+    '  50% { opacity: 0.5; transform: scale(0.85); }',
+    '}',
     '.at-close {',
-    '  width: 32px; height: 32px;',
+    '  width: 30px; height: 30px;',
     '  border: 0; border-radius: 50%;',
-    '  background: var(--accent); color: white;',
-    '  cursor: pointer; font-size: 18px;',
+    '  background: rgba(255,255,255,0.18);',
+    '  color: white;',
+    '  cursor: pointer;',
     '  display: flex; align-items: center; justify-content: center;',
     '  flex-shrink: 0; padding: 0;',
+    '  transition: background 0.15s;',
     '}',
+    '.at-close:hover { background: rgba(255,255,255,0.3); }',
+    '.at-close svg { width: 16px; height: 16px; }',
     '',
+    /* ── Messages Area ── */
     '.at-messages {',
+    '  flex: 1;',
     '  min-height: 0;',
     '  overflow-y: auto;',
     '  overflow-x: hidden;',
@@ -175,38 +221,108 @@
     '  flex-direction: column;',
     '  gap: 2px;',
     '}',
+    '.at-messages::-webkit-scrollbar { width: 4px; }',
+    '.at-messages::-webkit-scrollbar-track { background: transparent; }',
+    '.at-messages::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }',
+    '.at-messages::-webkit-scrollbar-thumb:hover { background: var(--muted); }',
     '',
+    '.at-msg-row {',
+    '  display: flex;',
+    '  flex-direction: column;',
+    '  align-items: flex-start;',
+    '  margin-bottom: 4px;',
+    '  animation: at-msg-in 0.22s ease-out;',
+    '}',
+    '',
+    '.at-avatar {',
+    '  width: 28px; height: 28px;',
+    '  border-radius: 50%;',
+    '  background: linear-gradient(135deg, var(--accent), var(--accent-strong));',
+    '  display: flex;',
+    '  align-items: center;',
+    '  justify-content: center;',
+    '  color: white;',
+    '  font-size: 10px;',
+    '  font-weight: 700;',
+    '  margin-left: 12px;',
+    '  margin-top: -14px;',
+    '  position: relative;',
+    '  z-index: 1;',
+    '  border: 2px solid var(--panel);',
+    '}',
+    '',
+    /* ── Message Bubbles ── */
     '.at-msg {',
     '  min-width: 0;',
     '  max-width: 92%;',
     '  flex: 0 0 auto;',
-    '  padding: 10px 12px;',
-    '  border-radius: var(--radius);',
+    '  padding: 10px 13px;',
     '  font-size: 14px;',
     '  line-height: 1.45;',
     '  white-space: pre-wrap;',
     '  overflow-wrap: anywhere;',
+    '  animation: at-msg-in 0.22s ease-out;',
+    '}',
+    '@keyframes at-msg-in {',
+    '  from { opacity: 0; transform: translateY(6px); }',
+    '  to { opacity: 1; transform: translateY(0); }',
     '}',
     '.at-msg.at-user {',
     '  align-self: flex-end;',
     '  background: var(--accent);',
     '  color: white;',
+    '  border-radius: var(--radius) var(--radius) 4px var(--radius);',
+    '  box-shadow: 0 1px 3px rgba(0,0,0,0.08);',
     '}',
     '.at-msg.at-assistant {',
     '  align-self: flex-start;',
-    '  background: var(--bot-bubble-bg);',
+    '  background: linear-gradient(135deg, var(--bot-bubble-bg), #f4f8fa);',
     '  color: var(--bot-bubble-text);',
     '  white-space: normal;',
     '  margin-top: -3px;',
+    '  border-radius: var(--radius) var(--radius) var(--radius) 4px;',
+    '  box-shadow: 0 1px 2px rgba(0,0,0,0.04);',
     '}',
-    '.at-msg.at-assistant.at-thinking { position: relative; min-height: 12px; }',
-    '.at-msg.at-assistant.at-thinking::before {',
-    '  content: "Thinking and checking data......";',
-    '  display: inline-block;',
+    '.at-msg.at-assistant.at-thinking {',
+    '  padding: 16px 18px 12px;',
+    '  min-height: 36px;',
+    '  display: flex;',
+    '  align-items: center;',
+    '}',
+    '.at-msg.at-error { background: #fef2f2; color: var(--rose); border: 1px solid #fecaca; border-radius: var(--radius); }',
+    '',
+    /* ── Typing Dots ── */
+    '.at-thinking-dots {',
+    '  display: flex;',
+    '  align-items: center;',
+    '  gap: 5px;',
+    '}',
+    '.at-thinking-dots span {',
+    '  width: 8px; height: 8px;',
+    '  border-radius: 50%;',
+    '  background: var(--muted);',
+    '  animation: at-dot-bounce 1.4s ease-in-out infinite both;',
+    '}',
+    '.at-thinking-dots span:nth-child(1) { animation-delay: -0.32s; }',
+    '.at-thinking-dots span:nth-child(2) { animation-delay: -0.16s; }',
+    '.at-thinking-dots span:nth-child(3) { animation-delay: 0s; }',
+    '@keyframes at-dot-bounce {',
+    '  0%, 80%, 100% { transform: translateY(0) scale(0.8); opacity: 0.4; }',
+    '  40% { transform: translateY(-6px) scale(1); opacity: 0.8; }',
+    '}',
+    '',
+    /* ── Typing Cursor ── */
+    '.at-typing-cursor::after {',
+    '  content: "\u258C";',
+    '  display: inline;',
+    '  animation: at-cursor-blink 0.8s step-end infinite;',
     '  color: var(--muted);',
-    '  font-style: italic;',
+    '  font-size: 14px;',
+    '  margin-left: 1px;',
     '}',
-    '.at-msg.at-error { background: #fff1f3; color: var(--rose); }',
+    '@keyframes at-cursor-blink {',
+    '  50% { opacity: 0; }',
+    '}',
     '.at-msg.at-assistant p { margin: 0 0 5px; }',
     '.at-msg.at-assistant p:last-child, .at-msg.at-assistant ul:last-child, .at-msg.at-assistant ol:last-child { margin-bottom: 0; }',
     '.at-msg.at-assistant ul, .at-msg.at-assistant ol { margin: 0 0 10px; padding-left: 20px; }',
@@ -216,30 +332,34 @@
     '  padding: 1px 5px;',
     '  border-radius: 5px;',
     '  background: rgba(15, 118, 110, 0.1);',
-    '  color: var(--accent);',
+    '  color: var(--accent-strong);',
     '  font-size: 0.92em;',
     '}',
     '',
+    /* ── Tool Strip ── */
     '.at-tool-strip {',
     '  align-self: flex-start;',
     '  max-width: 92%;',
     '  display: flex;',
     '  flex-wrap: wrap;',
-    '  gap: 6px;',
-    '  margin-bottom: 2px;',
+    '  gap: 5px;',
+    '  margin-bottom: 1px;',
+    '  animation: at-msg-in 0.22s ease-out;',
     '}',
     '.at-tool-strip span {',
     '  display: inline-flex;',
     '  align-items: center;',
     '  min-height: 22px;',
-    '  padding: 3px 8px;',
+    '  padding: 2px 9px;',
     '  border-radius: 999px;',
-    '  background: rgba(37, 99, 235, 0.1);',
+    '  background: linear-gradient(135deg, #eff6ff, #f0f9ff);',
     '  color: var(--blue);',
     '  font-size: 11px;',
     '  font-weight: 700;',
+    '  letter-spacing: 0.01em;',
     '}',
     '',
+    /* ── Markdown Table ── */
     '.at-table-wrap {',
     '  max-width: 100%;',
     '  overflow-x: auto;',
@@ -258,88 +378,106 @@
     '.at-table-wrap th { background: #f9fbfb; color: var(--muted); font-weight: 600; text-align: left; }',
     '.at-table-wrap tr:last-child td { border-bottom: 0; }',
     '',
+    /* ── Form ── */
     '.at-form {',
-    '  display: grid;',
-    '  grid-template-columns: 1fr;',
-    '  gap: 8px;',
-    '  padding: 12px;',
+    '  padding: 6px 10px 10px;',
     '  border-top: 1px solid var(--line);',
+    '  background: #fafbfc;',
+    '  flex-shrink: 0;',
+    '}',
+    '.at-form-row {',
+    '  display: flex;',
+    '  gap: 6px;',
+    '  align-items: flex-end;',
     '}',
     '.at-form textarea {',
+    '  flex: 1;',
     '  resize: none;',
-    '  min-height: 44px;',
+    '  min-height: 40px;',
     '  max-height: 120px;',
     '  border: 1px solid var(--line);',
-    '  border-radius: var(--radius);',
-    '  padding: 10px 12px;',
+    '  border-radius: 12px;',
+    '  padding: 9px 12px;',
     '  font-family: inherit;',
     '  font-size: 14px;',
+    '  line-height: 1.4;',
     '  outline: none;',
     '  color: var(--ink);',
     '  background: var(--panel);',
+    '  transition: border-color 0.15s, box-shadow 0.15s;',
     '}',
-    '.at-form textarea:focus { border-color: var(--accent); }',
-    '.at-form button {',
-    '  border: 0;',
-    '  border-radius: var(--radius);',
-    '  background: var(--accent);',
-    '  color: white;',
-    '  cursor: pointer;',
-    '  font-size: 20px;',
-    '  display: flex;',
-    '  align-items: center;',
-    '  justify-content: center;',
-    '  padding: 0;',
+    '.at-form textarea:focus {',
+    '  border-color: var(--accent);',
+    '  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.1);',
     '}',
-    '.at-form button:hover { opacity: 0.9; }',
-    '.at-form button:disabled { opacity: 0.4; cursor: not-allowed; }',
+    '.at-form textarea::placeholder { color: var(--muted); }',
     '',
+    /* ── Mic Button ── */
     '.at-mic-btn {',
     '  width: 36px; height: 36px;',
     '  border: 0;',
     '  border-radius: 50%;',
-    '  background: transparent;',
-    '  color: var(--muted);',
+    '  background: #f1f5f9;',
+    '  color: var(--ink-light);',
     '  cursor: pointer;',
-    '  font-size: 18px;',
     '  display: flex;',
     '  align-items: center;',
     '  justify-content: center;',
     '  padding: 0;',
     '  flex-shrink: 0;',
-    '  transition: background 0.2s, color 0.2s;',
+    '  transition: background 0.15s, color 0.15s, transform 0.15s, box-shadow 0.15s;',
     '}',
-    '.at-mic-btn:hover { background: #f1f5f9; }',
+    '.at-mic-btn:hover { background: #e2e8f0; color: var(--ink); transform: scale(1.08); }',
     '.at-mic-btn.at-mic-recording {',
-    '  background: var(--rose, #e11d48);',
+    '  background: var(--rose);',
     '  color: white;',
-    '  animation: at-mic-pulse 1s infinite;',
+    '  transform: scale(1.1);',
+    '  animation: at-mic-pulse 1.2s infinite;',
     '}',
     '.at-mic-btn.at-mic-disabled {',
-    '  opacity: 0.3;',
+    '  opacity: 0.25;',
     '  cursor: not-allowed;',
+    '  transform: none;',
     '}',
     '@keyframes at-mic-pulse {',
-    '  0% { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.4); }',
+    '  0% { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.35); }',
     '  70% { box-shadow: 0 0 0 8px rgba(225, 29, 72, 0); }',
     '  100% { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0); }',
     '}',
-    '.at-mic-timer {',
-    '  position: absolute;',
-    '  bottom: 56px;',
-    '  left: 50%;',
-    '  transform: translateX(-50%);',
-    '  background: var(--rose, #e11d48);',
+    '',
+    /* ── Send Button ── */
+    '.at-send-btn {',
+    '  width: 36px; height: 36px;',
+    '  border: 0;',
+    '  border-radius: 50%;',
+    '  background: var(--accent);',
     '  color: white;',
+    '  cursor: pointer;',
+    '  display: flex;',
+    '  align-items: center;',
+    '  justify-content: center;',
+    '  padding: 0;',
+    '  flex-shrink: 0;',
+    '  transition: background 0.15s, transform 0.15s, opacity 0.2s;',
+    '}',
+    '.at-send-btn:hover { transform: scale(1.08); }',
+    '.at-send-btn:active { transform: scale(0.92); }',
+    '.at-send-btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }',
+    '.at-send-btn svg { width: 18px; height: 18px; }',
+    '',
+    /* ── Mic Timer ── */
+    '.at-mic-timer {',
+    '  text-align: center;',
+    '  color: var(--rose);',
     '  font-size: 12px;',
     '  font-weight: 700;',
-    '  padding: 3px 8px;',
-    '  border-radius: 999px;',
+    '  padding: 4px 0 2px;',
+    '  letter-spacing: 0.02em;',
     '  display: none;',
-    '  z-index: 10;',
     '}',
-    '.at-mic-timer.at-mic-timer-visible { display: block; }',
+    '.at-mic-timer-visible { display: block; }',
     '',
+    /* ── Retry ── */
     '.at-msg.at-retry-countdown {',
     '  align-self: center;',
     '  background: transparent;',
@@ -353,16 +491,18 @@
     '  margin-top: 8px;',
     '  padding: 6px 16px;',
     '  border: 1px solid var(--accent);',
-    '  border-radius: var(--radius);',
+    '  border-radius: 8px;',
     '  background: var(--panel);',
     '  color: var(--accent);',
     '  cursor: pointer;',
     '  font-size: 13px;',
     '  font-family: inherit;',
     '  outline: none;',
+    '  transition: all 0.15s;',
     '}',
     '.at-retry-btn:hover { background: var(--accent); color: white; }',
     '',
+    /* ── Responsive ── */
     '@media (max-width: 480px) {',
     '  .at-panel {',
     '    width: 100vw; height: 100vh;',
@@ -372,6 +512,7 @@
     '  .at-trigger { bottom: 12px; }',
     '  .at-trigger.at-right { right: 12px; }',
     '  .at-trigger.at-left { left: 12px; }',
+    '  .at-head { padding: 12px 12px 10px; }',
     '}'
   ].join('\n');
   }
@@ -499,7 +640,6 @@
   function renderTable(lines) {
     var dataRows = [];
     for (var j = 0; j < lines.length; j++) {
-      // Skip separator row
       if (/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(lines[j])) continue;
       var cells = lines[j].trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(function (c) { return c.trim(); });
       dataRows.push(cells);
@@ -522,6 +662,17 @@
       .replace(/`([^`]+)`/g, '<code>$1</code>');
   }
 
+  /* ─── SVG Icons ─── */
+
+  var ICONS = {
+    chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+    mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/></svg>',
+    micOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
+    thinking: '<div class="at-thinking-dots"><span></span><span></span><span></span></div>'
+  };
+
   /* ─── DOM Builder ─── */
 
   function buildWidget(host) {
@@ -531,7 +682,7 @@
     // ── Trigger Button ──
     var trigger = document.createElement('button');
     trigger.className = 'at-trigger ' + posClass;
-    trigger.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/><path d="M7 9h10v2H7zm0-3h10v2H7z"/></svg>';
+    trigger.innerHTML = ICONS.chat;
     host.appendChild(trigger);
 
     // ── Panel ──
@@ -542,9 +693,14 @@
     var head = document.createElement('div');
     head.className = 'at-head';
     head.innerHTML = '<div class="at-head-info"><strong>' + escapeHtml(CONFIG.title) + '</strong><span>' + escapeHtml(CONFIG.agent) + '</span></div>';
+    // Online status indicator
+    var statusEl = document.createElement('div');
+    statusEl.className = 'at-head-status';
+    statusEl.innerHTML = '<span class="at-dot"></span> ' + (CONFIG.lang === 'ru' ? 'Online' : 'Online');
+    head.querySelector('.at-head-info').appendChild(statusEl);
     var closeBtn = document.createElement('button');
     closeBtn.className = 'at-close';
-    closeBtn.textContent = '\u2212'; // minus sign
+    closeBtn.innerHTML = ICONS.close;
     head.appendChild(closeBtn);
     panel.appendChild(head);
 
@@ -557,36 +713,36 @@
     var form = document.createElement('form');
     form.className = 'at-form';
 
-    // Mic timer (positioned above form, absolute)
-    var micTimer = document.createElement('div');
-    micTimer.className = 'at-mic-timer';
-    form.appendChild(micTimer);
-
-    var formRow = document.createElement('div');
-    formRow.style.cssText = 'display:flex;gap:6px;align-items:center;';
-
     var textarea = document.createElement('textarea');
-    textarea.rows = 2;
+    textarea.rows = 1;
     textarea.placeholder = CONFIG.placeholder;
-    formRow.appendChild(textarea);
 
     var micBtn = document.createElement('button');
     micBtn.type = 'button';
     micBtn.className = 'at-mic-btn';
+    micBtn.innerHTML = ICONS.mic;
     micBtn.title = CONFIG.lang === 'ru' ? 'Голосовое сообщение' : 'Voice message';
-    // TODO: Бля чо это нахуй за пиздец это надо вычистить это ужасно
-    micBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6.91 4c-.49 0-.9.36-.98.85C16.52 12.2 14.47 14 12 14s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.09-.6-.39-1.14-1-1.14z"/></svg>';
-    micBtn.style.display = CONFIG.voiceInput && navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? '' : 'none';
-    formRow.appendChild(micBtn);
+    micBtn.style.display = CONFIG.voiceInput && navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? 'flex' : 'none';
 
     var sendBtn = document.createElement('button');
     sendBtn.type = 'submit';
-    sendBtn.textContent = '\u2197'; // ↗
+    sendBtn.className = 'at-send-btn';
+    sendBtn.innerHTML = ICONS.send;
+
+    // Build row: [textarea][mic][send]
+    var formRow = document.createElement('div');
+    formRow.className = 'at-form-row';
+    formRow.appendChild(textarea);
+    formRow.appendChild(micBtn);
     formRow.appendChild(sendBtn);
-
     form.appendChild(formRow);
-    panel.appendChild(form);
 
+    // Mic timer (above form row)
+    var micTimer = document.createElement('div');
+    micTimer.className = 'at-mic-timer';
+    form.insertBefore(micTimer, formRow);
+
+    panel.appendChild(form);
     host.appendChild(panel);
 
     return { trigger: trigger, panel: panel, messages: messages, form: form, textarea: textarea, closeBtn: closeBtn, sendBtn: sendBtn, head: head, micBtn: micBtn, micTimer: micTimer };
@@ -614,17 +770,20 @@
       state.messages = [];
       sessionId = getSessionId();
       state.sessionId = sessionId;
-      // Update header to show new agent name (only .at-head-info, keep closeBtn)
       var infoEl = headEl.querySelector('.at-head-info');
       if (infoEl) {
         infoEl.innerHTML = '<strong>' + escapeHtml(CONFIG.title) + '</strong><span>' + escapeHtml(CONFIG.agent) + '</span>';
       }
-      // Clear messages and reload history
       messagesEl.innerHTML = '';
       restoreHistory();
     };
 
-    // Sync with already-selected agent on page load (too early for app.js sync)
+    // Helper to get first letter of agent name for avatar
+    function getAgentInitial() {
+      return CONFIG.title ? CONFIG.title.charAt(0).toUpperCase() : 'A';
+    }
+
+    // Sync with already-selected agent on page load
     try {
       var storedAgent = window.localStorage.getItem('agentTutorAgentId');
       if (storedAgent && CONFIG.agent !== storedAgent) {
@@ -635,7 +794,6 @@
     // ── Session storage helpers ──
     function readStored() {
       var stored = loadStoredMessages();
-      // Filter for this session only (compat with potential multi-agent)
       return stored.filter(function (m) {
         return m.sessionId === sessionId;
       }).map(function (m) {
@@ -652,7 +810,6 @@
         tools: tools || [],
         ts: Date.now()
       });
-      // Keep max 100 messages per session
       var filtered = stored.filter(function (m) { return m.sessionId === sessionId; });
       if (filtered.length > 100) {
         var extra = filtered.length - 100;
@@ -671,20 +828,45 @@
     // ── Message rendering ──
     function addMessage(kind, text, opts) {
       opts = opts || {};
-      var node = document.createElement('div');
-      node.className = 'at-msg ' + (kind === 'user' ? 'at-user' : 'at-assistant');
 
       if (kind === 'assistant') {
-        node.dataset.raw = text || '';
-        node.innerHTML = renderMarkdown(text || '');
-      } else {
-        node.textContent = text || '';
-      }
+        // Wrap in a row: [avatar] [bubble]
+        var row = document.createElement('div');
+        row.className = 'at-msg-row';
 
-      if (opts.before) {
-        messagesEl.insertBefore(node, opts.before);
+        var avatar = document.createElement('div');
+        avatar.className = 'at-avatar';
+        avatar.textContent = 'AI';
+
+        var node = document.createElement('div');
+        node.className = 'at-msg at-assistant';
+
+        if (opts.thinking) {
+          node.dataset.raw = '';
+          node.innerHTML = ICONS.thinking;
+        } else {
+          node.dataset.raw = text || '';
+          node.innerHTML = renderMarkdown(text || '');
+        }
+
+        row.appendChild(node);
+        row.appendChild(avatar);
+
+        if (opts.before) {
+          messagesEl.insertBefore(row, opts.before);
+        } else {
+          messagesEl.appendChild(row);
+        }
       } else {
-        messagesEl.appendChild(node);
+        var node = document.createElement('div');
+        node.className = 'at-msg at-user';
+        node.textContent = text || '';
+
+        if (opts.before) {
+          messagesEl.insertBefore(node, opts.before);
+        } else {
+          messagesEl.appendChild(node);
+        }
       }
 
       if (opts.persist) {
@@ -701,7 +883,6 @@
     function restoreHistory() {
       var stored = readStored();
       if (!stored.length) {
-        // Show greeting
         addMessage('assistant', CONFIG.greeting, { persist: false, scroll: false });
         return;
       }
@@ -728,11 +909,21 @@
             messagesEl.appendChild(makeToolStrip(mergedTools));
           }
 
+          var row = document.createElement('div');
+          row.className = 'at-msg-row';
+
+          var avatar = document.createElement('div');
+          avatar.className = 'at-avatar';
+          avatar.textContent = 'AI';
+
           var node = document.createElement('div');
           node.className = 'at-msg at-assistant';
           node.dataset.raw = text;
           node.innerHTML = renderMarkdown(text);
-          messagesEl.appendChild(node);
+
+          row.appendChild(node);
+          row.appendChild(avatar);
+          messagesEl.appendChild(row);
         }
       });
 
@@ -762,16 +953,64 @@
 
     function getToolIcon(displayText) {
       var lower = displayText.toLowerCase();
-      if (lower.indexOf('поиск') !== -1 || lower.indexOf('найти') !== -1) return '\uD83D\uDD0D';
-      if (lower.indexOf('чтение') !== -1 || lower.indexOf('получение') !== -1 || lower.indexOf('данных') !== -1) return '\uD83D\uDCCB';
-      if (lower.indexOf('запрос') !== -1) return '\uD83D\uDCCA';
+      if (lower.indexOf('поиск') !== -1 || lower.indexOf('найти') !== -1 || lower.indexOf('find') !== -1 || lower.indexOf('search') !== -1) return '\uD83D\uDD0D';
+      if (lower.indexOf('чтение') !== -1 || lower.indexOf('get') !== -1 || lower.indexOf('получени') !== -1) return '\uD83D\uDCCB';
+      if (lower.indexOf('запрос') !== -1 || lower.indexOf('query') !== -1) return '\uD83D\uDCCA';
+      if (lower.indexOf('list') !== -1 || lower.indexOf('список') !== -1) return '\uD83D\uDCCB';
       return '\u26A1';
     }
+
+    var TYPEWRITER_INTERVAL = 20;
+    var TYPEWRITER_BURST = 3;
 
     function appendToken(target, text) {
       var raw = target.dataset.raw || '';
       target.dataset.raw = raw + text;
-      target.innerHTML = renderMarkdown(raw + text);
+      // Typewriter: accumulate and reveal gradually
+      if (!target.dataset.typewriterRunning) {
+        target.dataset.typewriterRunning = '1';
+        target.dataset.typewriterBuffer = raw + text;
+        target.dataset.typewriterDisplayed = raw;
+        revealTypewriter(target);
+      } else {
+        target.dataset.typewriterBuffer = (target.dataset.typewriterBuffer || '') + text;
+      }
+    }
+
+    function revealTypewriter(target) {
+      var buffer = target.dataset.typewriterBuffer || '';
+      var displayed = target.dataset.typewriterDisplayed || '';
+
+      if (displayed.length >= buffer.length) {
+        target.dataset.typewriterRunning = '';
+        target.innerHTML = renderMarkdown(buffer);
+        scrollToBottom(messagesEl);
+        return;
+      }
+
+      var charsToReveal = Math.min(TYPEWRITER_BURST, buffer.length - displayed.length);
+      displayed = buffer.slice(0, displayed.length + charsToReveal);
+      target.dataset.typewriterDisplayed = displayed;
+
+      var rendered = renderMarkdown(displayed);
+      if (displayed.length < buffer.length) {
+        target.classList.add('at-typing-cursor');
+        target.innerHTML = rendered;
+      } else {
+        target.classList.remove('at-typing-cursor');
+        target.innerHTML = rendered;
+        target.dataset.typewriterRunning = '';
+        scrollToBottom(messagesEl);
+        return;
+      }
+
+      if (_isScrolledNearBottom(messagesEl)) {
+        scrollToBottom(messagesEl);
+      }
+
+      setTimeout(function () {
+        revealTypewriter(target);
+      }, TYPEWRITER_INTERVAL);
     }
 
     function setFinalText(target, text) {
@@ -785,10 +1024,9 @@
     function scheduleRetry(message, delayMs) {
       var remaining = Math.ceil(delayMs / 1000);
 
-      // Show countdown message
       var countdownMsg = document.createElement('div');
       countdownMsg.className = 'at-msg at-retry-countdown';
-      countdownMsg.textContent = '\u23F3 Retry in ' + remaining + 's...';
+      countdownMsg.textContent = '\u23F3 ' + (CONFIG.lang === 'ru' ? 'Повтор через' : 'Retry in') + ' ' + remaining + 's...';
       messagesEl.appendChild(countdownMsg);
       scrollToBottom(messagesEl);
 
@@ -799,18 +1037,31 @@
           countdownMsg.remove();
           retryChat(message);
         } else {
-          countdownMsg.textContent = '\u23F3 Retry in ' + remaining + 's...';
+          countdownMsg.textContent = '\u23F3 ' + (CONFIG.lang === 'ru' ? 'Повтор через' : 'Retry in') + ' ' + remaining + 's...';
         }
       }, 1000);
     }
 
-    function retryChat(message) {
-      // Use the same function that streamChat would create internally
-      var answerNode = addMessage('assistant', '', { persist: false, scroll: false });
-      streamChat(message, answerNode);
+    function findMsgNode(n) {
+      // targetNode might be inside .at-msg-row — find the actual .at-msg bubble
+      if (n.classList.contains('at-msg-row')) return n.querySelector('.at-msg');
+      if (n.classList.contains('at-msg')) return n;
+      return n;
     }
 
-    // ── SSE Streaming (shared parser — used by both text and voice chat) ──
+    function removeMsgRow(targetNode) {
+      // Remove the whole row (.at-msg-row) if target is inside one
+      var row = targetNode.closest('.at-msg-row');
+      if (row) { row.remove(); return; }
+      targetNode.remove();
+    }
+
+    function retryChat(message) {
+      var answerNode = addMessage('assistant', '', { thinking: true, persist: false, scroll: false });
+      streamChat(message, findMsgNode(answerNode));
+    }
+
+    // ── SSE Streaming ──
 
     function _pumpSSE(response, targetNode) {
       var reader = response.body.getReader();
@@ -886,9 +1137,6 @@
 
     function streamChat(message, targetNode) {
       targetNode.classList.add('at-thinking');
-      targetNode.dataset.tools = '[]';
-      targetNode.dataset.displayNames = '{}';
-      targetNode.dataset.saved = 'false';
 
       var url = CONFIG.apiBase + '/api/chat/' + encodeURIComponent(CONFIG.agent);
 
@@ -899,7 +1147,7 @@
       }).then(function (response) {
         if (response.status === 429) {
           targetNode.classList.remove('at-thinking');
-          targetNode.remove();
+          removeMsgRow(targetNode);
 
           var retryAfter = response.headers.get('Retry-After');
           var delay = 5;
@@ -913,15 +1161,14 @@
 
           if (attempts >= MAX_RETRIES) {
             var failMsg = document.createElement('div');
-            failMsg.className = 'at-msg at-assistant';
-            failMsg.textContent = '\u26A0\uFE0F Server overloaded. Try again later.';
-            messagesEl.appendChild(failMsg);
-            scrollToBottom(messagesEl);
-
+            failMsg.className = 'at-msg at-assistant at-error';
+            failMsg.innerHTML = '\u26A0\uFE0F Server overloaded.';
             var retryBtn = document.createElement('button');
             retryBtn.className = 'at-retry-btn';
             retryBtn.textContent = 'Retry';
             failMsg.appendChild(retryBtn);
+            messagesEl.appendChild(failMsg);
+            scrollToBottom(messagesEl);
             retryBtn.addEventListener('click', function() {
               delete retryAttempts[message];
               failMsg.remove();
@@ -932,7 +1179,8 @@
 
           var rateMsg = document.createElement('div');
           rateMsg.className = 'at-msg at-assistant';
-          rateMsg.textContent = '\u26A0\uFE0F Server temporarily overloaded. Retry in ' + delay + 's.';
+          rateMsg.textContent = '\u26A0\uFE0F ' + (CONFIG.lang === 'ru'
+            ? 'Сервер перегружен. Повтор через' : 'Server overloaded. Retry in') + ' ' + delay + 's.';
           messagesEl.appendChild(rateMsg);
           scrollToBottom(messagesEl);
 
@@ -952,15 +1200,15 @@
       }).catch(function (err) {
         targetNode.classList.remove('at-thinking');
         targetNode.classList.add('at-error');
-        // TODO: РЕФАКТОРИНГ ЭТООГО
-        targetNode.innerHTML = '\u26A0\uFE0F No connection to server. Check your internet.<br><button class="at-retry-btn" data-message="' + escapeHtml(message) + '">Retry</button>';
+        targetNode.innerHTML = '\u26A0\uFE0F ' + (CONFIG.lang === 'ru'
+          ? 'Нет соединения с сервером.' : 'No connection to server.')
+          + '<br><button class="at-retry-btn">' + (CONFIG.lang === 'ru' ? 'Повторить' : 'Retry') + '</button>';
         var btn = targetNode.querySelector('.at-retry-btn');
         if (btn) {
           btn.addEventListener('click', function() {
-            var msg = btn.getAttribute('data-message');
             targetNode.classList.remove('at-error');
-            targetNode.innerHTML = '';
-            streamChat(msg, targetNode);
+            targetNode.innerHTML = ICONS.thinking;
+            streamChat(message, targetNode);
           });
         }
       });
@@ -973,7 +1221,11 @@
         if (unique.indexOf(n) === -1) unique.push(n);
       });
       if (!unique.length) return;
-      var prev = targetNode.previousElementSibling;
+
+      // Get the row element that contains targetNode (or targetNode itself for non-row)
+      var ref = targetNode.closest ? (targetNode.closest('.at-msg-row') || targetNode) : targetNode;
+      var prev = ref.previousElementSibling;
+
       if (prev && prev.className === 'at-tool-strip') {
         prev.innerHTML = unique.map(function (name) {
           var display = displayNames[name] || name;
@@ -983,12 +1235,11 @@
         return;
       }
       var strip = makeToolStrip(unique, displayNames);
-      if (strip) messagesEl.insertBefore(strip, targetNode);
+      if (strip) messagesEl.insertBefore(strip, ref);
     }
 
     // ── Event Bindings ──
 
-    // Toggle panel
     ui.trigger.addEventListener('click', function () {
       state.open = true;
       ui.panel.classList.remove('at-hidden');
@@ -1008,12 +1259,20 @@
       var text = ui.textarea.value.trim();
       if (!text) return;
       ui.textarea.value = '';
+      // Auto-reset height
+      ui.textarea.style.height = 'auto';
       addMessage('user', text, { persist: true });
-      var answerNode = addMessage('assistant', '', { persist: false, scroll: false });
+      var answerNode = addMessage('assistant', '', { thinking: true, persist: false, scroll: false });
       streamChat(text, answerNode);
     }
 
-    // Textarea: Enter to send, Shift+Enter for newline
+    // Textarea auto-resize
+    ui.textarea.addEventListener('input', function () {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+    });
+
+    // Enter to send, Shift+Enter for newline
     ui.textarea.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -1021,7 +1280,6 @@
       }
     });
 
-    // Submit (mouse click or form submit)
     ui.form.addEventListener('submit', function (e) {
       e.preventDefault();
       handleSubmit();
@@ -1077,15 +1335,15 @@
             var blob = new Blob(micChunks, { type: mimeType });
             if (blob.size === 0) return;
 
-            // Show user message with mic icon + duration
             var durStr = ui.micTimer.textContent || (micDuration + 's');
-            addMessage('user', '🎤 ' + durStr, { persist: true });
+            addMessage('user', '\uD83C\uDFA4 ' + durStr, { persist: true });
 
-            var answerNode = addMessage('assistant', '', { persist: false, scroll: false });
+            var answerNode = addMessage('assistant', '', { thinking: true, persist: false, scroll: false });
             streamVoiceChat(blob, answerNode);
           };
 
           mediaRecorder.start();
+          ui.micBtn.innerHTML = ICONS.micOff;
           ui.micBtn.classList.add('at-mic-recording');
           ui.micTimer.classList.add('at-mic-timer-visible');
           micStartTime = Date.now();
@@ -1093,7 +1351,6 @@
           updateMicTimer();
           micTimerInterval = setInterval(updateMicTimer, 1000);
 
-          // Auto-stop at max duration
           if (MAX_RECORDING_SEC > 0) {
             setTimeout(function () {
               if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -1105,8 +1362,8 @@
         .catch(function (err) {
           if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
             addMessage('assistant', (CONFIG.lang === 'ru'
-              ? '❌ Разрешите доступ к микрофону в настройках браузера'
-              : '❌ Please allow microphone access in browser settings'),
+              ? '\u274C Разрешите доступ к микрофону в настройках браузера'
+              : '\u274C Please allow microphone access in browser settings'),
               { persist: false });
           } else {
             ui.micBtn.classList.add('at-mic-disabled');
@@ -1133,9 +1390,6 @@
 
     function streamVoiceChat(blob, targetNode) {
       targetNode.classList.add('at-thinking');
-      targetNode.dataset.tools = '[]';
-      targetNode.dataset.displayNames = '{}';
-      targetNode.dataset.saved = 'false';
 
       var url = CONFIG.apiBase + '/api/chat/voice';
       var formData = new FormData();
@@ -1154,8 +1408,8 @@
           var msg = document.createElement('div');
           msg.className = 'at-msg at-assistant';
           msg.textContent = CONFIG.lang === 'ru'
-            ? '⚠️ Сервер перегружен. Попробуйте позже.'
-            : '⚠️ Server overloaded. Try again later.';
+            ? '\u26A0\uFE0F Сервер перегружен. Попробуйте позже.'
+            : '\u26A0\uFE0F Server overloaded. Try again later.';
           messagesEl.appendChild(msg);
           scrollToBottom(messagesEl);
           return;
@@ -1172,7 +1426,8 @@
       }).catch(function () {
         targetNode.classList.remove('at-thinking');
         targetNode.classList.add('at-error');
-        targetNode.innerHTML = '\u26A0\uFE0F Connection error.';
+        targetNode.innerHTML = '\u26A0\uFE0F ' + (CONFIG.lang === 'ru'
+          ? 'Ошибка соединения.' : 'Connection error.');
       });
     }
 
@@ -1187,12 +1442,8 @@
         var blob = new Blob([byteArray], { type: 'audio/mpeg' });
         var url = URL.createObjectURL(blob);
         var audio = new Audio(url);
-        audio.play().catch(function () {
-          // Autoplay blocked — user needs to interact first
-        });
-      } catch (_e) {
-        // Invalid base64
-      }
+        audio.play().catch(function () {});
+      } catch (_e) {}
     }
 
     // ── Init ──
@@ -1205,19 +1456,15 @@
   }
 
   function buildUI() {
-    // Create host element
     var host = document.createElement('div');
     host.id = 'helperium-widget-' + CONFIG.agent.replace(/[^a-zA-Z0-9_-]/g, '');
 
-    // Shadow DOM
     var shadow = host.attachShadow({ mode: 'open' });
 
-    // Inject styles
     var style = document.createElement('style');
     style.textContent = WIDGET_CSS;
     shadow.appendChild(style);
 
-    // Create widget UI inside shadow
     var root = document.createElement('div');
     root.className = 'at-root';
     shadow.appendChild(root);

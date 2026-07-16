@@ -42,6 +42,8 @@
 | `data-bot-bubble-color` | `"#eef3f4"` | Цвет фона пузырька ассистента |
 | `data-bot-bubble-text` | `"var(--ink)"` | Цвет текста пузырька ассистента |
 | `data-lang` | `"en"` | Язык сообщений об ошибках: `"ru"` или `"en"`. Если не указан — английский. |
+| `data-voice-input` | `"true"` | Голосовой ввод: `"true"` или `"false"` |
+| `data-voice-output` | `"true"` | Голосовой вывод (TTS): `"true"` или `"false"` |
 
 ### Сообщения об ошибках
 
