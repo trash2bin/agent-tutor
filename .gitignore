@@ -43,6 +43,10 @@ context.md
 # Graph / knowledge
 graphify-out/
 
+# Go mutation reports
+data-service/report.json
+mcp-gateway/report.json
+
 # Regened seed
 specs/fixtures/seed.json
 specs/test_tenants/

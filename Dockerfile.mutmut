@@ -1,0 +1,42 @@
+# Mutation testing (mutmut) — Linux (fork-safe)
+# Build:  bash scripts/build_mutmut_docker.sh
+# Run:    docker run --rm helperium-mutmut
+FROM python:3.12-slim
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+RUN apt-get update && apt-get install -y rsync && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ── 1. ALL deps (incl rag stub) ───────────────────────────
+# uv.lock intentionally omitted — rag stub has different hash
+COPY pyproject.toml ./
+COPY helperium-sdk helperium-sdk/
+COPY api-service api-service/
+COPY agent-db agent-db/
+COPY rag rag/
+COPY api-service/embed embed/
+COPY demo demo/
+COPY specs specs/
+
+# No uv.lock — rag uses lightweight stub, avoid torch/scipy
+RUN uv sync
+
+# ── 2. Delete .pth so imports come from PYTHONPATH/src/ ───
+RUN find /app/.venv/lib/python*/site-packages -name '_editable_impl_*.pth' -delete
+
+# ── 3. Flat src/ with all code + tests ────────────────────
+RUN mkdir -p /app/src && \
+    cp -r api-service/src/api_service /app/src/api_service && \
+    cp -r helperium-sdk/src/helperium_sdk /app/src/helperium_sdk && \
+    cp -r agent-db/agent_db /app/src/agent_db && \
+    cp -r embed /app/src/embed && \
+    rm -rf api-service helperium-sdk agent-db rag demo && \
+    uv pip install mutmut==3.6.0 && \
+    echo "PY files: $(find /app/src -name '*.py' | wc -l), Tests: $(find /app/src -name 'test_*.py' | wc -l)"
+
+ENV PYTHONPATH=/app/src
+
+COPY run_mutmut_docker.sh /app/run_mutmut.sh
+RUN chmod +x /app/run_mutmut.sh
+CMD ["/app/run_mutmut.sh"]

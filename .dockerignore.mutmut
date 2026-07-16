@@ -1,0 +1,24 @@
+# .dockerignore.mutmut — used by Dockerfile.mutmut
+# Same as .dockerignore but WITHOUT the **/tests/ exclusion
+.venv/
+.git/
+__pycache__/
+*.pyc
+.data/
+generated_materials/
+backlog/
+*.db
+*.sqlite*
+.env*
+!.env.example
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+conftest.py
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

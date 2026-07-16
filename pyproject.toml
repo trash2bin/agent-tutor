@@ -62,5 +62,34 @@ markers = [
 
 
 
+
+[tool.mutmut]
+source_paths = [
+    "src/api_service",
+]
+also_copy = [
+    "src/helperium_sdk",
+    "src/agent_db",
+    "src/demo",
+    "embed",
+]
+pytest_add_cli_args_test_selection = [
+    "src/api_service/tests",
+]
+exclude_dirs = [
+    ".git",
+    ".venv",
+    ".data",
+    "mutants",
+    "__pycache__",
+    "node_modules",
+    ".egg-info",
+    "specs",
+    "docker",
+    "scripts",
+    "doc",
+]
+debug = false
+
 [tool.uv]
 index-strategy = "unsafe-first-match"
