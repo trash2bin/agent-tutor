@@ -111,7 +111,11 @@ func CountHandler(c *Context, entityName string) http.HandlerFunc {
 
 		var count int
 		if rows.Next() {
-			_ = rows.Scan(&count)
+			if err := rows.Scan(&count); err != nil {
+			RespondError(w, http.StatusInternalServerError, "scan_error",
+				fmt.Sprintf("failed to scan count for %q: %v", entityName, err))
+			return
+		}
 		}
 
 		RespondJSON(w, http.StatusOK, map[string]any{

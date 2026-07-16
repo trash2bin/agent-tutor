@@ -6,12 +6,12 @@ import (
 	"testing"
 
 	"github.com/trash2bin/helperium/data-service/internal/datasource"
+	"github.com/trash2bin/helperium/data-service/internal/runtime"
 )
 
-// TestConnAdapter verifies the delegation methods.
+// TestConnAdapter verifies the delegation methods on InstrumentedAdapter.
 func TestConnAdapter_VerifyDelegation(t *testing.T) {
-	// ConnAdapter with mock conn/adapter
-	ca := &ConnAdapter{
+	ca := &runtime.InstrumentedAdapter{
 		Conn: &mockConn{},
 		Adp:  &mockAdapterForConn{},
 	}

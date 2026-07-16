@@ -12,8 +12,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/trash2bin/helperium/helperium-go/config"
@@ -76,7 +76,9 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 					"path", r.URL.Path,
 					"method", r.Method,
 				)
-				http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"error":"internal server error"}`))
 			}
 		}()
 		next.ServeHTTP(w, r)
@@ -95,7 +97,10 @@ func BodyLimitMiddleware(limit int64) func(http.Handler) http.Handler {
 					"content_length", r.ContentLength,
 					"limit", limit,
 				)
-				http.Error(w, `{"error":"body_too_large","message":"Request body exceeds maximum size"}`, http.StatusRequestEntityTooLarge)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", "1")
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				w.Write([]byte(`{"error":"body_too_large","message":"Request body exceeds maximum size"}`))
 				return
 			}
 			// Wrap body with LimitReader для потоковой защиты
@@ -175,26 +180,19 @@ func AdminRateLimitMiddleware() func(http.Handler) http.Handler {
 // ThrottleMiddleware ограничивает количество одновременных запросов.
 // Если превышен лимит — возвращает 503 Service Unavailable.
 func ThrottleMiddleware(maxConcurrent int) func(http.Handler) http.Handler {
-	var mu sync.Mutex
-	active := 0
+	var active atomic.Int32
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			mu.Lock()
-			if active >= maxConcurrent {
-				mu.Unlock()
+			if active.Load() >= int32(maxConcurrent) {
 				w.Header().Set("Retry-After", "1")
-				http.Error(w, `{"error":"too_many_requests","message":"Server at capacity, try again later"}`, http.StatusServiceUnavailable)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":"too_many_requests","message":"Server at capacity, try again later"}`))
 				return
 			}
-			active++
-			mu.Unlock()
-
-			defer func() {
-				mu.Lock()
-				active--
-				mu.Unlock()
-			}()
+			active.Add(1)
+			defer active.Add(-1)
 
 			next.ServeHTTP(w, r)
 		})
@@ -295,15 +293,6 @@ func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 				return
 			}
 			tenantID := r.Header.Get(tenantHeader)
-			if tenantID == "" {
-				// Case-insensitive fallback
-				for k, v := range r.Header {
-					if len(v) > 0 && strings.EqualFold(k, tenantHeader) {
-						tenantID = v[0]
-						break
-					}
-				}
-			}
 			ctx := context.WithValue(r.Context(), tenantIDKey, tenantID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

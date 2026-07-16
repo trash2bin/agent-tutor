@@ -157,8 +157,8 @@ func TestMapRow_WithPublicMapping(t *testing.T) {
 	}
 
 	// Check public names, NOT column names
-	if row["id"] != 42 {
-		t.Errorf("id = %v (%T), want 42 (int)", row["id"], row["id"])
+	if row["id"] != int64(42) {
+		t.Errorf("id = %v (%T), want 42 (int64)", row["id"], row["id"])
 	}
 	if row["name"] != "Alice" {
 		t.Errorf("name = %v, want Alice", row["name"])

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -596,6 +597,9 @@ func (c *Config) Validate() error {
 			} else if !entityNames[cnt.Entity] {
 				errs = append(errs, fmt.Sprintf("stats.counters[%d].entity %q not found in entities", i, cnt.Entity))
 			}
+			if cnt.Filter != "" && !isValidFilterExpression(cnt.Filter) {
+				errs = append(errs, fmt.Sprintf("stats.counters[%d].filter: contains forbidden SQL construct", i))
+			}
 		}
 	}
 
@@ -615,4 +619,34 @@ func (c *Config) String() string {
 		c.Version, c.DataSource.Driver,
 		len(c.Entities), len(c.Endpoints), len(c.CustomQueries), len(c.MCPTools),
 		c.Server)
+}
+
+// forbiddenSQLPatterns matches SQL keywords that should not appear in counter.Filter.
+var forbiddenSQLPattern = regexp.MustCompile(`(?i)\b(DROP|INSERT|UPDATE|DELETE|ALTER|CREATE|TRUNCATE|EXEC|EXECUTE|UNION)\b`)
+
+// isValidFilterExpression проверяет, что filter содержит только безопасные
+// SQL WHERE-выражения. Запрещены multi-statement (;) и DDL/DML ключевые слова.
+//
+// Разрешены: column op value, AND/OR, IS NULL, IS NOT NULL, IN (...), LIKE
+func isValidFilterExpression(filter string) bool {
+	if filter == "" {
+		return true
+	}
+
+	// Запрещаем multi-statement (;) — единственная реальная SQL injection защита
+	if strings.Contains(filter, ";") {
+		return false
+	}
+
+	// Запрещаем SQL комментарии
+	if strings.Contains(filter, "--") || strings.Contains(filter, "/*") {
+		return false
+	}
+
+	// Запрещаем ключевые слова DDL/DML
+	if forbiddenSQLPattern.MatchString(filter) {
+		return false
+	}
+
+	return true
 }

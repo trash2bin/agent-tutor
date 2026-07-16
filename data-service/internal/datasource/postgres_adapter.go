@@ -129,40 +129,225 @@ func (PostgresAdapter) Introspect(ctx context.Context, database Conn) (*Schema, 
 		ORDER BY table_schema, table_name
 	`
 
-	// Шаг 1: собираем список таблиц в слайс до закрытия rows, чтобы
-	// SetMaxOpenConns не блокировал последующие запросы к тому же пулу.
+	// Шаг 1: список таблиц.
 	rows, err := database.QueryContext(ctx, listSQL)
 	if err != nil {
-		return nil, fmt.Errorf("postgres: list information_schema.tables failed: %w", err)
+		return nil, fmt.Errorf("postgres: list tables failed: %w", err)
 	}
-
-	type tableRef struct {
-		schema string
-		name   string
-	}
+	type tableRef struct{ schema, name string }
 	var tableRefs []tableRef
 	for rows.Next() {
 		var schema, name string
 		if err := rows.Scan(&schema, &name); err != nil {
 			_ = rows.Close()
-			return nil, fmt.Errorf("postgres: scan information_schema.tables row: %w", err)
+			return nil, fmt.Errorf("postgres: scan table row: %w", err)
 		}
 		tableRefs = append(tableRefs, tableRef{schema: schema, name: name})
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return nil, fmt.Errorf("postgres: iterate information_schema.tables: %w", err)
+		return nil, fmt.Errorf("postgres: iterate tables: %w", err)
 	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("postgres: close information_schema.tables rows: %w", err)
+	_ = rows.Close()
+
+	if len(tableRefs) == 0 {
+		return &Schema{Driver: "postgres"}, nil
 	}
 
-	// Шаг 2–5: для каждой таблицы читаем колонки, PK, FK и описания.
-	schema := &Schema{Driver: "postgres"}
-	for _, ref := range tableRefs {
-		tbl, err := introspectPostgresTable(ctx, database, ref.schema, ref.name)
+	// Шаг 2: все колонки + PK за 1 запрос (вместо N).
+	const colsSQL = `
+		SELECT c.table_schema, c.table_name,
+		       c.column_name, c.data_type, c.is_nullable, c.ordinal_position,
+		       (pk.column_name IS NOT NULL) AS is_pk
+		FROM information_schema.columns c
+		LEFT JOIN (
+		    SELECT ku.column_name, ku.table_name, ku.table_schema
+		    FROM information_schema.table_constraints tc
+		    JOIN information_schema.key_column_usage ku
+		        ON tc.constraint_schema = ku.constraint_schema
+		       AND tc.constraint_name   = ku.constraint_name
+		    WHERE tc.constraint_type = 'PRIMARY KEY'
+		) pk ON pk.table_name = c.table_name
+		    AND pk.table_schema = c.table_schema
+		    AND pk.column_name = c.column_name
+		WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
+		ORDER BY c.table_schema, c.table_name, c.ordinal_position
+	`
+
+	type colRef struct {
+		schema, table, column, dtype, nullable string
+		ordinal                                int
+		isPK                                   bool
+	}
+	colRows, err := database.QueryContext(ctx, colsSQL)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list columns failed: %w", err)
+	}
+	var colRefs []colRef
+	for colRows.Next() {
+		var r colRef
+		nullStr := "YES"
+		if err := colRows.Scan(&r.schema, &r.table, &r.column, &r.dtype, &nullStr, &r.ordinal, &r.isPK); err != nil {
+			_ = colRows.Close()
+			return nil, fmt.Errorf("postgres: scan column row: %w", err)
+		}
+		r.nullable = nullStr
+		colRefs = append(colRefs, r)
+	}
+	if err := colRows.Err(); err != nil {
+		_ = colRows.Close()
+		return nil, fmt.Errorf("postgres: iterate columns: %w", err)
+	}
+	_ = colRows.Close()
+
+	// Шаг 3: description всех колонок за 1 запрос.
+	const descSQL = `
+		SELECT n.nspname, c.relname, a.attname,
+		       pg_catalog.col_description(c.oid, a.attnum) AS description
+		FROM pg_catalog.pg_class c
+		JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+		WHERE a.attnum > 0 AND c.relkind = 'r'
+		  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+	`
+
+	type descRef struct{ schema, table, column, description string }
+	descMap := make(map[string]map[string]string) // [schema.table][column]desc
+	{
+		dRows, err := database.QueryContext(ctx, descSQL)
+		if err == nil {
+			for dRows.Next() {
+				var r descRef
+				var desc sql.NullString
+				if err := dRows.Scan(&r.schema, &r.table, &r.column, &desc); err == nil {
+					key := r.schema + "." + r.table
+					if descMap[key] == nil {
+						descMap[key] = make(map[string]string)
+					}
+					if desc.Valid {
+						descMap[key][r.column] = desc.String
+					}
+				}
+			}
+			_ = dRows.Close()
+		}
+		// best-effort: если pg_catalog недоступен — просто без описаний
+	}
+
+	// Шаг 4: все FK за 1 запрос.
+	const fkSQL = `
+		SELECT kcu.table_schema, kcu.table_name,
+		       tc.constraint_name,
+		       kcu.column_name,
+		       ccu.table_schema AS ref_table_schema,
+		       ccu.table_name   AS ref_table_name,
+		       ccu.column_name  AS ref_column_name,
+		       kcu.ordinal_position
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+		    ON tc.constraint_schema = kcu.constraint_schema
+		   AND tc.constraint_name   = kcu.constraint_name
+		JOIN information_schema.constraint_column_usage ccu
+		    ON tc.constraint_schema = ccu.constraint_schema
+		   AND tc.constraint_name   = ccu.constraint_name
+		WHERE tc.constraint_type = 'FOREIGN KEY'
+		  AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
+		ORDER BY kcu.table_schema, kcu.table_name, tc.constraint_name, kcu.ordinal_position
+	`
+
+	type fkRow struct {
+		tableSchema, tableName, constraintName string
+		column, refSchema, refTable, refColumn string
+	}
+	var fkRows []fkRow
+	{
+		fRows, err := database.QueryContext(ctx, fkSQL)
 		if err != nil {
-			return nil, fmt.Errorf("postgres: introspect table %q.%q: %w", ref.schema, ref.name, err)
+			return nil, fmt.Errorf("postgres: list fk failed: %w", err)
+		}
+		for fRows.Next() {
+			var r fkRow
+			var ord int
+			if err := fRows.Scan(&r.tableSchema, &r.tableName, &r.constraintName,
+				&r.column, &r.refSchema, &r.refTable, &r.refColumn, &ord); err != nil {
+				_ = fRows.Close()
+				return nil, fmt.Errorf("postgres: scan fk row: %w", err)
+			}
+			fkRows = append(fkRows, r)
+		}
+		if err := fRows.Err(); err != nil {
+			_ = fRows.Close()
+			return nil, fmt.Errorf("postgres: iterate fk: %w", err)
+		}
+		_ = fRows.Close()
+	}
+
+	// Шаг 5: сборка Schema.
+	schema := &Schema{Driver: "postgres"}
+
+	// Группируем колонки по таблицам
+	type tblBuilder struct {
+		columns   []Column
+		pkCols    []string
+	}
+	tblMap := make(map[string]*tblBuilder)
+	for _, c := range colRefs {
+		key := c.schema + "." + c.table
+		if _, ok := tblMap[key]; !ok {
+			tblMap[key] = &tblBuilder{}
+		}
+		col := Column{
+			Name:     c.column,
+			Type:     mapPostgresType(c.dtype),
+			Nullable: strings.EqualFold(c.nullable, "YES"),
+		}
+		if desc, ok := descMap[key]; ok {
+			col.Description = desc[c.column]
+		}
+		tblMap[key].columns = append(tblMap[key].columns, col)
+		if c.isPK {
+			tblMap[key].pkCols = append(tblMap[key].pkCols, c.column)
+		}
+	}
+
+	// Группируем FK по constraint_name
+	type fkGroup struct {
+		refTable       string
+		columns        []string
+		referencedCols []string
+	}
+	fkMap := make(map[string]map[string]*fkGroup) // [tableKey][constraintName]
+	for _, f := range fkRows {
+		key := f.tableSchema + "." + f.tableName
+		if fkMap[key] == nil {
+			fkMap[key] = make(map[string]*fkGroup)
+		}
+		g, ok := fkMap[key][f.constraintName]
+		if !ok {
+			g = &fkGroup{refTable: f.refSchema + "." + f.refTable}
+			fkMap[key][f.constraintName] = g
+		}
+		g.columns = append(g.columns, f.column)
+		g.referencedCols = append(g.referencedCols, f.refColumn)
+	}
+
+	// Собираем таблицы в порядке tableRefs
+	for _, ref := range tableRefs {
+		key := ref.schema + "." + ref.name
+		tbl := Table{Name: key, Columns: make([]Column, 0)}
+		if tb, ok := tblMap[key]; ok {
+			tbl.Columns = tb.columns
+			tbl.PrimaryKey = tb.pkCols
+		}
+		if fks, ok := fkMap[key]; ok {
+			for cname, g := range fks {
+				tbl.ForeignKeys = append(tbl.ForeignKeys, ForeignKey{
+					Name:              cname,
+					Columns:           g.columns,
+					ReferencedTable:   g.refTable,
+					ReferencedColumns: g.referencedCols,
+				})
+			}
 		}
 		schema.Tables = append(schema.Tables, tbl)
 	}
@@ -175,263 +360,6 @@ func (PostgresAdapter) Introspect(ctx context.Context, database Conn) (*Schema, 
 // Имя таблицы отражается в Table.Name как "schema.table" — это позволяет
 // не терять информацию о схеме при матчинге в тестах и runtime-слое
 // (см. contract: имя нативное, как в БД).
-func introspectPostgresTable(ctx context.Context, database Conn, schemaName, tableName string) (Table, error) {
-	tbl := Table{Name: schemaName + "." + tableName}
-
-	// Шаг 2: колонки.
-	const colsSQL = `
-		SELECT column_name, data_type, is_nullable
-		FROM information_schema.columns
-		WHERE table_schema = $1 AND table_name = $2
-		ORDER BY ordinal_position
-	`
-	colRows, err := database.QueryContext(ctx, colsSQL, schemaName, tableName)
-	if err != nil {
-		return tbl, fmt.Errorf("columns: %w", err)
-	}
-
-	columns := make([]Column, 0)
-	for colRows.Next() {
-		var cname, dtype, nullable string
-		if err := colRows.Scan(&cname, &dtype, &nullable); err != nil {
-			_ = colRows.Close()
-			return tbl, fmt.Errorf("scan columns: %w", err)
-		}
-		columns = append(columns, Column{
-			Name:     cname,
-			Type:     mapPostgresType(dtype),
-			Nullable: strings.EqualFold(nullable, "YES"),
-			// Description заполняется отдельным запросом ниже — здесь оставляем пустым.
-		})
-	}
-	if err := colRows.Err(); err != nil {
-		_ = colRows.Close()
-		return tbl, fmt.Errorf("iterate columns: %w", err)
-	}
-	if err := colRows.Close(); err != nil {
-		return tbl, fmt.Errorf("close columns rows: %w", err)
-	}
-
-	// Шаг 5: description через pg_catalog.col_description.
-	// В pg_description хранится комментарий (из COMMENT ON COLUMN ... IS '...').
-	// Выполняем один запрос на таблицу, чтобы минимизировать round-trips.
-	if err := fillColumnDescriptions(ctx, database, schemaName, tableName, columns); err != nil {
-		// Описание — best-effort. Если запрос упал (например, нет прав на pg_catalog),
-		// не валим всю интроспекцию — оставляем Description пустым.
-		// Ошибка логируется в обёртке, но не пробрасывается дальше.
-		_ = err
-	}
-
-	tbl.Columns = columns
-
-	// Шаг 3: PRIMARY KEY.
-	pk, err := queryPostgresPrimaryKey(ctx, database, schemaName, tableName)
-	if err != nil {
-		return tbl, fmt.Errorf("primary key: %w", err)
-	}
-	tbl.PrimaryKey = pk
-
-	// Шаг 4: FOREIGN KEYS.
-	fks, err := queryPostgresForeignKeys(ctx, database, schemaName, tableName)
-	if err != nil {
-		return tbl, fmt.Errorf("foreign keys: %w", err)
-	}
-	tbl.ForeignKeys = fks
-
-	return tbl, nil
-}
-
-// queryPostgresPrimaryKey возвращает имена колонок PRIMARY KEY в порядке
-// их определения (ordinal_position).
-//
-// Используем information_schema.table_constraints, а не pg_index с regclass,
-// потому что information_schema стабильнее для типизированного доступа
-// и не требует привилегий на pg_catalog.
-func queryPostgresPrimaryKey(ctx context.Context, database Conn, schemaName, tableName string) ([]string, error) {
-	const q = `
-		SELECT k.column_name
-		FROM information_schema.table_constraints t
-		JOIN information_schema.key_column_usage k
-		  ON t.constraint_schema = k.constraint_schema
-		 AND t.constraint_name   = k.constraint_name
-		WHERE t.constraint_schema = $1
-		  AND t.table_name        = $2
-		  AND t.constraint_type   = 'PRIMARY KEY'
-		ORDER BY k.ordinal_position
-	`
-	rows, err := database.QueryContext(ctx, q, schemaName, tableName)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close() //nolint:errcheck
-
-	out := make([]string, 0)
-	for rows.Next() {
-		var col string
-		if err := rows.Scan(&col); err != nil {
-			return nil, fmt.Errorf("scan primary key: %w", err)
-		}
-		out = append(out, col)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate primary key: %w", err)
-	}
-	return out, nil
-}
-
-// queryPostgresForeignKeys возвращает FK-ограничения таблицы,
-// сгруппированные по constraint_name. Один constraint — один ForeignKey.
-//
-// Если таблица ссылается на колонку в другой схеме, ReferencedTable
-// сохраняется в формате "schema.table" — это согласуется с форматом
-// Table.Name и упрощает матчинг в runtime.
-func queryPostgresForeignKeys(ctx context.Context, database Conn, schemaName, tableName string) ([]ForeignKey, error) {
-	const q = `
-		SELECT tc.constraint_name,
-		       kcu.column_name,
-		       ccu.table_schema   AS foreign_table_schema,
-		       ccu.table_name     AS foreign_table,
-		       ccu.column_name    AS foreign_column,
-		       kcu.ordinal_position
-		FROM information_schema.table_constraints tc
-		JOIN information_schema.key_column_usage kcu
-		  ON tc.constraint_schema = kcu.constraint_schema
-		 AND tc.constraint_name   = kcu.constraint_name
-		JOIN information_schema.constraint_column_usage ccu
-		  ON tc.constraint_schema = ccu.constraint_schema
-		 AND tc.constraint_name   = ccu.constraint_name
-		WHERE tc.constraint_schema = $1
-		  AND tc.table_name        = $2
-		  AND tc.constraint_type   = 'FOREIGN KEY'
-		ORDER BY tc.constraint_name, kcu.ordinal_position
-	`
-	rows, err := database.QueryContext(ctx, q, schemaName, tableName)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close() //nolint:errcheck
-
-	// Группируем строки по constraint_name. ordinal_position задаёт
-	// позицию в составе композитного ключа — но для текущей задачи
-	// (одна колонка на FK) сортировка по ordinal_position достаточна,
-	// и композитные FK корректно упорядочатся по тому же полю.
-	type fkRow struct {
-		constraintName string
-		column         string
-		refSchema      string
-		refTable       string
-		refColumn      string
-	}
-	var collected []fkRow
-	for rows.Next() {
-		var (
-			cname, col, refSchema, refTable, refCol string
-			ord                                     int
-		)
-		if err := rows.Scan(&cname, &col, &refSchema, &refTable, &refCol, &ord); err != nil {
-			return nil, fmt.Errorf("scan foreign key: %w", err)
-		}
-		collected = append(collected, fkRow{
-			constraintName: cname,
-			column:         col,
-			refSchema:      refSchema,
-			refTable:       refTable,
-			refColumn:      refCol,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate foreign keys: %w", err)
-	}
-
-	// Группируем по constraint_name, сохраняя порядок первого появления.
-	groupOrder := make([]string, 0)
-	groups := make(map[string]*struct {
-		referencedTable string
-		columns         []string
-		referencedCols  []string
-	})
-
-	for _, r := range collected {
-		g, exists := groups[r.constraintName]
-		if !exists {
-			g = &struct {
-				referencedTable string
-				columns         []string
-				referencedCols  []string
-			}{referencedTable: r.refSchema + "." + r.refTable}
-			groups[r.constraintName] = g
-			groupOrder = append(groupOrder, r.constraintName)
-		}
-		g.columns = append(g.columns, r.column)
-		g.referencedCols = append(g.referencedCols, r.refColumn)
-	}
-
-	out := make([]ForeignKey, 0, len(groupOrder))
-	for _, name := range groupOrder {
-		g := groups[name]
-		out = append(out, ForeignKey{
-			Name:              name,
-			Columns:           g.columns,
-			ReferencedTable:   g.referencedTable,
-			ReferencedColumns: g.referencedCols,
-		})
-	}
-	return out, nil
-}
-
-// fillColumnDescriptions заполняет Column.Description из pg_catalog.col_description.
-//
-// pg_description.col_description(oid, attnum) возвращает text или NULL
-// (если комментария нет). NULL → оставляем Description пустым (omitempty
-// в JSON уберёт поле целиком).
-//
-// На таблице: SELECT oid FROM pg_catalog.pg_class WHERE relname = $1
-// обычно нестрогий по схеме (может вернуть oid таблицы из другой схемы,
-// если имена совпадают). Поэтому фильтруем дополнительно по schema:
-//
-//	JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $2.
-func fillColumnDescriptions(ctx context.Context, database Conn, schemaName, tableName string, columns []Column) error {
-	if len(columns) == 0 {
-		return nil
-	}
-
-	const q = `
-		SELECT a.attname, pg_catalog.col_description(c.oid, a.attnum)
-		FROM pg_catalog.pg_class c
-		JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
-		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-		WHERE c.relname = $1 AND n.nspname = $2 AND a.attnum > 0
-	`
-	rows, err := database.QueryContext(ctx, q, tableName, schemaName)
-	if err != nil {
-		return fmt.Errorf("col_description: %w", err)
-	}
-	defer rows.Close() //nolint:errcheck
-
-	// Индексируем по имени колонки.
-	descs := make(map[string]string, len(columns))
-	for rows.Next() {
-		var name string
-		var desc sql.NullString
-		if err := rows.Scan(&name, &desc); err != nil {
-			return fmt.Errorf("scan col_description: %w", err)
-		}
-		if desc.Valid {
-			descs[name] = desc.String
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate col_description: %w", err)
-	}
-
-	for i := range columns {
-		if d, ok := descs[columns[i].Name]; ok {
-			columns[i].Description = d
-		}
-	}
-	return nil
-}
-
 // mapPostgresType приводит нативный тип Postgres (data_type из
 // information_schema.columns) к одному из generic-типов из adapter.go
 // (TypeString / TypeInt / TypeFloat / TypeBool / TypeJSON / TypeDatetime / TypeDate).

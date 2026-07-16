@@ -132,8 +132,8 @@ func TestMapCustomQueryRow(t *testing.T) {
 		t.Fatalf("MapCustomQueryRow: %v", err)
 	}
 
-	if row["id"] != 1 {
-		t.Errorf("id = %v (%T), want 1 (int)", row["id"], row["id"])
+	if row["id"] != int64(1) {
+		t.Errorf("id = %v (%T), want 1 (int64)", row["id"], row["id"])
 	}
 	if row["name"] != "alice" {
 		t.Errorf("name = %v, want alice", row["name"])
@@ -276,8 +276,8 @@ func TestMapCustomQueryRow_PartialMapping(t *testing.T) {
 		t.Fatalf("MapCustomQueryRow: %v", err)
 	}
 
-	if row["id"] != 1 {
-		t.Errorf("id = %v (%T), want 1 (int)", row["id"], row["id"])
+	if row["id"] != int64(1) {
+		t.Errorf("id = %v (%T), want 1 (int64)", row["id"], row["id"])
 	}
 	if row["name"] != "bob" {
 		t.Errorf("name = %v, want bob", row["name"])

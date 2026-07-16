@@ -34,15 +34,16 @@ func StatsHandler(c *Context, cfg *config.Config) http.HandlerFunc {
 				RespondError(w, http.StatusInternalServerError, "db_error", "failed to count "+counter.Entity)
 				return
 			}
+
 			var count int
 			if rows.Next() {
 				if err := rows.Scan(&count); err != nil {
-					_ = rows.Close()
+					rows.Close()
 					RespondError(w, http.StatusInternalServerError, "scan_error", "failed to scan count for "+counter.Entity)
 					return
 				}
 			}
-			_ = rows.Close()
+			rows.Close()
 			results[counter.Name] = count
 		}
 

@@ -111,6 +111,51 @@ func TestTenantAdmin_AddTenant_Duplicate(t *testing.T) {
 	}
 }
 
+func TestTenantAdmin_AddTenant_InvalidConfig(t *testing.T) {
+	ts := newTenantAdminTestStore(t)
+	ts.TenantsDir = t.TempDir()
+
+	// Invalid driver "mysql" should fail validation
+	payload := `{
+		"id": "invalid-tenant",
+		"config": {"version": 1, "data_source": {"driver": "mysql", "dsn": "user:pass@tcp(host)/db"}, "entities": [], "endpoints": []}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants", strings.NewReader(payload))
+	rec := httptest.NewRecorder()
+	ts.adminAddTenantHandler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid config, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTenantAdmin_AddTenant_InvalidConfigFilter(t *testing.T) {
+	ts := newTenantAdminTestStore(t)
+	ts.TenantsDir = t.TempDir()
+
+	// counter.Filter with DROP should fail validation
+	payload := `{
+		"id": "filter-tenant",
+		"config": {
+			"version": 1,
+			"data_source": {"driver": "sqlite", "dsn": ":memory:"},
+			"entities": [{"name": "g", "table": "groups", "id_column": "id", "fields": [{"name": "id", "column": "id", "type": "string"}]}],
+			"stats": {"counters": [{"name": "total", "entity": "g", "filter": "1=1; DROP TABLE groups"}]}
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/admin/tenants", strings.NewReader(payload))
+	rec := httptest.NewRecorder()
+	ts.adminAddTenantHandler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid filter, got %d: %s", rec.Code, rec.Body.String())
+	}
+	// Verify the response mentions the filter validation
+	if !strings.Contains(rec.Body.String(), "filter") {
+		t.Errorf("response should mention filter validation, got: %s", rec.Body.String())
+	}
+}
+
 func TestTenantAdmin_RemoveTenant_Success(t *testing.T) {
 	ts := newTenantAdminTestStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

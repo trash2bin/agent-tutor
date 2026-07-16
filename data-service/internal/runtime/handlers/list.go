@@ -27,7 +27,7 @@ func ListHandler(c *Context, entityName string) http.HandlerFunc {
 		// Pagination
 		limit, offset := readPagination(r)
 		countSQL := countQuery(query.SQL)
-		total := runCountQuery(c.DB, countSQL, query.Args)
+		total := runCountQuery(r.Context(), c.DB, countSQL, query.Args)
 		query.SQL = appendPagination(query.SQL, limit, offset)
 
 		rows, err := c.DB.QueryContext(r.Context(), query.SQL, query.Args...)

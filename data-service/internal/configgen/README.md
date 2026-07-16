@@ -12,26 +12,45 @@ datasource.Adapter.Introspect() → Schema
          ▼
   configgen.Generate(schema, dsConfig, skipPrefixes)
          │
-         ├── DefaultSkipRules()         → фильтрация таблиц
-         ├── DisplayPrefixes            → отрезание префиксов (catalog_, auth_)
+         ├── shouldSkip()               → фильтрация: SkipRule + prefixes
          ├── tableToEntity()            → Table → Entity (поля, FK, PK)
-         ├── buildFilterParams()        → query-параметры для find/list
          ├── findSearchField()          → колонка для text search
+         ├── buildFilterParams()        → query-параметры для find/list
          ├── findEnumColumns()          → enum-колонки для distinct
+         ├── buildCRUDEndpoints()       → REST-endpoint'ы на entity
+         ├── buildNavigationEndpoints() → FK → custom_query + endpoint
          ├── GenerateSchemaForLLM()     → LLM-дружественная схема (без SQL)
-         ├── GenerateMCPTools()         → эндпоинты → MCP-манифест
-         └── navigation queries         → FK → custom_query + endpoint
+         └── GenerateMCPTools()         → эндпоинты → MCP-манифест
 ```
 
 ## File Map
 
-| File | Role | Key exports |
-|---|---|---|
-| `configgen.go` (1208 строк) | Everything below | `Generate()`, `GenerateSchemaForLLM()`, `GenerateMCPTools()`, `SkipRule`, `DisplayPrefixes`, `SchemaForLLM`, `LLMEntity` |
-| `configgen_test.go` | Unit tests (8) | `TestGenerate*` |
-| `integration_test.go` | Integration tests vs real DB (11) | `TestAutoparts_*` (`-tags=integration`) |
-| `cmd/gen_autoparts/main.go` | Debug CLI — генерация autoparts конфига | standalone binary |
-| `cmd/check_tools/main.go` | Debug CLI — проверка тулов | standalone binary |
+| Файл | Ответственность | Ключевые экспорты | Размер |
+|---|---|---|---|
+| **`configgen.go`** | Skip-правила, публичное API (`Generate`), CRUD-эндпоинты, counters | `Generate()`, `SkipRule`, `DefaultSkipRules()`, `shouldSkip()`, `buildCRUDEndpoints()`, `buildCounters()`, `findSearchFieldFromEntity()` | ~370 строк |
+| **`columns.go`** | Семантический анализ колонок — поиск name/enum/search полей, фильтр-параметры | `isNameField()`, `findSearchField()`, `findEnumColumns()`, `fieldTypeToParamType()`, `buildFilterParams()` | ~100 строк |
+| **`entity.go`** | Преобразование `datasource.Table` → `config.Entity` (поля, FK → relations, PK) | `tableToEntity()` | ~55 строк |
+| **`naming.go`** | Форматирование имён для UI и LLM: pluralization, title case, business names, display prefixes | `DisplayPrefixes`, `shortBusinessName()`, `titleCase()`, `shortColumnName()`, `pluralizeEntity()`, `toolDisplayName()` | ~100 строк |
+| **`navigation.go`** | Построение навигационных эндпоинтов из FK-связей (child-by-parent, custom queries) | `buildNavigationEndpoints()` | ~60 строк |
+| **`llm.go`** | LLM-дружественное представление схемы: типы `SchemaForLLM`, генерация хинтов | `SchemaForLLM`, `LLMEntity`, `FilterGroup`, `FilterField`, `LLMRelation`, `GenerateSchemaForLLM()`, `compactFilterSummary()` | ~270 строк |
+| **`mcp.go`** | Генерация MCP-манифеста: эндпоинты → инструменты для LLM | `GenerateMCPTools()`, `deriveToolParams()`, `extractPathParams()` | ~180 строк |
+| **`configgen_test.go`** | Unit-тесты (8) | `TestGenerate*` | ~500 строк |
+| **`integration_test.go`** | Интеграционные тесты против реальной БД (11, `-tags=integration`) | `TestAutoparts_*` | ~300 строк |
+
+### Структура пакета
+
+```
+internal/configgen/
+├── configgen.go          // Skip-правила + оркестратор Generate
+├── columns.go            // Анализ колонок: name/enum/search/filter поля
+├── entity.go             // datasource.Table → config.Entity
+├── naming.go             // Форматирование имён (plural, title, display)
+├── navigation.go         // FK → custom_queries + navigation endpoints
+├── llm.go                // SchemaForLLM — для system prompt агента
+├── mcp.go                // GenerateMCPTools — MCP-манифест
+├── configgen_test.go     // Unit-тесты
+└── integration_test.go   // Integration-тесты против реальной БД
+```
 
 ## Contracts — Who Calls What
 
@@ -65,13 +84,13 @@ data-service /mcp/schema
 ### `SchemaForLLM` — LLM-friendly schema (NO raw SQL)
 
 ```go
-// configgen.go:596
+// llm.go:15
 type SchemaForLLM struct {
     Entities      []LLMEntity   `json:"entities"`
     WorkflowHints []string      `json:"workflow_hints,omitempty"`
 }
 
-// configgen.go:607
+// llm.go:26
 type LLMEntity struct {
     Name         string        `json:"name"`          // "Product (catalog_product)"
     ToolPrefix   string        `json:"-"`             // raw entity name for tool refs
@@ -81,7 +100,7 @@ type LLMEntity struct {
     Relations    []LLMRelation `json:"relations"`     // FK relationships
 }
 
-// configgen.go:630
+// llm.go:49
 type FilterGroup struct {
     Label  string        `json:"label"`  // "exact" | "bool" | "range" | "text search"
     Fields []FilterField `json:"fields"`
@@ -102,7 +121,7 @@ func GenerateMCPTools(endpoints []config.Endpoint, entities []config.Entity) []c
 ### `SkipRule` struct
 
 ```go
-// configgen.go:27
+// configgen.go
 type SkipRule struct {
     Prefix   string  // "auth_", "django_", "sqlite_"
     Suffix   string  // "_log", "_cache"
@@ -140,19 +159,19 @@ shouldSkip("public.auth_group", rules, nil) == true  // matches Prefix: "auth_"
 ### Single source of truth
 
 ```go
-// configgen.go:78  —  var, not hardcoded slice
+// naming.go:14  —  var в naming.go
 var DisplayPrefixes = []string{"catalog_", "auth_", "django_"}
 ```
 
 ### Where it's used (5 sites, all reference `DisplayPrefixes`)
 
-| Function | Purpose | Line |
+| Function | Purpose | File |
 |---|---|---|
-| `shortBusinessName()` | Entity display name: `catalog_Product` → `Product` | ~901 |
-| `pluralizeEntity()` | Pluralization input: `catalog_cartitem` → `cartitem` | ~946 |
-| `toolDisplayName()` | Tool display name: `get catalog_product` → `get product` | ~967 |
-| `GenerateMCPTools()` | Nav tool name: `products_by_brand` (child side) | ~1112 |
-| `GenerateMCPTools()` | Nav tool name: `products_by_brand` (parent side) | ~1116 |
+| `shortBusinessName()` | Entity display name: `catalog_Product` → `Product` | naming.go |
+| `pluralizeEntity()` | Pluralization input: `catalog_cartitem` → `cartitem` | naming.go |
+| `toolDisplayName()` | Tool display name: `get catalog_product` → `get product` | naming.go |
+| `GenerateMCPTools()` | Nav tool name: `products_by_brand` (child side) | mcp.go |
+| `GenerateMCPTools()` | Nav tool name: `products_by_brand` (parent side) | mcp.go |
 
 ### Adding a prefix
 
@@ -167,6 +186,7 @@ DisplayPrefixes = []string{"wp_", "catalog_", "auth_", "django_"}
 ### Phase 1: Table → Entity
 
 ```go
+// entity.go
 Parse: datastore.Table → config.Entity
   - Name: "public.students" → "students" (strip schema prefix)
   - IDColumn: PK column (first PK col, or first col as fallback)
@@ -175,6 +195,10 @@ Parse: datastore.Table → config.Entity
 ```
 
 ### Phase 2: Endpoint creation (per entity)
+
+```go
+// configgen.go — buildCRUDEndpoints()
+```
 
 | Condition | Endpoint | Tool Name |
 |---|---|---|
@@ -188,50 +212,42 @@ Parse: datastore.Table → config.Entity
 ### Phase 3: Navigation from FK
 
 ```go
-For each FK relation in entity:
-  parent = resolve parent entity
-  queryID = "{child_table}_by_{parent_table}_{fk_column}"
-  navPath = "/{parent}/{id}/{child}"
-
-  // CustomQuery
-  SQL: "SELECT t.* FROM {child_table} t WHERE t.{fk_col} = ?"
-
-  // Endpoint
-  Path: navPath, Op: custom_query, QueryID: queryID
-  Params: [{Name: parentID, In: path}]
-
-  // MCP tool
-  Name: "{child_plural}_by_{parent_short}"
-  Desc:  "Get all {entities} for a given {parent}."
+// navigation.go — buildNavigationEndpoints()
 ```
+
+For each FK relation in entity:
+  - parent = resolve parent entity
+  - queryID = `"{child_table}_by_{parent_table}_{fk_column}"`
+  - SQL: `SELECT t.* FROM {child_table} t WHERE t.{fk_col} = ?`
+  - Endpoint: path `/{parent}/{id}/{child}`, op `custom_query`
+  - MCP tool: name `"{child_plural}_by_{parent_short}"`
 
 ## Search Field Detection
 
 ```go
-// configgen.go:82
-func isNameField(col datasource.Column) bool
+// columns.go
+func findSearchFieldFromEntity(entity config.Entity) string
 ```
 
 **Matches:** `name`, `full_name`, `first_name`, `last_name`, `title` (string type only).
-**Priority:** First matching column in table definition order.
+**Priority:** First matching field in entity definition order.
 
 ## Filter Parameter Generation
 
 ```go
-// configgen.go:457
-func buildFilterParams(cols []datasource.Column, entity config.Entity, searchCol string) []config.EndpointParam
+// columns.go
+func buildFilterParamsFromEntity(entity config.Entity, searchCol string) []config.EndpointParam
 ```
 
-### Column → param mapping
+### Field type → param mapping
 
-| Column type | Param type | SQL operator | Notes |
+| Field type | Param type | SQL operator | Notes |
 |---|---|---|---|
 | `string` (search) | `ParamTypeString` | ILIKE/LIKE | only if col == searchCol |
-| `int` / `float` | `ParamTypeInt` / `ParamTypeFloat` | `=` | exact match |
+| `int` | `ParamTypeInt` | `=` | exact match |
+| `float` | `ParamTypeFloat` | `=` | exact match |
 | `bool` | `ParamTypeBool` | `=` | true/false |
 | `datetime` / `date` | `ParamTypeString` | comparison | ISO-8601 ("2024-01-15") |
-| `json` | — | **skipped** | ILIKE doesn't work on JSONB |
-| `string` (non-search) | `ParamTypeString` | `=` | exact match method |
 
 ## LLM Schema Injection
 
@@ -264,7 +280,7 @@ data-service /mcp/schema?tenant=autoparts
 
 💡 Categories = part type (brake pads, shock absorbers).
    Brands = manufacturer (Bosch, KYB, TRW).
-   Search category first, then products via products_by_category.
+   Search category first, then find products via products_by_category.
 ```
 
 ### What's NOT in schema
@@ -282,22 +298,21 @@ data-service /mcp/schema?tenant=autoparts
 |---|---|---|---|
 | `get_by_id` | `get_product` | `product by ID` | "Get a single record by its unique ID. Use after find_product when you have a specific ID." |
 | `find` | `find_product` | `Find product` | "Search products by name (partial match). Filters: ..." |
-| `list` | `list_product` | `All products` | "List all products. Use when find_product returns no results or you need all records." |
+| `list` | `list_product` | `All products` | "List all products. Use when find_product returns no results." |
 | `count` | `count_product` | `Count products` | "Count products matching filters. Returns {entity, count}." |
-| `distinct` | `distinct_product` | `Distinct products` | "Get unique values for enum columns in products. Use to discover valid filter values." |
-| `custom_query` | `products_by_brand` | `products by brand` | "Get all products for a given brand. Use after find_brand to get the ID, then call this to list related products." |
+| `distinct` | `distinct_product` | `Distinct products` | "Get unique values for enum columns in products." |
+| `custom_query` | `products_by_brand` | `products by brand` | "Get all products for a given brand." |
 
 ### Strategic hints in descriptions
 
-Some tools include workflow guidance:
-- **`find_product`**: "If user asks about a type (e.g. 'muffler', 'brake pads'), search categories first, then navigate to products."
-- **`products_by_category`**: "Use after find_category to get the ID, then call this to list related products."
+Some tools include workflow guidance in `mcp.go`:
+- `find_product`: "If user asks about a type (e.g. 'muffler', 'brake pads'), search categories first, then navigate to products."
+- `products_by_category`: "Use after find_category, then call this to list related products."
 - Filter summary: `"partial match on 'name'; exact: article, price, +22 more; bool: is_available"`
 
 ### JSONB fields
 
 **Do NOT generate filter params** for JSON/JSONB columns — ILIKE/LIKE does not work on them.
-Currently no JSONB-aware filtering feature; schema hints about `car_applicability` are removed.
 
 ## Testing
 
@@ -307,7 +322,7 @@ Currently no JSONB-aware filtering feature; schema hints about `car_applicabilit
 go test ./data-service/internal/configgen/ -v           # 8 tests, ~50ms
 ```
 
-### Integration tests (require running autoparts PG DB)
+### Integration tests (require running PG DB)
 
 ```bash
 go test -tags=integration ./data-service/internal/configgen/ -run TestAutoparts -v  # 11 tests
@@ -319,13 +334,11 @@ go test -tags=integration ./data-service/internal/configgen/ -run TestAutoparts 
 |---|---|
 | `TestAutoparts_Introspect` | Correct table count (17 raw), column types |
 | `TestAutoparts_GenerateEntities` | 7 entities (not 17), filtered skip rules |
-| `TestAutoparts_Relations` | FK relations found: brand_id, category_id, cart_id, product_id |
-| `TestAutoparts_BoolFilters` | Bool params: is_available, is_popular, is_new, is_bestseller, is_promo, is_active |
-| `TestAutoparts_DatetimeFilters` | Datetime params: created_at, updated_at |
+| `TestAutoparts_Relations` | FK relations found |
+| `TestAutoparts_BoolFilters` | Bool params |
 | `TestAutoparts_CountEndpoints` | 7 count_* endpoints |
-| `TestAutoparts_MCPTools` | 29 MCP tools, display names in English |
-| `TestAutoparts_CustomQueries` | 5 navigation queries from FK relations |
-| `TestAutoparts_CleanPaths` | No double underscores in paths or tool names |
+| `TestAutoparts_MCPTools` | MCP tools, display names in English |
+| `TestAutoparts_CustomQueries` | Navigation queries from FK |
 | `TestAutoparts_ToolCount` | Stable tool count (29) |
 
 ## Adding a New Adapter (MySQL, MSSQL)
@@ -336,30 +349,11 @@ go test -tags=integration ./data-service/internal/configgen/ -run TestAutoparts 
 4. Add MySQL-specific skip rules to `DefaultSkipRules()` if needed
 5. Integration test: register tenant with MySQL DSN, run rewrite
 
-**No changes needed in** `configgen.go`, `endpoint_builder.go`, handlers, or runtime.
-Adapter pattern keeps everything generic.
-
-## Future Plans
-
-### Potential refactors
-
-- **Extract `toolDisplayName()` and `shortBusinessName()`** into separate `display.go` file
-- **Extract `GenerateSchemaForLLM()` and LLM types** into `schema.go`
-- **Extract skip rules and DisplayPrefixes** into `rules.go`
-- **Configurable skip rules** via `Config.Introspection.ExcludeTables` (JSON config, not code)
-
-### Known gaps
-
-- Composite FK (multi-column) not yet supported
-- Views not processed (SQLite reads them but treats as tables; PG excludes them)
-- No JSONB-aware filtering in find endpoints
-- No auto-`search` parameter for multi-field LIKE (article, oem_number)
-- No FK fallback heuristic for DBs without physical FK (`*_id` → table name matching)
+**No changes needed in configgen** — adapter pattern keeps everything generic.
 
 ## Related docs
 
 - `doc/api-flow.md` — HTTP communication between services
 - `AGENTS.md` — §2a MCP Architecture, §2b Tenant Lifecycle, §6 Tenant Isolation
 - `helperium-go/config/types.go` — `Config`, `Entity`, `Endpoint`, `MCPTool` types
-- `helperium-go/config/validate.go` — Config validation
 - `data-service/internal/datasource/adapter.go` — `Adapter` interface, `Schema`, `Table`, `Column`

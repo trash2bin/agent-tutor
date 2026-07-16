@@ -1,7 +1,9 @@
 package server
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/trash2bin/helperium/helperium-go/config"
 )
@@ -44,4 +46,128 @@ func TestAdminConfigResponseFromConfig(t *testing.T) {
 	if len(resp.Entities) != 1 {
 		t.Errorf("Entities count = %d, want 1", len(resp.Entities))
 	}
+}
+
+// TestTenantHealthRace verifies that concurrent HealthCheck writes and
+// tenantResponseFromInstance reads do not produce data races.
+func TestTenantHealthRace(t *testing.T) {
+	inst := &TenantInstance{
+		ID: "test-tenant",
+		Config: &config.Config{
+			Version: 1,
+			DataSource: config.DataSourceConfig{Driver: "sqlite", DSN: ":memory:"},
+		},
+		CreatedAt: time.Now(),
+	}
+
+	var wg sync.WaitGroup
+
+	// Simulate HealthCheck writes
+	for i := 0; i < 10; i++ {
+		wg.Add(2)
+
+		// Writer goroutine (simulates HealthCheck)
+		go func() {
+			defer wg.Done()
+			inst.healthMu.Lock()
+			inst.Healthy = true
+			inst.LastError = ""
+			inst.healthMu.Unlock()
+		}()
+
+		// Reader goroutine (simulates tenantResponseFromInstance)
+		go func() {
+			defer wg.Done()
+			inst.healthMu.Lock()
+			_ = inst.Healthy
+			_ = inst.LastError
+			inst.healthMu.Unlock()
+		}()
+	}
+
+	wg.Wait()
+
+	if !inst.Healthy {
+		t.Error("expected Healthy=true after write")
+	}
+}
+
+// TestTenantHealthRaceViaResponse verifies that tenantResponseFromInstance
+// reads safely under concurrent writes.
+func TestTenantHealthRaceViaResponse(t *testing.T) {
+	inst := &TenantInstance{
+		ID: "test-tenant",
+		Config: &config.Config{
+			Version: 1,
+			DataSource: config.DataSourceConfig{Driver: "sqlite", DSN: ":memory:"},
+		},
+		CreatedAt: time.Now(),
+	}
+
+	var wg sync.WaitGroup
+
+	for i := 0; i < 10; i++ {
+		wg.Add(2)
+
+		// Writer goroutine
+		go func() {
+			defer wg.Done()
+			inst.healthMu.Lock()
+			inst.Healthy = (i%2 == 0)
+			inst.LastError = ""
+			if i%2 != 0 {
+				inst.LastError = "db timeout"
+			}
+			inst.healthMu.Unlock()
+		}()
+
+		// Reader via tenantResponseFromInstance
+		go func() {
+			defer wg.Done()
+			_ = tenantResponseFromInstance(inst)
+		}()
+	}
+
+	wg.Wait()
+}
+
+// TestTenantHealthRaceDirectAccess ensures concurrent direct field reads
+// and writes are race-free (used by admin handlers and other readers).
+func TestTenantHealthRaceDirectAccess(t *testing.T) {
+	inst := &TenantInstance{
+		ID: "test-tenant",
+		Config: &config.Config{
+			Version: 1,
+			DataSource: config.DataSourceConfig{Driver: "sqlite", DSN: ":memory:"},
+		},
+		CreatedAt: time.Now(),
+	}
+
+	var wg sync.WaitGroup
+
+	for i := 0; i < 20; i++ {
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 5; j++ {
+				inst.healthMu.Lock()
+				inst.Healthy = (j%2 == 0)
+				inst.LastError = ""
+				inst.healthMu.Unlock()
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 5; j++ {
+				inst.healthMu.Lock()
+				_ = inst.Healthy
+				_ = inst.LastError
+				inst.healthMu.Unlock()
+			}
+		}()
+	}
+
+	wg.Wait()
 }

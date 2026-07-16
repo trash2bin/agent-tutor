@@ -10,6 +10,10 @@ import (
 
 // MapRow сканирует одну строку *sql.Rows в map[string]any с публичными
 // именами полей сущности и type coercion по entity.Fields.
+//
+// Сканирует напрямую в нативные Go-типы (int64, float64, bool, string) вместо
+// sql.RawBytes, что устраняет лишнюю аллокацию на RawBytes→string и даёт
+// правильные типы в JSON ({"id": 123} вместо {"id": "123"}).
 func (b *Builder) MapRow(rows *sql.Rows, entity Entity) (map[string]any, error) {
 	columns, err := rows.Columns()
 	if err != nil {
@@ -18,8 +22,7 @@ func (b *Builder) MapRow(rows *sql.Rows, entity Entity) (map[string]any, error) 
 
 	dest := make([]any, len(columns))
 	for i := range dest {
-		var rb sql.RawBytes
-		dest[i] = &rb
+		dest[i] = new(any)
 	}
 
 	if err := rows.Scan(dest...); err != nil {
@@ -35,24 +38,25 @@ func (b *Builder) MapRow(rows *sql.Rows, entity Entity) (map[string]any, error) 
 			continue // неизвестная колонка — пропускаем
 		}
 
-		rbPtr, ok := dest[i].(*sql.RawBytes)
-		if !ok || rbPtr == nil || *rbPtr == nil {
+		ptr := dest[i].(*any)
+		if ptr == nil || *ptr == nil {
 			result[publicName] = nil
 			continue
 		}
 
-		val := string(*rbPtr)
+		val := *ptr
 
 		// Type coercion по конфигу поля
 		ft := b.fieldTypeFor(entity, publicName)
-		result[publicName] = coerceValue(val, ft)
+		result[publicName] = coerceNative(val, ft)
 	}
 	return result, nil
 }
 
 // MapCustomQueryRow сканирует одну строку *sql.Rows в map[string]any
-// для custom_query. Всегда возвращает строки (type coercion через mapping
-// — задача фазы 3.5+).
+// для custom_query. При наличии маппинга сканирует в нативные Go-типы
+// и приводит по ResultMappingField.Type. Без маппинга возвращает строки
+// (как legacy-поведение).
 func (b *Builder) MapCustomQueryRow(rows *sql.Rows, mapping map[string]ResultMappingField) (map[string]any, error) {
 	columns, err := rows.Columns()
 	if err != nil {
@@ -61,8 +65,7 @@ func (b *Builder) MapCustomQueryRow(rows *sql.Rows, mapping map[string]ResultMap
 
 	dest := make([]any, len(columns))
 	for i := range dest {
-		var rb sql.RawBytes
-		dest[i] = &rb
+		dest[i] = new(any)
 	}
 
 	if err := rows.Scan(dest...); err != nil {
@@ -71,19 +74,20 @@ func (b *Builder) MapCustomQueryRow(rows *sql.Rows, mapping map[string]ResultMap
 
 	result := make(map[string]any, len(columns))
 	for i, col := range columns {
-		rbPtr, ok := dest[i].(*sql.RawBytes)
-		if !ok || rbPtr == nil || *rbPtr == nil {
+		ptr := dest[i].(*any)
+		if ptr == nil || *ptr == nil {
 			result[col] = nil
 			continue
 		}
 
-		val := string(*rbPtr)
+		val := *ptr
 
 		// Type coercion по маппингу custom_query
 		if mf, ok := mapping[col]; ok {
-			result[col] = coerceValue(val, string(mf.Type))
+			result[col] = coerceNative(val, string(mf.Type))
 		} else {
-			result[col] = val
+			// Без маппинга — legacy поведение: строки
+			result[col] = fmt.Sprintf("%v", val)
 		}
 	}
 	return result, nil
@@ -109,6 +113,7 @@ func (b *Builder) MapRows(
 		out = append(out, row)
 		count++
 		if maxRows > 0 && count >= maxRows {
+			// early close: release connection back to pool immediately
 			_ = rows.Close()
 			break
 		}
@@ -120,6 +125,7 @@ func (b *Builder) MapRows(
 }
 
 // coerceValue приводит строковое значение к типу из конфига.
+// Сохранён для обратной совместимости (используется в тестах).
 func coerceValue(val, typ string) any {
 	if val == "" {
 		return val
@@ -148,6 +154,87 @@ func coerceValue(val, typ string) any {
 		return val
 	default:
 		return val
+	}
+}
+
+// coerceNative приводит нативное значение (int64, float64, bool, string)
+// к ожидаемому типу из конфига. Если значение уже правильного типа —
+// возвращает как есть. Это позволяет JSON-маршаллеру сериализовать
+// числа как числа, а не строки.
+func coerceNative(val any, typ string) any {
+	if val == nil {
+		return nil
+	}
+
+	switch typ {
+	case "int":
+		switch v := val.(type) {
+		case int64:
+			return v
+		case float64:
+			return int64(v)
+		case string:
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				return n
+			}
+		}
+		return val
+
+	case "float":
+		switch v := val.(type) {
+		case float64:
+			return v
+		case int64:
+			return float64(v)
+		case string:
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				return f
+			}
+		}
+		return val
+
+	case "bool":
+		switch v := val.(type) {
+		case bool:
+			return v
+		case int64:
+			return v != 0
+		case float64:
+			return v != 0
+		case string:
+			if b, err := strconv.ParseBool(v); err == nil {
+				return b
+			}
+		}
+		return val
+
+	case "json":
+		switch v := val.(type) {
+		case string:
+			var js any
+			if err := json.Unmarshal([]byte(v), &js); err == nil {
+				return js
+			}
+			return v
+		case []byte:
+			var js any
+			if err := json.Unmarshal(v, &js); err == nil {
+				return js
+			}
+			return string(v)
+		}
+		return val
+
+	default:
+		// string, datetime, date, unknown → конвертируем в строку
+		switch v := val.(type) {
+		case string:
+			return v
+		case fmt.Stringer:
+			return v.String()
+		default:
+			return fmt.Sprintf("%v", v)
+		}
 	}
 }
 

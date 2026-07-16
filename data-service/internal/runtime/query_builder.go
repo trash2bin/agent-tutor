@@ -1,6 +1,13 @@
 package runtime
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
+
+// Package-level replacer for LIKE wildcard escaping.
+// Created once to avoid allocation on every search query.
+var escapeReplacer = strings.NewReplacer("%", "\\%", "_", "\\_")
 
 // Builder — собирает SELECT-запросы по конфигу Entity/CustomQuery
 // с использованием адаптера для placeholder'ов и квотирования.
@@ -91,7 +98,7 @@ func (b *Builder) BuildFind(entity Entity, searchField, value string) (Query, er
 	// PostgreSQL: ILIKE (case-insensitive). SQLite: LIKE (already case-insensitive).
 	// Безопасность: value в prepared statement, wildcards % и _ экранируются
 	// перед LIKE, чтобы предотвратить DoS через wildcard-атаки (full scan).
-	escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(value)
+	escaped := escapeReplacer.Replace(value)
 	searchVal := "%" + escaped + "%"
 
 	likeOp := "LIKE"
@@ -170,7 +177,7 @@ func (b *Builder) BuildFilter(entity Entity, filterCols []string, filterVals []a
 			if !ok {
 				continue
 			}
-			escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(s)
+			escaped := escapeReplacer.Replace(s)
 			args = append(args, "%"+escaped+"%")
 			conditions = append(conditions, b.adapter.QuoteIdentifier(column)+" "+likeOp+" "+ph)
 			phIdx++
@@ -302,33 +309,9 @@ func (b *Builder) columnFor(entity Entity, publicField string) (string, bool) {
 // валидации числа аргументов для custom_query.
 func paramCountMismatchReason(expected, got int) string {
 	return "arg count mismatch: query expects " +
-		itoa(expected) + " params, got " + itoa(got)
+		strconv.Itoa(expected) + " params, got " + strconv.Itoa(got)
 }
 
-// itoa — локальный strconv.Itoa, чтобы не тянуть strconv в hot-path.
-// Используется только в сообщениях об ошибках.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := false
-	if n < 0 {
-		neg = true
-		n = -n
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
-}
 
 // isValidSelect — проверяет, что SQL является безопасным SELECT-выражением.
 //

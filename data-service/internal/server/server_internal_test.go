@@ -1,7 +1,11 @@
 package server
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/trash2bin/helperium/helperium-go/config"
@@ -115,6 +119,66 @@ func TestResolveIntEnv_Negative(t *testing.T) {
 	got := resolveIntEnv("DS_MAX_CONCURRENT", 10, 50)
 	if got != 10 {
 		t.Errorf("resolveIntEnv with negative = %d, want 10 (fallback)", got)
+	}
+}
+
+// TestRecoveryMiddleware_ContentType — проверяет что RecoveryMiddleware возвращает
+// правильный Content-Type и тело парсится как JSON.
+func TestRecoveryMiddleware_ContentType(t *testing.T) {
+	handler := RecoveryMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("test panic")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+
+	// Тело должно парситься как JSON
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("response body is not valid JSON: %v", err)
+	}
+	if body["error"] != "internal server error" {
+		t.Errorf("expected error=internal server error, got %q", body["error"])
+	}
+}
+
+// TestBodyLimitMiddleware_ContentType — проверяет что BodyLimitMiddleware возвращает
+// правильный Content-Type при превышении лимита.
+func TestBodyLimitMiddleware_ContentType(t *testing.T) {
+	handler := BodyLimitMiddleware(10)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader("this body is too long for the limit"))
+	req.ContentLength = 100
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected 413, got %d", w.Code)
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("response body is not valid JSON: %v", err)
+	}
+	if body["error"] != "body_too_large" {
+		t.Errorf("expected error=body_too_large, got %q", body["error"])
 	}
 }
 

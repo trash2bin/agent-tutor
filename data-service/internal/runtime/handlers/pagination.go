@@ -60,8 +60,8 @@ func countQuery(selectSQL string) string {
 }
 
 // runCountQuery выполняет COUNT запрос и возвращает общее число записей.
-func runCountQuery(db runtime.AdapterSubset, countSQL string, args []any) int {
-	rows, err := db.QueryContext(context.Background(), countSQL, args...)
+func runCountQuery(ctx context.Context, db runtime.AdapterSubset, countSQL string, args []any) int {
+	rows, err := db.QueryContext(ctx, countSQL, args...)
 	if err != nil {
 		return -1
 	}

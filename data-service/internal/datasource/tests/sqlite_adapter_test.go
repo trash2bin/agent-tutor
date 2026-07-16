@@ -2,6 +2,8 @@ package datasource_test
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/trash2bin/helperium/data-service/internal/datasource"
@@ -65,7 +67,88 @@ func TestSqliteAdapter_Introspect_Empty(t *testing.T) {
 	}
 }
 
-// TestSqliteAdapter_Introspect_GenericSchema — на generic-схеме
+// TestSqliteAdapter_DefaultPragmas — DSN по умолчанию включает WAL, FK, busy_timeout и synchronous=NORMAL.
+// Использует file-based БД, т.к. прагмы (WAL, busy_timeout) работают только с файлами.
+func TestSqliteAdapter_DefaultPragmas(t *testing.T) {
+	a := datasource.SqliteAdapter{}
+	ctx := context.Background()
+
+	// Используем временный файл вместо :memory:, т.к. WAL-mode не работает с in-memory.
+	dbPath := t.TempDir() + "/test.db"
+	conn, err := a.Connect(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("Connect %q: %v", dbPath, err)
+	}
+	defer conn.Close()
+
+	// Создаём таблицы с FK
+	_, err = conn.ExecContext(ctx, `CREATE TABLE parent (id INTEGER PRIMARY KEY)`)
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	_, err = conn.ExecContext(ctx, `CREATE TABLE child (id INTEGER PRIMARY KEY, p_id INTEGER REFERENCES parent(id))`)
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	// Вставка в child без parent — должна упасть с FK violation
+	_, err = conn.ExecContext(ctx, `INSERT INTO child (id, p_id) VALUES (1, 999)`)
+	if err == nil {
+		t.Error("expected FK violation for orphan insert, got nil")
+	}
+}
+
+// TestSqliteAdapter_ConcurrentReads — проверяет, что пул соединений
+// поддерживает конкурентное чтение (WAL mode + SetMaxOpenConns(2)).
+// Использует file-based БД — :memory: не поддерживает multi-connection (каждый conn своя БД).
+func TestSqliteAdapter_ConcurrentReads(t *testing.T) {
+	ctx := context.Background()
+	a := datasource.SqliteAdapter{}
+
+	dbPath := t.TempDir() + "/concurrent.db"
+	conn, err := a.Connect(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer conn.Close()
+
+	// Создаём таблицу с данными
+	_, err = conn.ExecContext(ctx, `CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)`)
+	if err != nil {
+		t.Fatalf("create items: %v", err)
+	}
+	for i := range 10 {
+		_, err = conn.ExecContext(ctx, `INSERT INTO items (id, name) VALUES (?, ?)`, i, fmt.Sprintf("item-%d", i))
+		if err != nil {
+			t.Fatalf("insert item %d: %v", i, err)
+		}
+	}
+
+	// Конкурентные читатели
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			rows, err := conn.QueryContext(ctx, `SELECT id, name FROM items ORDER BY id`)
+			if err != nil {
+				t.Errorf("concurrent reader %d: QueryContext: %v", id, err)
+				return
+			}
+			defer rows.Close() //nolint:errcheck
+			for rows.Next() {
+				var id int
+				var name string
+				if err := rows.Scan(&id, &name); err != nil {
+					t.Errorf("concurrent reader %d: scan: %v", id, err)
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+
 // (магазин: customers/orders/items) проверяем корректность introspector
 // без привязки к доменной семантике (никаких university-имён).
 //

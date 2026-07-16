@@ -44,27 +44,40 @@ func (SqliteAdapter) Connect(ctx context.Context, dsn string) (Conn, error) {
 		return nil, fmt.Errorf("sqlite: empty DSN")
 	}
 
-	openDSN := dsn
-	if !strings.Contains(dsn, "?") {
-		// Дефолтные прагмы для боевого и тестового использования.
-		openDSN = dsn + "?_journal_mode=WAL&_foreign_keys=on"
-	}
+	slog.Info("sqlite: opening connection", "dsn", dsn)
 
-	slog.Info("sqlite: opening connection", "dsn", openDSN)
-
-	conn, err := sql.Open("sqlite", openDSN)
+	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: failed to open %q: %w", dsn, err)
 	}
 
-	// Для SQLite актуален один writer; ограничиваем пул, чтобы избежать
-	// "database is locked" в многопоточных тестах.
-	conn.SetMaxOpenConns(1)
+	// WAL mode поддерживает конкурентных читателей, поэтому пул увеличен до 2.
+	// busy_timeout=5000 позволяет запросу подождать блокировки до 5 секунд
+	// вместо немедленного "database is locked".
+	conn.SetMaxOpenConns(2)
 
 	if err := conn.PingContext(ctx); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("sqlite: ping failed for %q: %w", dsn, err)
 	}
+
+	// Устанавливаем прагмы явно через Exec, т.к. DSN-параметры работают
+	// не со всеми драйверами (modernc.org/sqlite vs mattn/go-sqlite3).
+	// WAL + synchronous=NORMAL даёт ~2x write throughput при той же durability.
+	// busy_timeout даёт конкурентным запросам дождаться блокировки.
+	// foreign_keys=on включает проверку целостности внешних ключей.
+	for _, pragma := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA busy_timeout=5000",
+		"PRAGMA foreign_keys=ON",
+	} {
+		if _, err := conn.ExecContext(ctx, pragma); err != nil {
+			slog.Warn("sqlite: pragma failed (non-fatal)", "pragma", pragma, "error", err)
+		}
+	}
+
+	slog.Info("sqlite: connection opened", "dsn", dsn)
 
 	return &SqliteConn{conn: conn}, nil
 }

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"strconv"
 	"testing"
 )
 
@@ -42,7 +43,7 @@ func TestBuildColumnList_NilFields(t *testing.T) {
 	}
 }
 
-// itoa tests
+// strconv.Itoa parity test (itoa was removed, replaced with strconv.Itoa)
 
 func TestItoa(t *testing.T) {
 	tests := []struct {
@@ -59,9 +60,9 @@ func TestItoa(t *testing.T) {
 		{-987654321, "-987654321"},
 	}
 	for _, tc := range tests {
-		got := itoa(tc.n)
+		got := strconv.Itoa(tc.n)
 		if got != tc.want {
-			t.Errorf("itoa(%d) = %q, want %q", tc.n, got, tc.want)
+			t.Errorf("strconv.Itoa(%d) = %q, want %q", tc.n, got, tc.want)
 		}
 	}
 }
