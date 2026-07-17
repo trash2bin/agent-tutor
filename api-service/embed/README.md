@@ -1,6 +1,6 @@
 # Helperium — Embeddable Chat Widget
 
-Виджет чата для встраивания на любой сайт. Vanilla JS, без зависимостей, изолирован в Shadow DOM.
+Виджет чата для встраивания на любой сайт. TypeScript, Shadow DOM, 0 runtime-зависимостей.
 
 ## Быстрый старт
 
@@ -21,6 +21,22 @@
 
 Всё. Виджет появится в правом нижнем углу.
 
+### Альтернатива: window.EMBED_CONFIG
+
+Если нужно задать конфиг программно (без data-* атрибутов):
+
+```html
+<script>
+  window.EMBED_CONFIG = {
+    agent: 'shop-assistant',
+    apiBase: 'https://your-server.com',
+    title: 'Помощник',
+    accent: '#0f766e'
+  };
+</script>
+<script src="/embed/embed.js"></script>
+```
+
 ## Параметры конфигурации
 
 Все параметры задаются через `data-*` атрибуты на `<script>`.
@@ -29,11 +45,11 @@
 |---|---|---|
 | `data-agent` | _(обязательный)_ | Имя агента — определяет SSE endpoint `/api/chat/{agent}` |
 | `data-api-base` | `window.location.origin` | Базовый URL сервера с API |
-| `data-title` | `"Ассистент"` | Заголовок виджета (жирный текст в шапке) |
-| `data-greeting` | `"Чем могу помочь?"` | Приветственное сообщение при пустой истории |
+| `data-title` | `"Assistant"` | Заголовок виджета (жирный текст в шапке) |
+| `data-greeting` | `"How can I help?"` | Приветственное сообщение при пустой истории |
 | `data-accent` | `"#0f766e"` | Акцентный цвет (CSS hex, поддерживает transparent) |
 | `data-position` | `"right"` | Положение: `"right"` или `"left"` |
-| `data-placeholder` | `"��апишите вопрос..."` | Текст-плейсхолдер в поле ввода |
+| `data-placeholder` | `"Ask a question..."` | Текст-плейсхолдер в поле ввода |
 | `data-width` | `"min(380px, calc(100vw - 28px))"` | Ширина панели (любое CSS-значение) |
 | `data-height` | `"min(620px, calc(100vh - 44px))"` | Высота панели (любое CSS-значение) |
 | `data-trigger-offset-bottom` | `"16px"` | Отступ от нижнего края для кнопки и панели |
@@ -41,9 +57,10 @@
 | `data-show-header` | `"true"` | Показывать шапку: `"true"` или `"false"` |
 | `data-bot-bubble-color` | `"#eef3f4"` | Цвет фона пузырька ассистента |
 | `data-bot-bubble-text` | `"var(--ink)"` | Цвет текста пузырька ассистента |
-| `data-lang` | `"en"` | Язык сообщений об ошибках: `"ru"` или `"en"`. Если не указан — английский. |
+| `data-lang` | auto | Язык: `"ru"` или `"en"`. Если не указан — определяется по `navigator.language` |
 | `data-voice-input` | `"true"` | Голосовой ввод: `"true"` или `"false"` |
 | `data-voice-output` | `"true"` | Голосовой вывод (TTS): `"true"` или `"false"` |
+| `data-voice-toggle` | `"classic"` | Режим голоса: `"classic"` (toggle on/off) или `"telegram"` (зажать = запись, текст = send) |
 
 ### Сообщения об ошибках
 
@@ -81,14 +98,12 @@
 
 ### Shadow DOM изоляция
 
-Виджет создаёт свой хост-элемент с `attachShadow({ mode: 'open' })`. Стили и разметка внутри Shadow DOM не пересекаются с CSS сайта. Единственное, что выходит наружу — позиционирование `.at-trigger` и `.at-panel` (через `position: fixed`).
+Виджет создаёт свой хост-элемент с `attachShadow({ mode: 'open' })`. Стили и разметка внутри Shadow DOM не пересекаются с CSS сайта.
 
 ### Хранение сессий
 
 - **sessionStorage**: история сообщений (ключ `at_messages_{agent}`) и текущий session_id (ключ `at_session_{agent}`)
-- **sessionStorage** привязан к вкладке браузера — при закрытии вкладки история теряется
-- На сервере история хранится в SQLite (смотрим `SessionStore` в `api-service/src/api_service/sessions.py`)
-- При переключении агента сообщения предыдущего агента не теряются — лежат под своим ключом
+- **localStorage**: выбранный агент (ключ `agentTutorAgentId`) — для синхронизации с admin dashboard
 
 ### SSE протокол
 
@@ -98,28 +113,118 @@
 |---|---|
 | `token` | Очередной токен ответа. `{ "type":"token", "text":"частичный текст..." }` |
 | `tool_call` | Агент вызвал инструмент. `{ "type":"tool_call", "name":"find_products" }` |
-| `final` | Финальный текст ответа (может отличаться от суммы токенов). `{ "type":"final", "text":"полный ответ" }` |
-| `done` | Поток завершён. Виджет сохраняет сообщение в sessionStorage. |
+| `final` | Финальный текст ответа. `{ "type":"final", "text":"полный ответ" }` |
+| `audio` | Голосовой ответ (base64 WAV). `{ "type":"audio", "data":"base64..." }` |
+| `done` | Поток завершён. |
 | `error` | Ошибка. `{ "type":"error", "text":"сообщение ошибки" }` |
 
 ## Интеграция с app.js (Agent Dashboard)
 
-Если виджет используется вместе с [Agent Dashboard](../../demo/web/static/app.js), работает глобальный bridge:
+Глобальный bridge для runtime переключения агента:
 
 ```js
-// app.js устанавливает state.agentId через localStorage и dropdown
+// Переключить агента
 window.__agentTutorSetAgent("shop-assistant");
 ```
 
 Bridge делает:
-1. Меняет `CONFIG.agent` на нового агента
-2. Обновляет ключи sessionStorage (`at_messages_{agent}`)
+1. Меняет агента в конфиге
+2. Обновляет ключи sessionStorage
 3. Создаёт новый session_id
-4. Обновляет заголовок виджета (показывает имя агента)
+4. Обновляет заголовок виджета
 5. Очищает сообщения и загружает историю нового агента
+6. Сохраняет выбор в `localStorage.agentTutorAgentId`
 
-Актуальное состояние агента хранится в `localStorage` под ключом `agentTutorAgentId`.
-Виджет проверяет его при загрузке страницы и синхронизируется автоматически.
+При загрузке страницы виджет проверяет `localStorage.agentTutorAgentId` и автоматически синхронизируется.
+
+## Голосовой ввод
+
+### Classic режим (`data-voice-toggle="classic"`)
+
+Кнопка микрофона рядом с textarea. Нажатие = вкл/выкл запись. Работает параллельно с текстовым вводом.
+
+### Telegram режим (`data-voice-toggle="telegram"`)
+
+Одна кнопка, которая меняется в зависимости от ввода:
+
+- **Пустое поле** → кнопка микрофона. Зажмите и удерживайте для записи, отпустите — отправится голосовое сообщение.
+- **Текст введён** → кнопка отправки (send) с анимацией замены.
+
+Анимация: кнопка плавно поворачивается и масштабируется при переключении.
+
+```html
+<!-- Telegram-style voice -->
+<script src="/embed/embed.js"
+        data-agent="shop"
+        data-voice-toggle="telegram"
+        data-voice-input="true">
+</script>
+```
+
+## Сборка (для разработчиков)
+
+```bash
+cd api-service/embed
+npm install
+npm run build        # typecheck + esbuild → dist/embed.js + dist/embed.css
+npm run test         # vitest (59 тестов)
+npm run dev          # watch mode
+```
+
+### Структура файлов
+
+```
+api-service/embed/
+├── src/                    # TypeScript source
+│   ├── index.ts           # Entry point, auto-init, event wiring
+│   ├── config.ts          # Parse data-* attributes + window.EMBED_CONFIG
+│   ├── types.ts           # All interfaces (WidgetConfig, SSE events, etc.)
+│   ├── dom.ts             # buildWidget() + DOM query helpers
+│   ├── sse.ts             # streamChat() — POST /api/chat SSE
+│   ├── sse-reader.ts      # Shared SSE stream reader
+│   ├── voice.ts           # MediaRecorder, voice streaming, audio playback
+│   ├── markdown.ts        # Lightweight markdown → HTML
+│   ├── messages.ts        # addMessage(), restoreHistory()
+│   ├── storage.ts         # sessionStorage + session-aware storage
+│   ├── tools.ts           # Tool strip (makeToolStrip, ensureToolStrip)
+│   ├── typewriter.ts      # Token-by-token rendering
+│   └── icons.ts           # SVG icons (chat, close, send, mic)
+│   └── icons/              # SVG icon files
+│       ├── chat.svg
+│       ├── close.svg
+│       ├── mic.svg
+│       ├── mic-off.svg
+│       └── send.svg
+├── css/                    # Component CSS files
+│   ├── variables.css      # Design tokens
+│   ├── root.css           # .at-root (all: initial)
+│   ├── trigger.css        # Floating button
+│   ├── panel.css          # Chat panel
+│   ├── header.css         # Panel header
+│   ├── messages.css       # Message bubbles
+│   ├── form.css           # Input area
+│   ├── tools.css          # Tool strip
+│   ├── animations.css     # Keyframes
+│   └── responsive.css     # Mobile adjustments
+├── dist/                   # Build output
+│   ├── embed.js           # Bundled widget (IIFE, minified, ~44KB)
+│   └── embed.css          # CSS (standalone, ~19KB)
+├── tests/                  # Vitest unit tests (59 tests)
+├── build.sh               # Concat CSS → esbuild bundle
+├── package.json            # 0 runtime deps, 3 dev deps
+├── tsconfig.json           # strict mode
+├── vitest.config.ts        # node + jsdom for DOM tests
+└── README.md               # This file
+```
+
+### Зависимости
+
+- **Runtime**: 0
+- **Dev**: esbuild, typescript, vitest
+
+### TypeScript
+
+Строгий режим: `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`.
 
 ## Кастомизация через CSS переменные
 
@@ -137,27 +242,10 @@ Bridge делает:
 }
 ```
 
-## Запуск в dev-режиме
-
-```bash
-# Сервер api-service раздаёт embed.js и embed.css
-# Web-сервис проксирует /embed/* на api-service:
-#   demo/web/server.py → _proxy_to_api(request, "/embed/{path}")
-```
-
-## Структура файлов
-
-```
-api-service/embed/
-├── embed.js      # Виджет (единственный файл для встраивания)
-├── embed.css     # CSS-запасной (можно добавить на страницу вручную)
-└── README.md     # Этот файл
-```
-
 ## Совместимость
 
 - **Браузеры**: все современные (Chrome, Firefox, Safari, Edge)
-- **ES**: ES5 (транспиляция не нужна)
+- **ES**: ES2018 (транспиляция не нужна)
 - **Зависимости**: нет
 
 ## Продвинутое: несколько виджетов на одной странице
@@ -171,7 +259,7 @@ api-service/embed/
 
 ## Отладка
 
-- В консоли: `window.__agentTutorSetAgent — глобальный bridge`
+- `window.__agentTutorSetAgent` — глобальный bridge для переключения агентов
 - `sessionStorage` ключи: `at_messages_{agent}`, `at_session_{agent}`
 - `localStorage` ключ: `agentTutorAgentId` (используется dashboard'ом)
 
@@ -184,13 +272,4 @@ script-src https://ваш-сервер.com;
 connect-src https://ваш-сервер.com;
 ```
 
-**Пояснение:**
-- `script-src` — виджет загружается через `<script src="https://ваш-сервер.com/embed/embed.js">`. Если ваш CSP запрещает external scripts, виджет не запустится.
-- `connect-src` — виджет делает `fetch` к `POST https://ваш-сервер.com/api/chat/{agent}` для SSE стриминга.
-
 Виджет **не** использует inline-скрипты, `style-src` не нужен благодаря Shadow DOM.
-
-**Безопасность:** сервер устанавливает на `/embed/*` заголовки:
-- `X-Content-Type-Options: nosniff`
-- `X-Frame-Options: DENY`
-- `Cache-Control: public, max-age=31536000, immutable` (для .js/.css)

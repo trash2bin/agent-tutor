@@ -1,4 +1,4 @@
-.PHONY: ci ci-lint-py ci-test-py ci-lint-go ci-test-go ci-audit ci-all
+.PHONY: ci ci-lint-py ci-test-py ci-lint-go ci-test-go ci-audit ci-all ci-test-embed build-embed
 
 ci-lint-py:
 	uv run ruff check api-service/src/
@@ -42,5 +42,16 @@ ci-admin:
 	./scripts/check-admin-contract.sh
 	@echo "✅ Admin dashboard OK"
 
-ci: ci-lint-py ci-audit ci-test-py ci-lint-go ci-test-go ci-lint-js ci-admin
+ci-test-embed:
+	@echo "=== Embed widget tests ==="
+	cd api-service/embed && npm test
+	cd api-service/embed && bash build.sh
+	@echo "✅ Embed widget OK"
+
+build-embed:
+	cd api-service/embed && bash build.sh
+	./scripts/dev.sh restart api
+	@echo "✅ Embed widget rebuilt + api-service restarted"
+
+ci: ci-lint-py ci-audit ci-test-py ci-lint-go ci-test-go ci-lint-js ci-admin ci-test-embed
 	@echo "✅ CI passed locally"

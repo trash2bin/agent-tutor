@@ -138,6 +138,37 @@ curl -X POST http://localhost:8081/api/agents \
 | `data-accent` | ❌ | `#0f766e` | Акцентный цвет |
 | `data-position` | ❌ | `right` | Положение: `right` / `left` |
 | `data-lang` | ❌ | `en` | Язык сообщений об ошибках: `ru` или `en` |
+| `data-width` | ❌ | `min(380px, calc(100vw - 28px))` | Ширина панели (любое CSS-значение) |
+| `data-height` | ❌ | `min(620px, calc(100vh - 44px))` | Высота панели |
+| `data-placeholder` | ❌ | `"Ask a question..."` | Текст-плейсхолдер в поле ввода |
+| `data-header-color` | ❌ | (равно accent) | Цвет фона шапки |
+| `data-show-header` | ❌ | `"true"` | Показывать шапку: `"true"` / `"false"` |
+| `data-bot-bubble-color` | ❌ | `"#eef3f4"` | Цвет фона пузырька ассистента |
+| `data-bot-bubble-text` | ❌ | `"var(--ink)"` | Цвет текста пузырька ассистента |
+| `data-voice-input` | ❌ | `"true"` | Голосовой ввод: `"true"` / `"false"` |
+| `data-voice-output` | ❌ | `"true"` | Голосовой вывод (TTS): `"true"` / `"false"` |
+| `data-voice-toggle` | ❌ | `"classic"` | Режим голоса: `"classic"` (toggle) / `"telegram"` (зажать=запись, текст=send) |
+
+### Голосовой ввод
+
+#### Classic режим (`data-voice-toggle="classic"`)
+
+Кнопка микрофона рядом с textarea. Нажатие = вкл/выкл запись. Работает параллельно с текстовым вводом.
+
+#### Telegram режим (`data-voice-toggle="telegram"`)
+
+Одна кнопка, которая меняется в зависимости от ввода:
+
+- **Пустое поле** → кнопка микрофона. Зажмите и удерживайте для записи, отпустите — отправится голосовое сообщение.
+- **Текст введён** → кнопка отправки (send) с анимацией замены.
+
+```html
+<script src="/embed/embed.js"
+        data-agent="shop"
+        data-voice-toggle="telegram"
+        data-voice-input="true">
+</script>
+```
 
 ### Автозагрузка конфига из API
 

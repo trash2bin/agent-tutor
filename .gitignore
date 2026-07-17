@@ -95,3 +95,6 @@ playwright-report/
 # Symlinks to specs/
 api-service/specs
 /cmd
+
+# tp and js
+node_modules/

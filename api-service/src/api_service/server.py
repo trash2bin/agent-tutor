@@ -451,12 +451,12 @@ app.add_middleware(
 # Mount embed widget static files
 # Resolution order:
 #   1. EMBED_DIR env var (absolute override for production)
-#   2. <project_root>/embed/
+#   2. <project_root>/embed/dist/
 embed_override = os.environ.get("EMBED_DIR")
 if embed_override:
     embed_path = Path(embed_override)
 else:
-    embed_path = Path(__file__).resolve().parent.parent.parent / "embed"
+    embed_path = Path(__file__).resolve().parent.parent.parent / "embed" / "dist"
 if embed_path.is_dir():
     app.mount("/embed", StaticFiles(directory=str(embed_path)), name="embed")
     logger.info("Embed widget mounted at /embed from %s", embed_path)

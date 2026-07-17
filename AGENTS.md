@@ -598,6 +598,12 @@ Web-сервис (`demo/web/server.py`) — тонкий reverse-proxy с под
 - `GET /api/rag/documents` → rag-service `/documents/list`
 - `GET/POST /api/chat` → api-service `/api/chat` (SSE)
 - `GET /embed/{path}` → прокси на api-service `/embed/{path}` (виджет: [api-service/embed/README.md](api-service/embed/README.md))
+  > **⚠️ После изменений в `api-service/embed/src/` или `api-service/embed/css/` нужно:**
+  > ```bash
+  > cd api-service/embed && npm run build  # typecheck + esbuild → dist/embed.js + dist/embed.css
+  > ./scripts/dev.sh restart api            # api-service монтирует embed/dist/
+  > ```
+  > Без `restart api` api-service отдаёт старый JS (кеш в памяти).
 - `GET/POST /api/tenant/{tenant_id}/{path:path}` — универсальный маршрут:
   - `data/{entity}` → data-service
   - `rag/{path}` → rag-service
@@ -703,6 +709,15 @@ uv run pytest helperium-sdk/tests/       # SDK модели и seedgen — 83 т
 go test ./data-service/... ./mcp-gateway/...  # ~585 тестов в 16 пакетах (data-service: ~416, mcp-gateway: ~121, admin-dashboard: ~58, helperium-go: ~22)
 # Seedgen больше не часть data-service — вынесен в agent-db/agent_db/seedgen/ (Python)
 ```
+
+### 2b. Embed Widget (TypeScript)
+```bash
+cd api-service/embed && npm test    # 59 тестов (vitest)
+cd api-service/embed && bash build.sh  # typecheck + esbuild → dist/embed.js
+# Или через Makefile из корня:
+make ci-test-embed
+```
+> **⚠️ После пересборки виджета:** `./scripts/dev.sh restart api` — api-service монтирует `embed/dist/`, без перезапуска отдаёт старый JS.
 
 ### 3. Сквозные интеграционные тесты
 
