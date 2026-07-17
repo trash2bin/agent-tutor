@@ -163,6 +163,7 @@ services:
       - RAG_SERVICE_URL=http://rag:8082
       - API_SERVICE_URL=http://api:8081
       - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - VIEWER_TOKEN=${VIEWER_TOKEN:-}
       - DATA_DIR=/data/uploads
     depends_on:
       data-service:

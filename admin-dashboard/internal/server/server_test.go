@@ -224,3 +224,141 @@ func TestStaticFileSecurityHeaders_CSSFile(t *testing.T) {
 		t.Errorf("X-Content-Type-Options = %q, want %q", xcto, "nosniff")
 	}
 }
+
+// ── RBAC Tests ──
+
+func TestAdminToken_AllMethodsAllowed(t *testing.T) {
+	s := New(Options{Addr: ":0", AdminToken: "admin-secret", ViewerToken: "viewer-secret"})
+	router := s.Router()
+
+	methods := []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete}
+	for _, method := range methods {
+		t.Run(method, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(method, "/api/tenants", nil)
+			req.Header.Set("Authorization", "Bearer admin-secret")
+			router.ServeHTTP(w, req)
+			// 502 = proxy bad gateway (expected — no upstream), not 401/403
+			if w.Code == http.StatusUnauthorized || w.Code == http.StatusForbidden {
+				t.Errorf("admin %s /api/tenants = %d, want anything but 401/403", method, w.Code)
+			}
+		})
+	}
+}
+
+func TestViewerToken_GetAllowed_PostPutDeleteForbidden(t *testing.T) {
+	s := New(Options{Addr: ":0", AdminToken: "admin-secret", ViewerToken: "viewer-secret"})
+	router := s.Router()
+
+	t.Run("GET allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/tenants", nil)
+		req.Header.Set("Authorization", "Bearer viewer-secret")
+		router.ServeHTTP(w, req)
+		// 502 = proxy bad gateway (expected), not 401/403
+		if w.Code == http.StatusUnauthorized || w.Code == http.StatusForbidden {
+			t.Errorf("viewer GET /api/tenants = %d, want anything but 401/403", w.Code)
+		}
+	})
+
+	t.Run("POST forbidden", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/tenants", nil)
+		req.Header.Set("Authorization", "Bearer viewer-secret")
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("viewer POST /api/tenants = %d, want 403", w.Code)
+		}
+	})
+
+	t.Run("PUT forbidden", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/api/tenants/test/config", nil)
+		req.Header.Set("Authorization", "Bearer viewer-secret")
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("viewer PUT /api/tenants/test/config = %d, want 403", w.Code)
+		}
+	})
+
+	t.Run("DELETE forbidden", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/tenants/test", nil)
+		req.Header.Set("Authorization", "Bearer viewer-secret")
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("viewer DELETE /api/tenants/test = %d, want 403", w.Code)
+		}
+	})
+}
+
+func TestNoToken_ReturnsUnauthorized(t *testing.T) {
+	s := New(Options{Addr: ":0", AdminToken: "admin-secret"})
+	router := s.Router()
+
+	t.Run("no auth header", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/tenants", nil)
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("no auth = %d, want 401", w.Code)
+		}
+	})
+
+	t.Run("wrong token", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/tenants", nil)
+		req.Header.Set("Authorization", "Bearer wrong-token")
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("wrong token = %d, want 401", w.Code)
+		}
+	})
+}
+
+func TestNoTokensConfigured_ReturnsServerError(t *testing.T) {
+	s := New(Options{Addr: ":0", AdminToken: "", ViewerToken: ""})
+	router := s.Router()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/tenants", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("no tokens = %d, want 500", w.Code)
+	}
+}
+
+func TestStaticFilesBypassAuth(t *testing.T) {
+	s := New(Options{Addr: ":0", AdminToken: "admin-secret"})
+	router := s.Router()
+
+	paths := []string{"/", "/styles.css", "/app.js", "/static/logo.svg", "/js/store.js", "/health", "/api/health"}
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, p, nil)
+			router.ServeHTTP(w, req)
+			if w.Code == http.StatusUnauthorized || w.Code == http.StatusForbidden {
+				t.Errorf("static path %s returned %d, should bypass auth", p, w.Code)
+			}
+		})
+	}
+}
+
+func TestViewerCanAccessHealthAndStatic(t *testing.T) {
+	s := New(Options{Addr: ":0", ViewerToken: "viewer-secret"})
+	router := s.Router()
+
+	paths := []string{"/", "/styles.css", "/health", "/api/health", "/i18n.json", "/metrics"}
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, p, nil)
+			// No auth needed for static/health
+			router.ServeHTTP(w, req)
+			if w.Code == http.StatusUnauthorized || w.Code == http.StatusForbidden {
+				t.Errorf("viewer public path %s returned %d, should bypass auth", p, w.Code)
+			}
+		})
+	}
+}

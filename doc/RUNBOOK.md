@@ -47,6 +47,9 @@ DEMO_TENANTS=client-name
 
 # Only for prod:
 DOMAIN=chat.client.com
+
+# Optional: read-only access to admin dashboard
+# VIEWER_TOKEN=viewer-token
 ```
 
 The other ~170 vars have safe defaults. Only change per client.
@@ -99,6 +102,8 @@ uv run agent-rag-ingest import /path/to/doc.pdf -d client-name
 ## Configure agent
 
 Admin dashboard: `http://localhost:8085`
+
+**Auth:** логин с `ADMIN_TOKEN` (полный доступ) или `VIEWER_TOKEN` (только чтение).
 
 1. **Tenants** — check client-name exists
 2. **Config** — verify LLM provider

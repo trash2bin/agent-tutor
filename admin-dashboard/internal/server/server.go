@@ -12,6 +12,7 @@
 package server
 
 import (
+	"context"
 	"embed"
 	"bytes"
 	"encoding/json"
@@ -35,12 +36,13 @@ import (
 
 // Options для создания сервера.
 type Options struct {
-	Addr       string
-	DataSvcURL string
-	RagSvcURL  string
-	ApiSvcURL  string
-	AdminToken string
-	DataDir    string
+	Addr        string
+	DataSvcURL  string
+	RagSvcURL   string
+	ApiSvcURL   string
+	AdminToken  string
+	ViewerToken string
+	DataDir     string
 }
 
 // responseWriter wraps http.ResponseWriter to capture the status code.
@@ -105,7 +107,7 @@ func (s *Server) Router() chi.Router {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(corsMiddleware)
-	r.Use(authMiddleware(s.opts.AdminToken))
+	r.Use(authMiddleware(s.opts.AdminToken, s.opts.ViewerToken))
 
 	// Prometheus metrics (no auth needed)
 	r.Handle("/metrics", promhttp.Handler())
@@ -215,19 +217,40 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// authMiddleware проверяет Authorization: Bearer <token>.
-func authMiddleware(token string) func(http.Handler) http.Handler {
+type contextKey string
+
+const roleKey contextKey = "role"
+
+// RoleFromContext извлекает роль из контекста запроса.
+func RoleFromContext(ctx context.Context) string {
+	if r, ok := ctx.Value(roleKey).(string); ok {
+		return r
+	}
+	return ""
+}
+
+// isPublicPath возвращает true для путей, не требующих авторизации.
+func isPublicPath(path string) bool {
+	switch path {
+	case "/", "/index.html", "/styles.css", "/app.js", "/i18n.js", "/i18n.json", "/metrics":
+		return true
+	}
+	if strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/js/") {
+		return true
+	}
+	return false
+}
+
+// authMiddleware проверяет Authorization: Bearer <token> для двух уровней:
+//   - ADMIN_TOKEN  → role="admin"  (полный доступ)
+//   - VIEWER_TOKEN → role="viewer" (только GET на /api/*)
+func authMiddleware(adminToken, viewerToken string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 
-			// Static files — без auth (все пути под .css, .js, i18n.json, i18n.js, index.html)
-			if path == "/" || path == "/index.html" || path == "/styles.css" || path == "/app.js" || path == "/i18n.js" || path == "/i18n.json" || path == "/metrics" {
-				next.ServeHTTP(w, r)
-				return
-			}
-			if strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/js/") {
-				// Static assets and domain JS modules bypass auth
+			// Static files — без auth
+			if isPublicPath(path) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -237,17 +260,31 @@ func authMiddleware(token string) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if token == "" {
-				http.Error(w, `{"error":"ADMIN_TOKEN not configured"}`, http.StatusInternalServerError)
-				return
-			}
+
 			auth := r.Header.Get("Authorization")
-			expected := "Bearer " + token
-			if auth != expected {
+
+			var role string
+			switch {
+			case adminToken != "" && auth == "Bearer "+adminToken:
+				role = "admin"
+			case viewerToken != "" && auth == "Bearer "+viewerToken:
+				role = "viewer"
+			case adminToken == "" && viewerToken == "":
+				http.Error(w, `{"error":"no tokens configured"}`, http.StatusInternalServerError)
+				return
+			default:
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
-			next.ServeHTTP(w, r)
+
+			// Viewer restriction: только GET/OPTIONS на /api/*
+			if role == "viewer" && strings.HasPrefix(path, "/api/") && r.Method != http.MethodGet && r.Method != http.MethodOptions {
+				http.Error(w, `{"error":"viewer: read-only access"}`, http.StatusForbidden)
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), roleKey, role)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
@@ -436,6 +473,8 @@ func (s *Server) i18nHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) dashboardHandler(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+
 	// Получаем список тенантов из data-service (возвращает {"tenants": [...]})
 	body, status, err := s.proxyGetToDataService("/admin/tenants")
 	if err != nil {
@@ -471,6 +510,7 @@ func (s *Server) dashboardHandler(w http.ResponseWriter, r *http.Request) {
 		"tenants":      respData["tenants"],
 		"tenant_count": tCount,
 		"data_service": s.opts.DataSvcURL,
+		"role":         role,
 	})
 }
 

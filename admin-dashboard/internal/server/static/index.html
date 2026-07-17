@@ -24,6 +24,15 @@
   <link rel="stylesheet" href="/styles.css?v=1">
   <style>
     /* Inline login overlay styles so they load instantly before Alpine boots */
+
+/* Viewer role: hide all write buttons (backend also blocks POST/PUT/DELETE for viewer) */
+[data-role="viewer"] .btn-danger { display: none !important; }
+[data-role="viewer"] .btn-write,
+[data-role="viewer"] button:has(.btn-write) { display: none !important; }
+[data-role="viewer"] .page-header-right .btn-primary,
+[data-role="viewer"] .form-actions .btn-primary { display: none !important; }
+[data-role="viewer"] a:has(.btn-write) { display: none !important; }
+[data-role="viewer"] .modal-overlay { display: none !important; }
     .login-overlay {
       position: fixed;
       inset: 0;
@@ -237,7 +246,7 @@
 }
   </style>
 </head>
-<body x-data="dashboard()" x-init="init()">
+<body x-data="dashboard()" x-init="init()" :data-role="$store.ui.role || localStorage.getItem('admin_role')">
   <!-- ── Login Overlay ── -->
   <div x-show="!tokenSet" class="login-overlay" x-cloak>
     <div class="login-card">
@@ -269,6 +278,7 @@
         </a>
         <a href="#" @click.prevent="page='tenants'; if (typeof loadTenants==='function') loadTenants(); document.querySelector('.main').scrollTop = 0" :class="{active: page==='tenants'}">
           <span x-text="__('nav.tenants')"></span>
+          <span x-show="$store.ui.isViewer()" style="font-size:10px;color:#8b949e;margin-left:4px;">👁️</span>
         </a>
         <a href="#" @click.prevent="page='config'; if (typeof refreshConfig==='function') refreshConfig(); document.querySelector('.main').scrollTop = 0" :class="{active: page==='config'}" x-show="selectedTenant">
           <span x-text="__('nav.config')"></span>

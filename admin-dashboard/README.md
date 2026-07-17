@@ -18,7 +18,12 @@ Admin Dashboard (:8085)
   └─ /api/agents/*              → API service (:8081) — CRUD агентов
 ```
 
-**Защита:** Все API-запросы (кроме `/api/health` и статики) требуют `Authorization: Bearer <ADMIN_TOKEN>`.
+**Защита:** Все API-запросы (кроме `/api/health` и статики) требуют `Authorization: Bearer <token>`.
+Два уровня доступа:
+- **admin** (`ADMIN_TOKEN`) — полный CRUD
+- **viewer** (`VIEWER_TOKEN`) — только GET на `/api/*` (read-only). POST/PUT/DELETE → 403.
+
+Роль определяется автоматически по токену и возвращается в `/api/dashboard`.
 
 ---
 
@@ -180,7 +185,8 @@ curl -s -H "Authorization: Bearer secret" http://localhost:8085/api/health
 | `DATA_SERVICE_URL` | `http://localhost:8084` | Data service URL |
 | `RAG_SERVICE_URL` | `http://localhost:8082` | RAG service URL |
 | `API_SERVICE_URL` | `http://localhost:8081` | API service URL |
-| `ADMIN_TOKEN` | — | Bearer-токен для API (обязателен, без него API возвращает 500) |
+| `ADMIN_TOKEN` | — | Bearer-токен для API (admin, полный доступ). Без него API возвращает 500 |
+| `VIEWER_TOKEN` | — | Bearer-токен для API (viewer, только чтение). Опционально. |
 | `DATA_DIR` | `/data` | Директория для загруженных SQLite-файлов тенантов |
 | `LOG_LEVEL` | `info` | Уровень логирования: debug, info, warn, error |
 | `LOG_FORMAT` | `json` | Формат: json (slog) или text |
@@ -189,11 +195,33 @@ curl -s -H "Authorization: Bearer secret" http://localhost:8085/api/health
 
 ## Безопасность
 
-- Все API-эндпоинты (кроме `/api/health` и статики) защищены `ADMIN_TOKEN`
+### Аутентификация (RBAC)
+
+Два уровня доступа:
+
+| Роль | Токен | Права |
+|---|---|---|
+| **admin** | `ADMIN_TOKEN` | Полный CRUD: все методы, все эндпоинты |
+| **viewer** | `VIEWER_TOKEN` | Только GET/OPTIONS на `/api/*`. POST/PUT/DELETE → 403 Forbidden |
+
 - Токен передаётся как `Bearer <token>` в заголовке `Authorization`
-- Без токена сервис возвращает `500 ADMIN_TOKEN not configured`
-- UI имеет форму логина — токен сохраняется в `localStorage` браузера
-- CORS разрешён для всех origin (dev-mode)
+- Если не задан ни один токен — `/api/*` возвращают 500
+- Если токен не совпал — 401
+- Роль возвращается в `/api/dashboard` как `"role": "admin"|"viewer"`
+- UI: фронтенд фетчит роль при логине, скрывает write-кнопки для viewer
+
+### Публичные пути (без auth)
+
+- `/health`, `/api/health`
+- `/`, `/index.html`, `/styles.css`, `/app.js`, `/i18n.json`, `/i18n.js`
+- `/static/*`, `/js/*`
+- `/metrics`
+
+### CORS
+
+- По умолчанию: `http://localhost:8080`
+- Для embed/production: `CORS_ALLOW_ORIGINS=*`
+- Разрешённые заголовки: `Content-Type, Authorization, X-Tenant-ID, X-Correlation-ID`
 
 ---
 

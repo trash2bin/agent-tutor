@@ -700,7 +700,7 @@ uv run pytest helperium-sdk/tests/       # SDK модели и seedgen — 83 т
 
 ### 2. Go Unit/Integration тесты
 ```bash
-go test ./data-service/... ./mcp-gateway/...  # ~585 тестов в 16 пакетах (data-service: ~416, mcp-gateway: ~121, admin-dashboard: ~26, helperium-go: ~22)
+go test ./data-service/... ./mcp-gateway/...  # ~585 тестов в 16 пакетах (data-service: ~416, mcp-gateway: ~121, admin-dashboard: ~58, helperium-go: ~22)
 # Seedgen больше не часть data-service — вынесен в agent-db/agent_db/seedgen/ (Python)
 ```
 
@@ -773,6 +773,15 @@ go test ./data-service/... ./mcp-gateway/...  # ~585 тестов в 16 паке
 
 ### api-service level
 Список tenant'ов определяется заголовком `X-Tenant-ID` от web-прокси и передаётся как `tenant_ids: list[str]` через orchestrator → MCPClient. Если tenant не указан в заголовке, его данные и инструменты недоступны.
+
+### Admin Dashboard level (RBAC)
+Два уровня доступа к admin dashboard:
+- **admin** (`ADMIN_TOKEN`) — полный CRUD: создание/удаление tenant'ов, редактирование конфигов, аппрув тулов, управление агентами/RAG/LLM/voice
+- **viewer** (`VIEWER_TOKEN`) — только чтение: GET на `/api/*`, POST/PUT/DELETE → 403 Forbidden
+
+Роль определяется на уровне middleware в `admin-dashboard/internal/server/server.go` по токену в заголовке `Authorization: Bearer <token>`. Фронтенд (Alpine.js) фетчит роль из `/api/dashboard` при логине и скрывает write-кнопки для viewer — блокировка на уровне backend, CSS — чисто UX.
+
+**Публичные пути** (без auth): `/health`, `/api/health`, статика `/`, `/styles.css`, `/app.js`, `/js/*`, `/static/*`, `/i18n.json`, `/i18n.js`, `/metrics`.
 
 ### Верификация изоляции
 - `e2e-data` — data-level: tenant-a не видит БД tenant-b (разные SQLite файлы).
