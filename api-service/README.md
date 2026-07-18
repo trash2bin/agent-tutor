@@ -1,10 +1,12 @@
-# API Service (demo-api)
+# API Service
 
 Оркестратор LLM-агента с MCP-интеграцией, управлением сессиями и бэклогом.
 
+**Не демка.** Это основной сервис, через который проходят все LLM-запросы.
+
 ## Роль в системе
 
-`demo-api` — единственный компонент, который общается с LLM (через LiteLLM). Он:
+`api-service` — единственный компонент, который общается с LLM (через LiteLLM). Он:
 - Формирует системный промпт + Persona агента
 - Управляет MCP-клиентом (подключение к mcp-gateway:8083)
 - Хранит историю диалогов (SQLite: `demo_sessions.sqlite`)
@@ -39,6 +41,19 @@
 | `/api/agents/{name}/widget-config` | GET | Конфиг виджета для агента (используется embed.js) |
 | `/embed/embed.js` | GET | JS-файл embed-виджета (Shadow DOM, стриминг) |
 | `/embed/embed.css` | GET | CSS стили виджета |
+| `/admin/abuse-config` | GET | Anti-abuse конфигурация |
+| `/admin/abuse-config/reload` | POST | Перезагрузить abuse config |
+| `/admin/abuse-config` | POST | Обновить abuse config |
+| `/admin/llm-providers` | GET | Список LLM-провайдеров |
+| `/admin/llm-provider-list` | GET | Доступные провайдеры (из litellm) |
+| `/admin/llm-providers/{name}` | GET | Детали провайдера |
+| `/admin/llm-providers` | POST | Создать провайдера |
+| `/admin/llm-providers/{name}` | PUT | Обновить провайдера |
+| `/admin/llm-providers/{name}` | DELETE | Удалить провайдера |
+| `/admin/llm-providers/{name}/toggle` | POST | Вкл/выкл провайдера |
+| `/admin/llm-config` | GET | Глобальная LLM-конфигурация |
+| `/api/voice-config` | GET | Voice config (STT/TTS) |
+| `/api/voice-config` | PUT | Обновить voice config |
 
 ## Per-Agent LLM Config
 
@@ -275,7 +290,7 @@ cd /project/root
 uv run python -m demo.api.server
 
 # Или напрямую
-uv run --package demo-api python -m uvicorn demo.api.server:app --port 8081
+uv run --package api-service python -m uvicorn api_service.server:app --port 8081
 ```
 
 ## Тестирование

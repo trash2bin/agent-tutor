@@ -6,8 +6,10 @@ FastAPI reverse-proxy для multi-tenant архитектуры helperium.
 
 `demo-web` — тонкий reverse-proxy, который:
 - Обслуживает статический фронтенд (HTML/JS/CSS)
-- Проксирует API-запросы к `demo-api:8081` (агент, чат, сессии)
+- Проксирует API-запросы к `api-service:8081` (агент, чат, сессии)
 - Проксирует данные напрямую в `data-service:8084` (обход api-service для снижения latency)
+
+**Не демка.** Несмотря на название `demo-web`, это основной UI-слой — reverse-proxy для всего стека. Статические HTML/JS/CSS — это production-фронтенд, а не демо-заглушка.
 - Проксирует RAG-запросы в `rag:8082` (документы)
 - Пробрасывает `X-Tenant-ID` для multi-tenancy изоляции
 
@@ -77,7 +79,7 @@ Browser → /api/tenant/school-a/data/students
 
 ```python
 async def _proxy_to_api(request, api_path, stream=False)
-  # Проксирует в demo-api
+  # Проксирует в api-service
   # Headers: X-Tenant-ID из request.headers ИЛИ request.state.tenant_id
 
 async def _proxy_to_data_service(request, data_path)
@@ -238,7 +240,7 @@ curl -s http://127.0.0.1:8080/health
 curl -s -H "X-Tenant-ID: default" http://127.0.0.1:8080/api/manifest | jq '.entities | length'
 # Должен вернуть > 0
 
-# 4. Proxy → demo-api (SSE chat endpoint)
+# 4. Proxy → api-service (SSE chat endpoint)
 curl -s -X POST http://127.0.0.1:8080/api/chat \
   -H "Content-Type: application/json" -H "X-Tenant-ID: default" \
   -d '{"message":"test","session_id":"test"}' | head -c 200
