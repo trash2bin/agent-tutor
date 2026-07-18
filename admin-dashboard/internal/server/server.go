@@ -244,7 +244,7 @@ func RoleFromContext(ctx context.Context) string {
 // isPublicPath возвращает true для путей, не требующих авторизации.
 func isPublicPath(path string) bool {
 	switch path {
-	case "/", "/index.html", "/styles.css", "/app.js", "/i18n.js", "/i18n.json", "/metrics":
+	case "/", "/index.html", "/styles.css", "/admin.css", "/app.js", "/i18n.js", "/i18n.json", "/metrics":
 		return true
 	}
 	if strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/js/") || strings.HasPrefix(path, "/dist/") {

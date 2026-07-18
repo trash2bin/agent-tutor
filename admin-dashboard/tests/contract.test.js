@@ -16,7 +16,7 @@ import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DOMAINS_DIR = join(__dirname, '../internal/server/static/js/domains');
+const DOMAINS_DIR = join(__dirname, '../src/domains');
 const CONTRACTS_DIR = join(__dirname, 'contracts');
 
 // ── Normalize path ──
@@ -141,7 +141,7 @@ function matchContract(method, path) {
 
 // ── Collect all calls ──
 let allCalls = [];
-const domainFiles = readdirSync(DOMAINS_DIR).filter(function (f) { return f.endsWith('.js'); });
+const domainFiles = readdirSync(DOMAINS_DIR).filter(function (f) { return f.endsWith('.ts'); });
 
 domainFiles.forEach(function (f) {
   allCalls = allCalls.concat(extractApiCalls(readFileSync(join(DOMAINS_DIR, f), 'utf-8'), f));
