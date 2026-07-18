@@ -262,6 +262,7 @@ curl -X POST http://localhost:8081/api/agents \
 | `AGENT_DB_PATH` | `<session_db_dir>/agents.sqlite` | Путь к БД агентов + global config |
 | `BACKLOG_DIR` | `./backlog` | Директория бэклогов |
 | `BACKLOG_RETENTION_DAYS` | `30` | Дней хранения бэклогов |
+| `BACKLOG_MODE` | `full` | `full` — всё пишется, `errors` — только ошибки, `off` — ничего не пишется |
 | `DEMO_HISTORY_TURNS` | `8` | Кол-во ходов в контексте |
 | `DEMO_HISTORY_CONTENT_CHARS` | `6000` | Макс. символов в истории |
 | `DEMO_REQUEST_TIMEOUT` | `600` | Таймаут запросов к LLM (сек) |

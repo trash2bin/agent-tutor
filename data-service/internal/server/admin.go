@@ -288,7 +288,7 @@ func adminConfigVersionsHandler(ctx *AdminContext) http.HandlerFunc {
 
 // buildRouterFromConfig собирает роутер из конфига (dry-run).
 func buildRouterFromConfig(cfg *config.Config, ctx *AdminContext) (http.Handler, error) {
-	return NewRouterFromConfig(nil, cfg, ctx.DB, ctx.Router, ctx.Adapter, ctx.ConfigPath, nil, nil)
+	return NewRouterFromConfig(nil, cfg, ctx.DB, nil)
 }
 
 // archiveCurrentConfig сохраняет текущий config.json как config.{ts}.json.

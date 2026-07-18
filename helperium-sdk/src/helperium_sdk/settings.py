@@ -70,6 +70,7 @@ class DemoSettings:
         self.backlog_retention_days: int = int(
             os.environ.get("BACKLOG_RETENTION_DAYS", "30")
         )
+        self.backlog_mode: str = os.environ.get("BACKLOG_MODE", "full")
 
         # MCP service URL for HTTP transport
         self.mcp_service_url: str = os.environ.get(

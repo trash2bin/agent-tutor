@@ -250,7 +250,7 @@ func (ts *TenantStore) adminConfigUpdateHandler(w http.ResponseWriter, r *http.R
 	if targetPath == "" {
 		targetPath = ts.TenantConfigPath(inst.ID)
 	}
-	_, err := NewRouterFromConfig(ts, &newCfg, inst.AdapterSub, inst.AdapterSub, inst.Adapter, targetPath, nil, nil)
+	_, err := NewRouterFromConfig(ts, &newCfg, inst.AdapterSub, nil)
 	if err != nil {
 		handlers.RespondError(w, http.StatusBadRequest, "build_error",
 			fmt.Sprintf("router build failed: %v", err))
@@ -568,7 +568,7 @@ func (ts *TenantStore) adminTenantApproveToolHandler(w http.ResponseWriter, r *h
 		for _, p := range inst.Config.ApprovedTools {
 			approvedTools[p] = true
 		}
-		newRouter, err := NewRouterFromConfig(ts, inst.Config, inst.AdapterSub, inst.AdapterSub, inst.Adapter, inst.ConfigPath, nil, approvedTools)
+		newRouter, err := NewRouterFromConfig(ts, inst.Config, inst.AdapterSub, approvedTools)
 		if err != nil {
 			return fmt.Errorf("rebuild router after approval: %w", err)
 		}

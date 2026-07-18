@@ -133,6 +133,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/backlog/export/{session_id}:
+    get:
+      summary: Экспорт сессии бэклога
+      description: Export backlog session as JSONL for fine-tuning.
+      operationId: export_backlog_api_backlog_export__session_id__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/session/history:
     get:
       summary: История сессии

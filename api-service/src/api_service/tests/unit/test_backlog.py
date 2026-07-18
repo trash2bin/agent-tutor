@@ -219,3 +219,80 @@ def test_sessions_are_isolated(backlog_tmpdir):
     assert len(backlog_tmpdir.read_session("session-x")) == 1
     assert len(backlog_tmpdir.read_session("session-y")) == 1
     assert backlog_tmpdir.read_session("session-x")[0]["data"]["user_message"] == "X"
+
+
+# --- Backlog mode ---
+
+
+def test_backlog_mode_off(backlog_tmpdir):
+    """backlog_mode='off' writes nothing."""
+    with patch("api_service.backlog.settings.backlog_mode", "off"):
+        bl = ModelBacklog()
+        bl.turn_start("test", "hello")
+        records = bl._read_records("test")
+        assert len(records) == 0
+
+
+def test_backlog_mode_errors_skips_non_errors(backlog_tmpdir):
+    """backlog_mode='errors' writes only error/tool_error events."""
+    with patch("api_service.backlog.settings.backlog_mode", "errors"):
+        bl = ModelBacklog()
+        bl.turn_start("test", "hello")
+        bl.tool_result("test", "t1", 0, "foo", "ok", 1.0)
+        records = bl._read_records("test")
+        assert len(records) == 0
+
+        # Now write an error
+        bl.error("test", "t1", 0, "something broke")
+        records = bl._read_records("test")
+        assert len(records) == 1
+        assert records[0]["event"] == "error"
+
+
+def test_backlog_mode_errors_keeps_error_events(backlog_tmpdir):
+    """backlog_mode='errors' keeps records with event='error' or type=RECORD_ERROR."""
+    with patch("api_service.backlog.settings.backlog_mode", "errors"):
+        bl = ModelBacklog()
+        # error() creates records with event="error" → should pass
+        bl.error("test", "t1", 0, "something broke")
+        records = bl._read_records("test")
+        assert len(records) == 1
+
+        # llm_call with status=error has type=RECORD_LLM_CALL, not "error"
+        # and event is not set — should NOT pass the filter
+        bl.record_llm_call("test", model="gpt", provider="openai", status="error")
+        records = bl._read_records("test")
+        assert len(records) == 1  # still 1
+
+
+def test_backlog_mode_full_default(backlog_tmpdir):
+    """Default backlog_mode='full' writes everything."""
+    # backlog_tmpdir already runs with default settings
+    backlog_tmpdir.turn_start("test", "hello")
+    backlog_tmpdir.tool_result("test", "t1", 0, "foo", "some result", 1.0)
+    backlog_tmpdir.error("test", "t1", 0, "err")
+    records = backlog_tmpdir._read_records("test")
+    assert len(records) == 3
+
+
+def test_backlog_setting_default_is_full():
+    """The settings.backlog_mode defaults to 'full'."""
+    from helperium_sdk.settings import settings
+
+    assert settings.backlog_mode == "full"
+
+
+def test_tool_result_stores_full_content_in_backlog():
+    """backlog.tool_result stores full content (truncation is in tool_handler)."""
+    with tempfile.TemporaryDirectory() as td:
+        with patch("api_service.backlog.settings.backlog_dir", td):
+            with patch("api_service.backlog.settings.backlog_mode", "full"):
+                bl = ModelBacklog()
+                long_result = "x" * 15_000
+                bl.tool_result("session-1", "t1", 0, "test_tool", long_result, 1.0)
+                records = bl._read_records("session-1")
+                assert len(records) == 1
+                stored = records[0]["data"]["result"]
+                # backlog stores full content; truncation is in tool_handler.py
+                assert len(stored) == 15_000
+                assert records[0]["data"]["result_chars"] == 15_000

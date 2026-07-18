@@ -50,7 +50,8 @@ type TenantInstance struct {
 
 	// healthMu guards Healthy and LastError — health check goroutines write,
 	// admin handlers read. Both must acquire healthMu.Lock() before access.
-	healthMu           sync.Mutex
+	// Pointer to prevent data races when TenantInstance is inadvertently copied.
+	healthMu           *sync.Mutex
 	Healthy            bool                 // (guarded by healthMu) last health ping result
 	LastError          string               // (guarded by healthMu) last error message if unhealthy
 	ApprovedTools      map[string]bool      // approved write endpoints (key = path, set on load from cfg.ApprovedTools)

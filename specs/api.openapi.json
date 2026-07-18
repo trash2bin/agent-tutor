@@ -202,6 +202,39 @@
         }
       }
     },
+    "/api/backlog/export/{session_id}": {
+      "get": {
+        "summary": "Экспорт сессии бэклога",
+        "description": "Export backlog session as JSONL for fine-tuning.",
+        "operationId": "export_backlog_api_backlog_export__session_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/session/history": {
       "get": {
         "summary": "История сессии",
@@ -235,6 +268,540 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/guardrails": {
+      "get": {
+        "summary": "Get Guardrails",
+        "description": "Get current guard config.",
+        "operationId": "get_guardrails_admin_guardrails_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Update Guardrails",
+        "description": "Update guard config. Accepts: enabled, block_on_match.",
+        "operationId": "update_guardrails_admin_guardrails_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Config"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/spending": {
+      "get": {
+        "summary": "Get All Spending",
+        "description": "Get spending overview.",
+        "operationId": "get_all_spending_admin_spending_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/spending/{tenant_id}": {
+      "get": {
+        "summary": "Get Tenant Spending",
+        "description": "Get spending for a specific tenant.",
+        "operationId": "get_tenant_spending_admin_spending__tenant_id__get",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Set Tenant Budget",
+        "description": "Set per-tenant budget override.\n\nBody: {\"budget\": 100.0}",
+        "operationId": "set_tenant_budget_admin_spending__tenant_id__post",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Config"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/abuse-config": {
+      "get": {
+        "summary": "Get Abuse Config",
+        "description": "Get the current effective abuse configuration (from file + env).",
+        "operationId": "get_abuse_config_admin_abuse_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Save Abuse Config",
+        "description": "Save new abuse config directly (admin dashboard alternative endpoint).",
+        "operationId": "save_abuse_config_admin_abuse_config_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Data"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/abuse-config/reload": {
+      "post": {
+        "summary": "Reload Abuse Config",
+        "description": "Reload abuse config from disk and apply runtime settings.\n\nCalled by admin-dashboard after saving new config.\nApplies runtime settings (history, loops) to the live settings object.",
+        "operationId": "reload_abuse_config_admin_abuse_config_reload_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/llm-providers": {
+      "get": {
+        "summary": "List Llm Providers",
+        "description": "List all LLM providers with masked API keys.",
+        "operationId": "list_llm_providers_admin_llm_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Add Llm Provider",
+        "description": "Add a new LLM provider.\n\nBody:\n    name (required): unique provider name\n    model (required): model identifier (e.g. openai/gpt-4o, anthropic/claude-3-sonnet)\n    provider: provider type — auto-detected from model prefix if omitted\n    api_key: API key (will not be returned in full)\n    api_base: custom API base URL\n    enabled: whether the provider is active (default: true)",
+        "operationId": "add_llm_provider_admin_llm_providers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/llm-provider-list": {
+      "get": {
+        "summary": "List Litellm Providers",
+        "description": "List all available providers from LiteLLM (live, no hardcode).",
+        "operationId": "list_litellm_providers_admin_llm_provider_list_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/llm-providers/{name}": {
+      "get": {
+        "summary": "Get Llm Provider",
+        "description": "Get a single LLM provider with masked API key.",
+        "operationId": "get_llm_provider_admin_llm_providers__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update Llm Provider",
+        "description": "Update an existing LLM provider.\n\nOmitted fields keep their current value.\nSet api_key=\"\" to keep existing key (not change it).\nSet api_key=\"__clear__\" to clear the key.",
+        "operationId": "update_llm_provider_admin_llm_providers__name__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Llm Provider",
+        "description": "Delete an LLM provider.",
+        "operationId": "delete_llm_provider_admin_llm_providers__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/llm-providers/{name}/toggle": {
+      "post": {
+        "summary": "Toggle Llm Provider",
+        "description": "Toggle a provider on/off.",
+        "operationId": "toggle_llm_provider_admin_llm_providers__name__toggle_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/llm-config": {
+      "get": {
+        "summary": "Get Llm Config",
+        "description": "Get current LLM provider fallback configuration.",
+        "operationId": "get_llm_config_admin_llm_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/voice-config": {
+      "get": {
+        "summary": "Get Voice Config",
+        "description": "Get current voice (STT/TTS) configuration.",
+        "operationId": "get_voice_config_api_voice_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update Voice Config",
+        "description": "Update and persist voice configuration.\n\nPreserves existing api_key/api_base/voice per provider when the\nincoming value is None or empty (masks sensitive fields).",
+        "operationId": "update_voice_config_api_voice_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Update Voice Config Api Voice Config Put"
                 }
               }
             }
@@ -469,6 +1036,43 @@
         }
       }
     },
+    "/api/chat/voice": {
+      "post": {
+        "summary": "Chat Voice Endpoint",
+        "description": "Voice chat endpoint.\n\nAccepts an audio file via multipart/form-data, transcribes it via\nthe configured STT provider(s), feeds the text through the existing\nchat pipeline, and streams the response as SSE events.\n\nIf TTS providers are configured, the final answer is also sent as\nan ``type=\"audio\"`` SSE event with base64-encoded audio bytes.",
+        "operationId": "chat_voice_endpoint_api_chat_voice_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_chat_voice_endpoint_api_chat_voice_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/chat/{name}": {
       "post": {
         "summary": "Чат с агентом по имени",
@@ -554,6 +1158,50 @@
               }
             ],
             "description": "Per-agent LLM overrides"
+          },
+          "provider_priority": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Provider Priority",
+            "description": "Provider names in priority order (from ProviderStore)"
+          },
+          "abuse_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abuse Config",
+            "description": "Per-agent abuse settings overrides (keys match AbuseConfig fields)"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt",
+            "description": "Per-agent system prompt override"
+          },
+          "voice_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VoiceAgentConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-agent voice configuration overrides"
           }
         },
         "type": "object",
@@ -623,6 +1271,50 @@
               }
             ],
             "description": "Per-agent LLM overrides"
+          },
+          "provider_priority": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Provider Priority",
+            "description": "Provider names in priority order (from ProviderStore)"
+          },
+          "abuse_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abuse Config",
+            "description": "Per-agent abuse settings overrides"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt",
+            "description": "Per-agent system prompt override"
+          },
+          "voice_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VoiceAgentConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-agent voice configuration overrides"
           },
           "created_at": {
             "type": "string",
@@ -694,6 +1386,57 @@
               }
             ],
             "description": "Per-agent LLM overrides"
+          },
+          "provider_priority": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Priority",
+            "description": "Provider names in priority order (from ProviderStore)"
+          },
+          "abuse_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abuse Config",
+            "description": "Per-agent abuse settings overrides"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt",
+            "description": "Per-agent system prompt override"
+          },
+          "voice_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VoiceAgentConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-agent voice configuration overrides"
           }
         },
         "type": "object",
@@ -847,6 +1590,47 @@
         ],
         "title": "BacklogSessionMetadata",
         "description": "Metadata for one backlog session entry."
+      },
+      "Body_chat_voice_endpoint_api_chat_voice_post": {
+        "properties": {
+          "audio": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "Audio"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "default": "default"
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
+          "lang": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lang"
+          }
+        },
+        "type": "object",
+        "required": [
+          "audio"
+        ],
+        "title": "Body_chat_voice_endpoint_api_chat_voice_post"
       },
       "ChatMessage": {
         "properties": {
@@ -1070,6 +1854,97 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VoiceAgentConfig": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled",
+            "description": "Override master switch for this agent"
+          },
+          "stt_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stt Provider",
+            "description": "STT provider name (must match a name in VoiceConfig.stt_providers)"
+          },
+          "tts_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tts Provider",
+            "description": "TTS provider name (must match a name in VoiceConfig.tts_providers)"
+          },
+          "stt_fallback": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stt Fallback",
+            "description": "Override STT fallback setting for this agent"
+          },
+          "tts_fallback": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tts Fallback",
+            "description": "Override TTS fallback setting for this agent"
+          },
+          "voice_input_disabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Input Disabled",
+            "description": "Explicitly disable voice input for this agent (hide mic in widget)"
+          },
+          "voice_output_disabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Output Disabled",
+            "description": "Explicitly disable TTS for this agent"
+          }
+        },
+        "type": "object",
+        "title": "VoiceAgentConfig",
+        "description": "Per-agent voice configuration overrides.\n\nAll fields are optional (None = fall back to global VoiceConfig)."
       },
       "WidgetConfig": {
         "properties": {

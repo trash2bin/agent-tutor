@@ -11,6 +11,7 @@ and only owns the *sequence* of steps and the loop termination logic.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -75,6 +76,9 @@ class LLMAgent:
         self._fallback_handler = FallbackHandler(
             self.llm_client, self.conversation_manager
         )
+
+        # ── Schema cache (per tenant) ────────────────────────────────
+        self._schema_cache: dict[str, str] = {}
 
         # ── Settings ──────────��────────────────────────────────────────
         self.max_iterations = settings.agent_max_iterations
@@ -185,6 +189,25 @@ class LLMAgent:
             "thinking_enabled": self.llm_client.enable_thinking,
         }
 
+    @contextlib.contextmanager
+    def _with_temp_handler(self, llm_client: LLMClientProtocol) -> Any:
+        """Temporarily replace handlers with a custom LLM client.
+
+        Restores the original handlers in ``finally`` so that
+        ``_run_turn`` never leaks a mutated handler to subsequent calls.
+        """
+        old_llm = self._llm_handler
+        old_fallback = self._fallback_handler
+        try:
+            self._llm_handler = LLMHandler(llm_client, self.tool_parser)
+            self._fallback_handler = FallbackHandler(
+                llm_client, self.conversation_manager
+            )
+            yield
+        finally:
+            self._llm_handler = old_llm
+            self._fallback_handler = old_fallback
+
     # ── Internal: turn loop ──────────────────────────────────────────────
 
     async def _run_turn(
@@ -224,150 +247,163 @@ class LLMAgent:
 
         # Re-wire handlers if a per-request LLM was provided.
         if request_llm and request_llm is not self.llm_client:
-            self._llm_handler = LLMHandler(request_llm, self.tool_parser)
-            self._fallback_handler = FallbackHandler(
-                request_llm, self.conversation_manager
-            )
+            context_manager = self._with_temp_handler(request_llm)
+        else:
+            context_manager = contextlib.nullcontext()
 
-        try:
-            async with self.mcp_client.get_session(tenant_ids=tenant_ids) as session:
-                # ── 2. Discover tools ──────────────────────────────────
-                ctx.tools = await self.mcp_client.list_tools(session)
-                logger.info(
-                    "[AGENT] Available tools: %s",
-                    [t.get("function", {}).get("name") for t in ctx.tools],
-                )
-
-                # ── 2b. Inject schema into context (if available) ────────
-                schema = await session.get_schema()
-                if schema and schema.get("entities"):
-                    schema_note = _build_schema_message(schema)
-                    ctx.messages.append({"role": "system", "content": schema_note})
+        with context_manager:
+            try:
+                async with self.mcp_client.get_session(
+                    tenant_ids=tenant_ids
+                ) as session:
+                    # ── 2. Discover tools ──────────────────────────────────
+                    ctx.tools = await self.mcp_client.list_tools(session)
                     logger.info(
-                        "[AGENT] Injected schema with %d entities and %d hints into prompt",
-                        len(schema["entities"]),
-                        len(schema.get("workflow_hints", [])),
+                        "[AGENT] Available tools: %s",
+                        [t.get("function", {}).get("name") for t in ctx.tools],
                     )
 
-                # ── 3. Agent loop ──────────────────────────────────────
-                for iteration in range(self.max_iterations):
-                    ctx.iteration = iteration
-
-                    # 3a. Call LLM → stream tokens + determine outcome
-                    _llm_start = time.monotonic()
-                    async for event in self._llm_handler.stream_and_parse(ctx):
-                        yield event
-                    _llm_duration = (time.monotonic() - _llm_start) * 1000
-
-                    # Guard: check output for leaks
-                    if ctx.outcome == "final" and ctx.turn_messages:
-                        last_msg = ctx.turn_messages[-1]
-                        if last_msg.get("role") == "assistant":
-                            content = last_msg.get("content", "")
-                            output_check = get_guard_checker().check_output(content)
-                            if output_check.blocked:
-                                logger.warning(
-                                    "[GUARD] Blocked output: %s (session %s)",
-                                    output_check.reason,
-                                    session_id,
-                                )
-                                last_msg["content"] = (
-                                    "[Ответ заблокирован системой безопа��ности]"
-                                )
-
-                    # Record spending for tenant
-                    _cost = (
-                        self._llm_handler._llm.last_cost
-                        if hasattr(self._llm_handler._llm, "last_cost")
-                        else 0.0
-                    )
-                    if _cost > 0 and tenant_ids:
-                        for tid in tenant_ids:
-                            get_spending_checker().record_spending(tid, _cost)
-
-                    # Check spending limit
-                    if tenant_ids:
-                        for tid in tenant_ids:
-                            _allowed, _reason = get_spending_checker().check_limits(tid)
-                            if not _allowed:
-                                logger.warning("[SPENDING] %s", _reason)
-                                yield AgentEvent(
-                                    "error",
-                                    ErrorEventData(
-                                        message="Лимит расходов исчерпан для этого тенанта."
-                                    ),
-                                )
-                                return
-
-                    # Record LLM call in backlog
-                    if (
-                        hasattr(self._llm_handler._llm, "last_usage")
-                        and self._llm_handler._llm.last_usage
-                    ):
-                        usage = self._llm_handler._llm.last_usage
-                        backlog.record_llm_call(
-                            session_id=session_id,
-                            model=getattr(self._llm_handler._llm, "model", "unknown"),
-                            provider=getattr(
-                                self._llm_handler._llm, "model", "unknown"
-                            ).split("/")[0]
-                            if "/" in getattr(self._llm_handler._llm, "model", "")
-                            else "unknown",
-                            duration_ms=_llm_duration,
-                            prompt_tokens=usage.get("prompt_tokens", 0),
-                            completion_tokens=usage.get("completion_tokens", 0),
-                            total_tokens=usage.get("total_tokens", 0),
-                            cost=self._llm_handler._llm.last_cost,
-                            status="success",
-                            tenant_ids=tenant_ids or [],
-                            turn_id=ctx.turn_id,
-                            iteration=ctx.iteration,
+                    # ── 2b. Inject schema into context (if available) ────────
+                    schema = await session.get_schema()
+                    if schema and schema.get("entities"):
+                        cache_key = "-".join(tenant_ids or ["default"])
+                        if cache_key not in self._schema_cache:
+                            self._schema_cache[cache_key] = _build_schema_message(
+                                schema
+                            )
+                        schema_note = self._schema_cache[cache_key]
+                        ctx.messages.append({"role": "system", "content": schema_note})
+                        logger.info(
+                            "[AGENT] Injected schema with %d entities and %d hints into prompt",
+                            len(schema["entities"]),
+                            len(schema.get("workflow_hints", [])),
                         )
 
-                    # 3b. Dispatch based on outcome
-                    if ctx.outcome == "final" or ctx.is_finished:
-                        await self.conversation_manager.aremember_turn(
-                            ctx.session_id,
-                            ctx.turn_messages,  # type: ignore[arg-type]
-                        )
-                        return  # success
+                    # ── 3. Agent loop ──────────────────────────────────────
+                    for iteration in range(self.max_iterations):
+                        ctx.iteration = iteration
 
-                    if ctx.outcome == "tool_calls":
-                        async for event in self._tool_handler.execute(
-                            ctx.pending_tool_calls,
-                            session,
-                            ctx,
+                        # 3a. Call LLM → stream tokens + determine outcome
+                        _llm_start = time.monotonic()
+                        async for event in self._llm_handler.stream_and_parse(ctx):
+                            yield event
+                        _llm_duration = (time.monotonic() - _llm_start) * 1000
+
+                        # Guard: check output for leaks
+                        if ctx.outcome == "final" and ctx.turn_messages:
+                            last_msg = ctx.turn_messages[-1]
+                            if last_msg.get("role") == "assistant":
+                                content = last_msg.get("content", "")
+                                output_check = get_guard_checker().check_output(content)
+                                if output_check.blocked:
+                                    logger.warning(
+                                        "[GUARD] Blocked output: %s (session %s)",
+                                        output_check.reason,
+                                        session_id,
+                                    )
+                                    last_msg["content"] = (
+                                        "[Ответ заблокирован системой безопасности]"
+                                    )
+
+                        # Record spending for tenant
+                        _cost = (
+                            self._llm_handler._llm.last_cost
+                            if hasattr(self._llm_handler._llm, "last_cost")
+                            else 0.0
+                        )
+                        if _cost > 0 and tenant_ids:
+                            for tid in tenant_ids:
+                                get_spending_checker().record_spending(tid, _cost)
+
+                        # Check spending limit
+                        if tenant_ids:
+                            for tid in tenant_ids:
+                                _allowed, _reason = get_spending_checker().check_limits(
+                                    tid
+                                )
+                                if not _allowed:
+                                    logger.warning("[SPENDING] %s", _reason)
+                                    yield AgentEvent(
+                                        "error",
+                                        ErrorEventData(
+                                            message="Лимит расходов исчерпан для этого тенанта."
+                                        ),
+                                    )
+                                    return
+
+                        # Record LLM call in backlog
+                        if (
+                            hasattr(self._llm_handler._llm, "last_usage")
+                            and self._llm_handler._llm.last_usage
+                        ):
+                            usage = self._llm_handler._llm.last_usage
+                            backlog.record_llm_call(
+                                session_id=session_id,
+                                model=getattr(
+                                    self._llm_handler._llm, "model", "unknown"
+                                ),
+                                provider=getattr(
+                                    self._llm_handler._llm, "model", "unknown"
+                                ).split("/")[0]
+                                if "/" in getattr(self._llm_handler._llm, "model", "")
+                                else "unknown",
+                                duration_ms=_llm_duration,
+                                prompt_tokens=usage.get("prompt_tokens", 0),
+                                completion_tokens=usage.get("completion_tokens", 0),
+                                total_tokens=usage.get("total_tokens", 0),
+                                cost=self._llm_handler._llm.last_cost,
+                                status="success",
+                                tenant_ids=tenant_ids or [],
+                                turn_id=ctx.turn_id,
+                                iteration=ctx.iteration,
+                            )
+
+                        # 3b. Dispatch based on outcome
+                        if ctx.outcome == "final" or ctx.is_finished:
+                            await self.conversation_manager.aremember_turn(
+                                ctx.session_id,
+                                ctx.turn_messages,  # type: ignore[arg-type]
+                            )
+                            return  # success
+
+                        if ctx.outcome == "tool_calls":
+                            async for event in self._tool_handler.execute(
+                                ctx.pending_tool_calls,
+                                session,
+                                ctx,
+                            ):
+                                yield event
+                            continue  # next iteration
+
+                        # 3c. Empty-round check
+                        if ctx.empty_rounds >= self.max_empty_rounds:
+                            logger.info(
+                                "[AGENT] Empty rounds limit hit (%d) — stopping",
+                                ctx.empty_rounds,
+                            )
+                            break
+
+                        # 3d. Token budget check
+                        if estimate_tokens(ctx.messages) >= self.max_turn_tokens:
+                            logger.warning(
+                                "[AGENT] Turn token budget exceeded (%d ≥ %d)",
+                                estimate_tokens(ctx.messages),
+                                self.max_turn_tokens,
+                            )
+                            break
+
+                    # ── 4. Fallback (no final answer) ───────────────────────
+                    if not ctx.is_finished:
+                        async for event in self._fallback_handler.run(
+                            ctx, was_finished=False
                         ):
                             yield event
-                        continue  # next iteration
 
-                    # 3c. Empty-round check
-                    if ctx.empty_rounds >= self.max_empty_rounds:
-                        logger.info(
-                            "[AGENT] Empty rounds limit hit (%d) — stopping",
-                            ctx.empty_rounds,
-                        )
-                        break
-
-                    # 3d. Token budget check
-                    if estimate_tokens(ctx.messages) >= self.max_turn_tokens:
-                        logger.warning(
-                            "[AGENT] Turn token budget exceeded (%d ≥ %d)",
-                            estimate_tokens(ctx.messages),
-                            self.max_turn_tokens,
-                        )
-                        break
-
-                # ── 4. Fallback (no final answer) ───────────────────────
-                if not ctx.is_finished:
-                    async for event in self._fallback_handler.run(
-                        ctx, was_finished=False
-                    ):
-                        yield event
-
-        except Exception as exc:
-            backlog.error(session_id, ctx.turn_id, ctx.iteration, str(exc))
-            yield AgentEvent("error", ErrorEventData(message=classify_error(exc, lang)))
+            except Exception as exc:
+                backlog.error(session_id, ctx.turn_id, ctx.iteration, str(exc))
+                yield AgentEvent(
+                    "error", ErrorEventData(message=classify_error(exc, lang))
+                )
 
 
 def _build_schema_message(schema: dict) -> str:

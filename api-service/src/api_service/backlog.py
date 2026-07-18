@@ -45,7 +45,17 @@ class ModelBacklog:
     def _record(self, **kw: Any) -> dict[str, Any]:
         return kw
 
+    def _should_write(self, record: dict[str, Any]) -> bool:
+        mode = settings.backlog_mode
+        if mode == "off":
+            return False
+        if mode == "errors":
+            return record.get("event") == "error" or record.get("type") == RECORD_ERROR
+        return True  # full
+
     def _write(self, session_id: str, record: dict[str, Any]) -> None:
+        if not self._should_write(record):
+            return
         backlog_records_total.labels(
             type=record.get("type", record.get("event", "unknown"))
         ).inc()

@@ -596,6 +596,64 @@ async def backlog_errors_endpoint(limit: int = Query(50, ge=1, le=200)):
 
 
 @app.get(
+    "/api/backlog/export/{session_id}",
+    response_class=StreamingResponse,
+    summary="Экспорт сессии бэклога",
+    description="Export backlog session as JSONL for fine-tuning.",
+)
+async def export_backlog(session_id: str):
+    """Export backlog session as JSONL for fine-tuning."""
+
+    async def generate():
+        records = backlog._read_records(session_id)
+        for r in records:
+            event = r.get("event")
+            if event == "turn_start":
+                msg = {
+                    "role": "user",
+                    "content": r.get("data", {}).get("user_message", ""),
+                }
+                yield json.dumps(msg, ensure_ascii=False) + "\n"
+            elif event == "model_response":
+                data = r.get("data", {})
+                content = data.get("content", "")
+                if content:
+                    msg = {"role": "assistant", "content": content}
+                    yield json.dumps(msg, ensure_ascii=False) + "\n"
+            elif event == "tool_call":
+                data = r.get("data", {})
+                msg = {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": data.get("name", ""),
+                                "arguments": json.dumps(
+                                    data.get("arguments", {}), ensure_ascii=False
+                                ),
+                            },
+                        }
+                    ],
+                }
+                yield json.dumps(msg, ensure_ascii=False) + "\n"
+            elif event == "tool_result":
+                data = r.get("data", {})
+                msg = {
+                    "role": "tool",
+                    "tool_call_id": f"call_{data.get('name', '')}",
+                    "content": data.get("result", ""),
+                }
+                yield json.dumps(msg, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": f'attachment; filename="{session_id}.jsonl"'},
+    )
+
+
+@app.get(
     "/api/session/history",
     response_model=SessionHistoryResponse,
     summary="История сессии",

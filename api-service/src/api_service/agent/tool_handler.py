@@ -125,13 +125,19 @@ class ToolHandler:
                     error=str(exc),
                 )
 
-            # ── Log the result ──────────────────────────────────────────
+            # ── Log the result (truncated for backlog) ───────────────────
+            tool_content = tool_result.tool_content
+            if len(tool_content) > 10_000:
+                tool_content = (
+                    tool_content[:10_000]
+                    + f"\n...(truncated, {len(tool_result.tool_content)} chars)"
+                )
             backlog.tool_result(
                 ctx.session_id,
                 ctx.turn_id,
                 ctx.iteration,
                 name,
-                tool_result.tool_content,
+                tool_content,
                 duration_ms=0,
             )
 

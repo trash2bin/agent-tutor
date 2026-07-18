@@ -1,17 +1,13 @@
 package server
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/trash2bin/helperium/helperium-go/config"
-	"github.com/trash2bin/helperium/helperium-go/pkg/metrics"
 	"github.com/trash2bin/helperium/data-service/internal/configgen"
-	"github.com/trash2bin/helperium/data-service/internal/datasource"
 	"github.com/trash2bin/helperium/data-service/internal/runtime"
 	"github.com/trash2bin/helperium/data-service/internal/runtime/handlers"
 	"github.com/go-chi/chi/v5"
@@ -19,54 +15,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// metricsAdapter wraps runtime.AdapterSubset with Prometheus instrumentation.
-type metricsAdapter struct {
-	inner runtime.AdapterSubset
-}
-
-func (m *metricsAdapter) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	start := time.Now()
-	rows, err := m.inner.QueryContext(ctx, query, args...)
-	// Use Seconds()*1000 for sub-millisecond precision — SQLite queries can be <1ms
-	elapsed := time.Since(start).Seconds() * 1000
-
-	// Extract tenant ID from context; fallback to "unknown" if not set
-	tenantID := resolvetenantID(ctx)
-	metrics.DBQueryDuration.WithLabelValues(tenantID).Observe(elapsed)
-	return rows, err
-}
-
-func (m *metricsAdapter) PingContext(ctx context.Context) error {
-	return m.inner.PingContext(ctx)
-}
-
-func (m *metricsAdapter) QuoteIdentifier(name string) string {
-	return m.inner.QuoteIdentifier(name)
-}
-
-func (m *metricsAdapter) TranslatePlaceholder(index int) string {
-	return m.inner.TranslatePlaceholder(index)
-}
-
-// resolvetenantID extracts tenant ID from context, set by TenantIDMiddleware.
-// Falls back to "default" for request paths that bypass tenant routing (/metrics).
-func resolvetenantID(ctx context.Context) string {
-	if id, ok := ctx.Value(tenantIDKey).(string); ok && id != "" {
-		return id
-	}
-	return "default"
-}
-
-// NewRouterFromConfig создаёт chi-роутер на основе конфигурации.
+// NewRouterFromConfig creates a chi router from a tenant config.
 //
-// Если introspectAdapter не nil — регистрируются /admin/* endpoint'ы.
-// configPath — путь к файлу конфига (для /admin/config/rewrite).
-// adminCtx — опциональный контекст для admin API (hot reload и версионирование).
-// Если nil — admin endpoints не регистрируются.
-//
-// Если cfg.DataSource.ReadOnly == true (по умолчанию), любые мутирующие HTTP-методы
-// (POST, PUT, PATCH, DELETE) не регистрируются — агент может только читать данные.
-func NewRouterFromConfig(ts *TenantStore, cfg *config.Config, db runtime.AdapterSubset, adapter runtime.AdapterSubset, introspectAdapter datasource.Adapter, configPath string, adminCtx *AdminContext, approvedTools map[string]bool) (http.Handler, error) {
+// Parameters:
+//   - ts: TenantStore for resolving tenant state (mcp/schema, openapi.json)
+//   - cfg: the tenant's config
+//   - adapter: AdapterSubset for query builder and handlers (includes metrics/logging)
+//   - approvedTools: map of write endpoint paths that are approved in read-only mode
+func NewRouterFromConfig(ts *TenantStore, cfg *config.Config, adapter runtime.AdapterSubset, approvedTools map[string]bool) (http.Handler, error) {
 	entities := runtime.ConfigToEntities(cfg.Entities)
 	customQueries := runtime.ConfigToCustomQueries(cfg.CustomQueries)
 
@@ -77,11 +33,8 @@ func NewRouterFromConfig(ts *TenantStore, cfg *config.Config, db runtime.Adapter
 
 	builder := runtime.NewBuilder(adapter)
 
-	// Wrap db adapter with Prometheus metrics instrumentation
-	instrumentedDB := &metricsAdapter{inner: db}
-
 	ctx := &handlers.Context{
-		DB:            instrumentedDB,
+		DB:            adapter,
 		Adapter:       adapter,
 		Builder:       builder,
 		Resolver:      resolver,
@@ -97,7 +50,7 @@ func NewRouterFromConfig(ts *TenantStore, cfg *config.Config, db runtime.Adapter
 	r.Use(StructuredLoggingMiddleware)
 	r.Use(chimw.Timeout(time.Duration(ResolveRequestTimeout(cfg)) * time.Second))
 
-	// Multi-tenancy: X-Tenant-ID middleware (если auth настроен)
+	// Multi-tenancy: X-Tenant-ID middleware (when auth is configured)
 	if cfg.Auth != nil && cfg.Auth.Strategy == config.AuthStrategyHeader {
 		tenantHeader := cfg.Auth.TenantHeader
 		if tenantHeader == "" {
@@ -106,9 +59,9 @@ func NewRouterFromConfig(ts *TenantStore, cfg *config.Config, db runtime.Adapter
 		r.Use(TenantIDMiddleware(tenantHeader))
 	}
 
-	// Системные эндпоинты (всегда)
+	// System endpoints (always available)
 	r.Get("/docs", SwaggerHandler)
-	r.Get("/openapi.json", NewOpenAPIHandler(ts, introspectAdapter != nil))
+	r.Get("/openapi.json", NewOpenAPIHandler(ts, false))
 
 	// MCP-манифест — единственный source of truth для mcp-gateway
 	r.Get("/mcp/manifest", handlers.MCPManifestHandler(cfg))

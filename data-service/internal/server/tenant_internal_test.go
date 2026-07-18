@@ -58,6 +58,7 @@ func TestTenantHealthRace(t *testing.T) {
 			DataSource: config.DataSourceConfig{Driver: "sqlite", DSN: ":memory:"},
 		},
 		CreatedAt: time.Now(),
+		healthMu: &sync.Mutex{},
 	}
 
 	var wg sync.WaitGroup
@@ -102,6 +103,7 @@ func TestTenantHealthRaceViaResponse(t *testing.T) {
 			DataSource: config.DataSourceConfig{Driver: "sqlite", DSN: ":memory:"},
 		},
 		CreatedAt: time.Now(),
+		healthMu: &sync.Mutex{},
 	}
 
 	var wg sync.WaitGroup
@@ -133,6 +135,48 @@ func TestTenantHealthRaceViaResponse(t *testing.T) {
 
 // TestTenantHealthRaceDirectAccess ensures concurrent direct field reads
 // and writes are race-free (used by admin handlers and other readers).
+// TestTenantHealth_CopyValueRace verifies that copying TenantInstance by value
+// creates a separate sync.Mutex, leading to unsynchronized concurrent access.
+// This test EXPECTS a data race when healthMu is sync.Mutex (value),
+// and must PASS when healthMu is *sync.Mutex (pointer).
+func TestTenantHealth_CopyValueRace(t *testing.T) {
+	inst := &TenantInstance{
+		ID: "test",
+		Config: &config.Config{
+			Version:    1,
+			DataSource: config.DataSourceConfig{Driver: "sqlite", DSN: ":memory:"},
+		},
+		CreatedAt: time.Now(),
+		Healthy:   true,
+		healthMu: &sync.Mutex{},
+	}
+	// Copy by dereference — this copies the struct INCLUDING the mutex.
+	// With sync.Mutex (value): copy gets its own mutex → race on shared fields.
+	// With *sync.Mutex (pointer): copy shares the same mutex → safe.
+	copy := *inst
+
+	var shared int
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		inst.healthMu.Lock()
+		shared = 1
+		inst.healthMu.Unlock()
+	}()
+
+	go func() {
+		defer wg.Done()
+		copy.healthMu.Lock() // DIFFERENT mutex when healthMu is sync.Mutex (value)!
+		shared = 2
+		copy.healthMu.Unlock()
+	}()
+
+	wg.Wait()
+	_ = shared
+}
+
 func TestTenantHealthRaceDirectAccess(t *testing.T) {
 	inst := &TenantInstance{
 		ID: "test-tenant",
@@ -141,6 +185,7 @@ func TestTenantHealthRaceDirectAccess(t *testing.T) {
 			DataSource: config.DataSourceConfig{Driver: "sqlite", DSN: ":memory:"},
 		},
 		CreatedAt: time.Now(),
+		healthMu: &sync.Mutex{},
 	}
 
 	var wg sync.WaitGroup

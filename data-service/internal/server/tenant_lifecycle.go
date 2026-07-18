@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/trash2bin/helperium/data-service/internal/datasource"
@@ -20,6 +21,9 @@ import (
 // Used by tests that already have an adapter and router — bypasses
 // DB connection opening so in-memory DBs persist across the seed-build-test cycle.
 func (ts *TenantStore) RegisterTenantInstance(inst *TenantInstance) error {
+	if inst.healthMu == nil {
+		inst.healthMu = &sync.Mutex{}
+	}
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 	if _, exists := ts.tenants[inst.ID]; exists {
@@ -133,7 +137,7 @@ func (ts *TenantStore) ReloadTenant(ctx context.Context, tenantID string, config
 	for _, p := range newCfg.ApprovedTools {
 		approvedTools[p] = true
 	}
-	newRouter, err := NewRouterFromConfig(ts, newCfg, inst.AdapterSub, inst.AdapterSub, inst.Adapter, configPath, nil, approvedTools)
+	newRouter, err := NewRouterFromConfig(ts, newCfg, inst.AdapterSub, approvedTools)
 	if err != nil {
 		return fmt.Errorf("reload tenant %q: build router: %w", tenantID, err)
 	}
@@ -209,7 +213,7 @@ func buildTenantInstance(ctx context.Context, ts *TenantStore, registry *datasou
 	for _, p := range cfg.ApprovedTools {
 		approvedTools[p] = true
 	}
-	router, err := NewRouterFromConfig(ts, cfg, adapterSub, adapterSub, adapter, configPath, nil, approvedTools)
+	router, err := NewRouterFromConfig(ts, cfg, adapterSub, approvedTools)
 	if err != nil {
 		_ = conn.Close()
 		if readonlyConn != nil {
@@ -229,6 +233,7 @@ func buildTenantInstance(ctx context.Context, ts *TenantStore, registry *datasou
 		ConfigPath:    configPath,
 		CreatedAt:     time.Now(),
 		Healthy:       true,
+		healthMu:      &sync.Mutex{},
 		ApprovedTools: approvedTools,
 	}, nil
 }

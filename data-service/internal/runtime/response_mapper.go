@@ -225,6 +225,10 @@ func coerceNative(val any, typ string) any {
 		}
 		return val
 
+	case "datetime", "date":
+		// Pass through as-is — the adapter already returns a string or time.Time
+		return val
+
 	default:
 		// string, datetime, date, unknown → конвертируем в строку
 		switch v := val.(type) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -273,6 +274,56 @@ func TestMapRows_ZeroLimit(t *testing.T) {
 }
 
 // TestMapRow_NilColumn tests MapRow with NULL in the DB.
+// TestCoerceNative_DateTimeMissingCase verifies that coerceNative with
+// typ="datetime" or typ="date" does NOT fall through to the default case
+// (which would produce fmt.Sprintf("%v", v) — a machine-readable string).
+// This tests that the function returns time.Time as-is instead of formatting it.
+func TestCoerceNative_DateTimeMissingCase(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+
+	tests := []struct {
+		name string
+		val  any
+		typ  string
+		want any
+	}{
+		{
+			name: "datetime returns time.Time as-is",
+			val:  now,
+			typ:  "datetime",
+			want: now,
+		},
+		{
+			name: "date returns time.Time as-is",
+			val:  now,
+			typ:  "date",
+			want: now,
+		},
+		{
+			name: "string datetime stays string",
+			val:  "2024-01-15 10:30:00",
+			typ:  "datetime",
+			want: "2024-01-15 10:30:00",
+		},
+		{
+			name: "string date stays string",
+			val:  "2024-01-15",
+			typ:  "date",
+			want: "2024-01-15",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := coerceNative(tc.val, tc.typ)
+			if got != tc.want {
+				t.Errorf("coerceNative(%v, %q) = %v (%T), want %v (%T)",
+					tc.val, tc.typ, got, got, tc.want, tc.want)
+			}
+		})
+	}
+}
+
 func TestMapRow_NilColumn(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
