@@ -14,7 +14,7 @@ repos:
         name: Biome JS lint
         entry: npx @biomejs/biome check
         language: system
-        files: ^(admin-dashboard/internal/server/static/.*\.js|api-service/embed/.*\.js|demo/web/static/.*\.js)$
+        files: ^(admin-dashboard/internal/server/static/.*\.js|api-service/embed/(src|tests)/.*\.js|demo/web/static/.*\.js)$
         pass_filenames: false
 
   - repo: local

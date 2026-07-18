@@ -38,6 +38,7 @@ backlog/
 .env.*
 *.egg-info
 dist/
+!api-service/embed/dist/
 context.md
 
 # Graph / knowledge
