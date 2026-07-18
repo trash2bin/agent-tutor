@@ -177,13 +177,27 @@ cmd_start() {
   }
   echo "  ✅ mcp-gateway built"
 
-  echo "  🔨 Building admin-dashboard..."
+  echo "  🎨 Building admin-dashboard frontend..."
+  (cd "$PROJECT_ROOT/admin-dashboard" && bash build.sh) || {
+    echo "  ❌ Failed to build admin-dashboard frontend"
+    exit 1
+  }
+  echo "  ✅ admin-dashboard frontend built"
+
+  echo "  🔨 Building admin-dashboard (Go)..."
   mkdir -p "$PROJECT_ROOT/admin-dashboard/bin"
   (cd "$PROJECT_ROOT/admin-dashboard" && go build -o bin/admin-dashboard ./cmd/server/) || {
-    echo "  ❌ Failed to build mcp-gateway"
+    echo "  ❌ Failed to build admin-dashboard"
     exit 1
   }
   echo "  ✅ admin-dashboard built"
+
+  echo "  🎨 Building embed widget frontend..."
+  (cd "$PROJECT_ROOT/api-service/embed" && npm run build) || {
+    echo "  ❌ Failed to build embed widget"
+    exit 1
+  }
+  echo "  ✅ embed widget built"
 
   for svc in "${SERVICES[@]}"; do
     if is_running "$svc"; then
@@ -205,13 +219,11 @@ cmd_start() {
     local extra_env=""
     case "$svc" in
       data)
+        extra_env="TENANTS_DIR=$PROJECT_ROOT/.data/tenants"
         # ADMIN_TOKEN — если задан в .env, прокидываем в data-service для /admin/* эндпоинтов
         if [ -n "${ADMIN_TOKEN:-}" ]; then
-          extra_env="ADMIN_TOKEN=$ADMIN_TOKEN"
+          extra_env="$extra_env ADMIN_TOKEN=$ADMIN_TOKEN"
         fi
-        ;;
-      data)
-        extra_env="TENANTS_DIR=$PROJECT_ROOT/.data/tenants"
         ;;
       mcp)
         extra_env="DATA_SERVICE_URL=http://127.0.0.1:$DATA_PORT LOG_LEVEL=info"
@@ -256,16 +268,10 @@ cmd_start() {
   echo "    ./scripts/dev.sh start          — dev-режим (MCP Playground ��строен)"
   if [ -n "${ADMIN_TOKEN:-}" ]; then
     echo ""
-    echo "  🔐 ADMIN_TOKEN задан — admin-эндпоинты data-service активны:"
-    echo "    curl -H 'Authorization: Bearer \$ADMIN_TOKEN' http://127.0.0.1:$DATA_PORT/admin/tenants"
-    echo "    POST   /admin/tenants         — добавить tenant"
-    echo "    GET    /admin/tenants         — список tenant'ов"
-    echo "    DELETE /admin/tenants/{id}    — удалить tenant"
-    echo "    GET    /admin/config          — текущий конфиг"
-    echo "    POST   /admin/config/reload   — перечитать конфиг с диска"
+    echo "  🔐 ADMIN_TOKEN задан — open admin dashboard at http://127.0.0.1:$ADMIN_PORT"
   else
     echo ""
-    echo "  ⚠️  ADMIN_TOKEN не задан — /admin/* эндпоинты data-service недоступны (401)."
+    echo "  ⚠️  ADMIN_TOKEN не задан — admin dashboard недоступен."
     echo "      Задай в .env: ADMIN_TOKEN=my-secret-token"
   fi
 }
@@ -429,7 +435,7 @@ cmd_logs() {
 # =============================================================================
 
 SCENARIOS_DIR="$PROJECT_ROOT/scenarios"
-CONFIG_SCHEMA="${CONFIG_SCHEMA:-$PROJECT_ROOT/specs/config.schema.json}"
+CONFIG_SCHEMA=""
 
 # Delegate db commands to agent-db CLI
 # Set HELPERIUM_ROOT so agent-db finds the project root regardless of cwd
@@ -735,7 +741,6 @@ db — управление сценариями data-service (фабрика т
   DATA_PORT=18084 ./scripts/dev.sh db serve postgres-testseed
 
 Env:
-  CONFIG_SCHEMA   JSON Schema конфига (default: $PROJECT_ROOT/specs/config.schema.json)
   DATA_PORT       порт для data-service (default: 8084)
   DATABASE_URL    PG-сценарий работает против этого URL
 
@@ -794,7 +799,6 @@ case "${1:-help}" in
     echo ""
     echo "Env:"
     echo "  .env в корне проекта — автоматически подгружается"
-    echo "  CONFIG_SCHEMA        — путь к JSON Schema конфига (по умолчанию specs/config.schema.json)"
     exit 0
     ;;
   *)
