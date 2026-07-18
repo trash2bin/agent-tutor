@@ -20,13 +20,14 @@
 |---|---|---|
 | `/health` | GET | Статус сервиса |
 | `/api/chat` | POST | SSE-стрим чата с агентом (требует `X-Tenant-ID`) |
+| `/api/chat/voice` | POST | SSE-стрим голосового чата (multipart/form-data с audio) |
 | `/api/chat/{name}` | POST | SSE-чат с именованным агентом (tenant_ids из Agent Store) |
-| `/api/sessions` | GET | Список сессий |
-| `/api/sessions/{id}` | GET | История конкретной сессии |
+| `/api/session/history` | GET | История сессии (query params: session_id, agent_name) |
 | `/api/backlog` | GET | Список бэклогов |
 | `/api/backlog/{id}` | GET | Детали бэклога |
 | `/api/backlog/stats/{session_id}` | GET | Статистика сессии (токены, cost, ошибки) |
 | `/api/backlog/errors` | GET | Последние ошибки чата |
+| `/api/backlog/export/{session_id}` | GET | Экспорт сессии бэклога (JSONL для fine-tuning) |
 | `/metrics` | GET | Prometheus метрики (мониторинг) |
 | `/api/agents` | POST | Создать агента (Agent Store) |
 | `/api/agents` | GET | Список агентов |
@@ -223,11 +224,15 @@ curl -X POST http://localhost:8081/api/agents \
 
 | Ситуация | Русский | English |
 |---|---|---|
-| Rate limit | Сервер временно перегружен. Повторите через несколько секунд. | Server is temporarily overloaded. Please retry. |
-| Ошибка модели | Ошибка доступа к модели. Попробуйте позже. | Model access error. Try again later. |
-| Длинный диалог | Диалог слишком длинный. Начните новый разговор. | Conversation too long. Start a new chat. |
-| Модель не отвечает | Модель не отвечает. Попробуйте задать более короткий вопрос. | Model not responding. Try a shorter question. |
-| Внутренняя ошибка | Извините, произошла внутренняя ошибка. | Sorry, an internal error occurred. |
+| Rate limit | Сервер временно перегружен. Пожалуйста, повторите ваш вопрос через несколько секунд. | Server is temporarily overloaded. Please retry your question in a few seconds. |
+| Ошибка модели | Ошибка доступа к модели. Попробуйте позже или обратитесь к администратору. | Model access error. Please try again later or contact the administrator. |
+| Длинный диалог | Диалог слишком длинный. Пожалуйста, начните новый разговор. | The conversation is too long. Please start a new chat. |
+| Ошибка подключения | Не удалось подключиться к серверу данных. Попробуйте позже. | Failed to connect to the data server. Please try again later. |
+| Модель не отвечает | Модель не отвечает. Пожалуйста, попробуйте снова или задайте более короткий вопрос. | The model is not responding. Please try again or ask a shorter question. |
+| Ошибка провайдера | Ошибка при обработке запроса моделью. Попробуйте позже. | An error occurred while processing your request. Please try again later. |
+| Ошибка MCP/БД | Не удалось выполнить запрос к базе данных. Попробуйте позже. | Failed to query the database. Please try again later. |
+| Внутренняя ошибка | Извините, произошла внутренняя ошибка. Попробуйте ещё раз. | Sorry, an internal error occurred. Please try again. |
+| Нет ответа | Не удалось получить ответ от модели. Пожалуйста, переформулируйте вопрос. | No response from the model. Please rephrase your question. |
 
 Язык определяется:
 1. **Embed-виджет** — через атрибут `data-lang="ru"` на `<script>`
@@ -286,11 +291,6 @@ curl -X POST http://localhost:8081/api/agents \
 ## Запуск
 
 ```bash
-# Из корня проекта
-cd /project/root
-uv run python -m demo.api.server
-
-# Или напрямую
 uv run --package api-service python -m uvicorn api_service.server:app --port 8081
 ```
 
@@ -298,7 +298,6 @@ uv run --package api-service python -m uvicorn api_service.server:app --port 808
 
 ```bash
 uv run pytest api-service/src/api_service/tests/ -v
-# 10 тестов MCP-клиента/оркестратора — skip (ожидают новый MCP SDK протокол)
 ```
 
 ---
@@ -312,7 +311,7 @@ uv run pytest api-service/src/api_service/tests/ -v
 | `MCP connection failed` / 502 | mcp-gateway не запущен на 8083 | `go run ./mcp-gateway/cmd/` |
 | 401 на `/api/chat` | Не передан `X-Tenant-ID` | Добавить заголовок `X-Tenant-ID: <tenant-id>` |
 | SSE обрывается / нет tool calls | LLM не вызывает инструменты | Проверить системный промпт, capabilities модели, логи `DEMO_DEBUG=1` |
-| `demo_sessions.sqlite` locked | Остался процесс от прошлого запуска | `pkill -f "demo.api" && rm -f demo_sessions.sqlite* backlog/*.jsonl` |
+| `demo_sessions.sqlite` locked | Остался процесс от прошлого запуска | `pkill -f "api.service" && rm -f demo_sessions.sqlite* backlog/*.jsonl` |
 | Голосовой конфиг | Voice config хранится в `agents.sqlite` → `global_config` (key=`voice`), а не в отдельном JSON-файле |
 
 ### Быстрый smoke-тест
@@ -333,7 +332,7 @@ curl -N -X POST http://127.0.0.1:8081/api/chat \
 ### Логи
 - Ручное запуск: stdout/stderr терминала
 - Через `dev.sh`: `.data/logs/api.log`
-- Debug режим: `DEMO_DEBUG=1 uv run python -m demo.api.server`
+- Debug режим: `DEMO_DEBUG=1 uv run --package api-service python -m uvicorn api_service.server:app --port 8081`
 
 ---
 
@@ -345,11 +344,14 @@ curl -N -X POST http://127.0.0.1:8081/api/chat \
 |---|---|---|
 | `chat_sessions_total` | Counter | Всего создано сессий чата |
 | `chat_messages_total` | Counter | Всего сообщений (labels: status) |
-| `llm_calls_total` | Counter | Вызовов LLM (labels: provider, model, status) |
+| `llm_calls_total` | Counter | Вызовов LLM (labels: model, provider) |
 | `llm_duration_ms` | Histogram | Длительность LLM-вызова |
 | `llm_token_usage` | Counter | Использовано токенов (labels: type=prompt/completion) |
 | `llm_cost_total` | Counter | Общая стоимость LLM вызовов ($) |
 | `abuse_blocked_total` | Counter | Заблокировано запросов по anti-abuse (labels: reason) |
+| `embed_widget_requests_total` | Counter | Запросов к embed-виджету (labels: endpoint) |
+| `backlog_records_total` | Counter | Записей бэклога (labels: type) |
+| `backlog_errors_total` | Counter | Ошибок в бэклоге (labels: error_type) |
 
 ### Logging
 - Используется structlog (JSON-формат при `LOG_FORMAT=json`)

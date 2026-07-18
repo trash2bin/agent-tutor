@@ -15,9 +15,12 @@ config.json → chi Router → Runtime Handlers (generic) → Query Builder → 
                 ├─ /{entity}?search=...  → find
                 ├─ /{entity}             → list
                 ├─ /{entity}/{id}/...    → custom_query (whitelist SELECT)
+                ├─ /docs                 → Swagger UI
+                ├─ /openapi.json         → OpenAPI 3.1 spec
+                ├─ /mcp/manifest         → runtime MCP tools generation
+                ├─ /mcp/schema           → introspected DB schema for LLM
                 ├─ /health, /stats       → builtin
-                ├─ /admin/*              → tenant CRUD, config hot-reload, discover
-                └─ /mcp/manifest         → runtime MCP tools generation
+                └─ /admin/*              → tenant CRUD, config hot-reload, discover
 ```
 
 **Структура пакетов (`internal/`):**
@@ -37,7 +40,8 @@ internal/
 ├── openapigen/                 # Runtime OpenAPI 3.1 генерация из конфига
 ├── runtime/                    # Query builder + typed response mapper
 │   ├── instrumented_adapter.go # Conn+Adapter → AdapterSubset с опциональными метриками
-│   ├── handlers/               # 6 хендлеров (get_by_id, find, list, custom_query, health, stats)
+│   ├── handlers/               # 9 хендлеров (get_by_id, find, list, custom_query,
+│   │                           #   count, distinct, health, stats, mcp_manifest)
 │   │   └── tests/              # black-box handler тесты
 │   └── tests/                  # black-box query builder тесты
 └── server/                     # HTTP server, middleware, TenantStore
@@ -45,6 +49,10 @@ internal/
     ├── tenant_admin.go         # admin-хендлеры (CRUD tenant'ов, rewrite, reload)
     ├── tenant_health.go        # HealthCheck, multiTenantHealthHandler
     ├── tenant_lifecycle.go     # AddTenant, RemoveTenant, ReloadTenant, buildTenantInstance
+    ├── server.go               # Middleware (Recovery, RequestID, StructuredLogging, RateLimit)
+    ├── endpoint_builder.go     # NewRouterFromConfig — сборка chi-роутера из конфига
+    ├── admin.go                # Admin API handlers (config CRUD, tool approval)
+    ├── swagger.go              # Swagger UI (GET /docs) + OpenAPI (GET /openapi.json)
     └── tests/                  # black-box scenario/integration тесты
 ```
 
@@ -54,16 +62,22 @@ internal/
 
 ## Multi-Tenancy (Strict Mode, фаза 3.7)
 
-- **TenantStore** — мапа `tenant_id → TenantInstance{Config, Conn, Router, ConfigPath, ...}` (разбит на 4 файла: `tenant.go` + `tenant_admin.go` + `tenant_health.go` + `tenant_lifecycle.go`)
+- **TenantStore** — мапа `tenant_id → TenantInstance{Config, Conn, Router, ConfigPath, ...}` (разбит на 8 файлов: `tenant.go` + `tenant_admin.go` + `tenant_health.go` + `tenant_lifecycle.go` + `server.go` + `endpoint_builder.go` + `admin.go` + `swagger.go`)
 - **Strict**: запрос **обязателен** `X-Tenant-ID` или `?tenant=` → иначе `404 tenant_not_found`
 - **Изоляция**: у каждого tenant свой пул коннектов, роутер, конфиг
 - **Admin API** (`Authorization: Bearer $ADMIN_TOKEN`):
   - `POST /admin/tenants` — добавить tenant на лету
   - `GET /admin/tenants` — список + health
-  - `PUT /admin/tenants/{id}/config` — обновить конфиг существующего tenant'а
-  - `POST /admin/tenants/{id}/config/rewrite` — интроспекция БД → перезапись конфига
-  - `POST /admin/tenants/{id}/reload` — hot reload без рестарта процесса
+  - `GET /admin/tenants/{id}` — детали tenant'а
+  - `POST /admin/config` — обновить конфиг текущего tenant'а
+  - `POST /admin/config/reload` — hot reload без рестарта процесса
+  - `POST /admin/config/rewrite` — интроспекция БД → перезапись конфига
+  - `GET /admin/config` — текущий конфиг (DSN скрыт)
+  - `GET /admin/config/versions` — история версий конфига
   - `DELETE /admin/tenants/{id}` — graceful drain (закрыть пул, удалить из мапы, стереть конфиг с диска)
+  - `GET /admin/tenants/{id}/tools/pending` — ожидающие подтверждения write-тулы
+  - `POST /admin/tenants/{id}/tools/{toolName}/approve` — подтвердить write-тул
+  - `GET /admin/discover` — интроспекция схемы (с `X-Tenant-ID`)
 - **Health**: single-tenant `{"status":"ok","db":"ok"}` | multi-tenant `{"status":"degraded","tenants":[...]}`
 
 ### Tenant Config Persistence
@@ -84,9 +98,9 @@ internal/
 **Жизненный цикл:**
 
 ```
-POST /admin/tenants  ──→  AddTenant() + SaveTenantConfig(id, cfg)  ──→  .data/tenants/{id}.json
-PUT .../config       ──→  update + reload  ──→  SaveTenantConfig(id, cfg)  ──→  перезаписан
-POST .../rewrite     ──→  introspect → generate → save  ──→  SaveTenantConfig(id, cfg)  ──→  обновлён
+POST /admin/tenants   ──→  AddTenant() + SaveTenantConfig(id, cfg)  ──→  .data/tenants/{id}.json
+POST /admin/config    ──→  update + reload  ──→  SaveTenantConfig(id, cfg)  ──→  перезаписан
+POST /admin/config/rewrite ──→  introspect → generate → save ──→  SaveTenantConfig(id, cfg)  ──→  обновлён
 DELETE /admin/tenants ──→  RemoveTenant() + DeleteTenantConfig(id)  ──→  файл удалён
 
 Startup               ──→  os.ReadDir(.data/tenants/) → config.Load() → AddTenant()  ──→  восстановлен
@@ -128,11 +142,11 @@ Startup               ──→  os.ReadDir(.data/tenants/) → config.Load() �
 cd data-service && go build -o bin/data-service ./cmd/server/
 
 # Dev SQLite (из корня проекта)
-./bin/data-service --config ../specs/config.example.json
+./bin/data-service --config specs/config.example.json
 
 # Dev PostgreSQL
 docker compose up -d db
-./bin/data-service --config ../specs/config.postgres.json
+./bin/data-service --config specs/config.postgres.json
 
 # Smoke-test
 curl -s http://127.0.0.1:8084/health                    # {"status":"ok"}
@@ -181,7 +195,7 @@ curl -s -H "Authorization: Bearer secret" http://127.0.0.1:8084/admin/tenants
 ## Тестирование
 
 ```bash
-# Все go-тесты (544 шт, 16 пакетов)
+# Все go-тесты (см. `make ci` — количество тестов динамическое)
 go test ./... -count=1
 
 # White-box тесты (рядом с кодом)
@@ -195,7 +209,7 @@ go test -race ./... -count=3
 
 # Cross-driver parity (PG)
 docker compose up -d db
-AGENT_TUTOR_TEST_PG=1 go test ./internal/server/tests/ -run TestCrossDriver -v
+AGENT_TUTOR_TEST_PG=1 go test ./internal/server/tests/ -v
 ```
 
 ---
@@ -203,7 +217,7 @@ AGENT_TUTOR_TEST_PG=1 go test ./internal/server/tests/ -run TestCrossDriver -v
 ## Security & Hardening
 
 - Только SELECT, prepared statements (`?` / `$1`), `max_rows` обязателен для custom_query
-- `read_only: true` по умолчанию, enforced
+- `read_only: true` enforced, если явно установлен в конфиге (поле `ReadOnly` — `*bool`, по умолчанию nil — read-write режим)
 - Валидация через Go-типы (`helperium-go/config/types.go`), JSON Schema не используется
 - Защита от SQL injection в `counter.Filter` — `isValidFilterExpression()` блокирует `;`, `--`, DDL/DML
 - Content-Type: `application/json` для всех ответов (включая error recovery)

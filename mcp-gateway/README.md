@@ -41,7 +41,7 @@ X-Tenant-ID: tenant-a,tenant-b      → composite: tenant-a__list_students, tena
 |---|---|
 | `cmd/main.go` | Точка входа: SSE-сессии, JSON-RPC, composite/routing, debug |
 | `cmd/mcp_debug.go` | `//go:embed playground.html` |
-| `internal/httpclient/client.go` | HTTP-клиент к data-service: `FetchConfigWithTenant`, `GetData` |
+| `internal/httpclient/client.go` | HTTP-клиент к data-service: `FetchConfigWithTenant`, `Call` |
 | `internal/ragclient/client.go` | HTTP-клиент к RAG: `SearchDocuments`, `ListDocuments`, `GetRagContext` |
 | `internal/tools/tools.go` | **Реестр инструментов**: `NewRegistry`, `NewPrefixedRegistry`, `RegisterAll`, `makeHandler`, `deriveToolName` |
 
@@ -55,14 +55,17 @@ X-Tenant-ID: tenant-a,tenant-b      → composite: tenant-a__list_students, tena
    - `httpClient.FetchConfigWithTenant(tenantID)` → GET к data-service `/mcp/manifest`
    - `tools.NewRegistry(cfg)` → конвертирует `mcp_tools[]` из конфига в MCP-инструменты
    - `registry.RegisterAll(mcpServer)` → регистрирует хендлеры
-4. **Каждый инструмент** — closure с `httpClient.GetData()` к data-service
+
+> **Кэш манифеста:** `FetchConfigWithTenant()` кэширует ответ `/mcp/manifest` на 30 секунд (TTL).
+> Повторные вызовы в пределах окна не ходят в data-service.
+4. **Каждый инструмент** — closure с `client.Call(ctx, endpoint, params)` к data-service
 
 ### Поток вызова инструмента
 
 1. **Запрос**: Агент шлёт JSON-RPC `tools/call` через SSE-сессию с `X-Tenant-ID`
 2. **Манифест**: mcp-gateway проксирует `/mcp/manifest` → data-service (тем tenant'ом)
 3. **Разрешение**: `Registry.buildTools()` — маппинг endpoint → MCP toolDef
-4. **Вызов**: `makeHandler()` → `httpClient.GetData()` → data-service → JSON → MCP-результат
+4. **Вызов**: `makeHandler()` → `client.Call(ctx, endpoint, params)` → data-service → JSON → MCP-результат
 
 ## Схема именования инструментов
 
@@ -130,7 +133,8 @@ X-Tenant-ID: tenant-a,tenant-b      → composite: tenant-a__list_students, tena
 | `MCP_READ_HEADER_TIMEOUT` | `10` | Read header timeout (сек, slowloris защита) |
 | `MCP_IDLE_TIMEOUT` | `120` | Idle timeout HTTP (сек) |
 | `MCP_DEV` | — | Debug-режим (playground, доп. логи) |
-| `LOG_LEVEL` | `info` | debug / info / warn / error |
+| `MCP_RATE_LIMIT_RPS` | `10` | Requests per second (rate limiter) |
+| `MCP_RATE_LIMIT_BURST` | `20` | Burst size (rate limiter) |
 
 ## Управление сессиями
 

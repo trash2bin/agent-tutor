@@ -6,33 +6,47 @@
 
 B2B SaaS: клиент подключает свою БД → платформа интроспектирует схему → автоматически генерирует REST API + MCP-инструменты → AI-агент отвечает на вопросы над данными.
 
-### 🔄 Data flow: Запрос данных
+### 🔄 Data flow: Запрос данных (админка → data-service)
 
 ```
-Browser → GET /api/data/students [X-Tenant-ID: tenant-a]
-  → demo-web (:8080) — прокси с X-Tenant-ID
-    → data-service (:8084) — chi router → tenantStore.resolveTenant()
-      → generic handler (get_by_id / find / list / custom_query)
-        → QueryBuilder (без ORM, prepared statements, placeholder адаптация под СУБД)
-          → Adapter.Conn.QueryContext → Client DB (SQLite/PG)
+Admin Dashboard (:8085) → GET /admin/tenants/{id}/data/{entity}
+  → data-service (:8084) — chi router → tenantStore.resolveTenant()
+    → generic handler (get_by_id / find / list / custom_query)
+      → QueryBuilder (без ORM, prepared statements, placeholder адаптация под СУБД)
+        → Adapter.Conn.QueryContext → Client DB (SQLite/PG)
 ```
 
 ### 🔄 Data flow: LLM Chat (SSE stream)
 
 ```
-Browser → POST /api/chat [X-Tenant-ID]
-  → web (:8080) — SSE proxy побайтово
+Embed Widget (браузер) — <script src="/embed/embed.js" data-agent="shop-assistant">
+  → POST /api/agents/{name}/chat [X-Tenant-ID]
     → api-service (:8081)
-      → chat_handler() → orchestrator.stream_events()
-        → guard check → load history → LLM call (LiteLLM)
-          → tool_call → MCPClient.call_tool() (если LLM вернул)
-            → mcp-gateway (:8083) → data-service → DB
-          → tool_result → следующий LLM call → final ответ
-        → yield AgentEvent(type="token"|"tool_call"|"final"|...) → SSE → Browser
+      → chat_agent_handler() → get_agent_store().get_agent()
+        → resolve tenant_ids из конфига агента
+        → _check_abuse() → guard check
+        → orchestrator.stream_events()
+          → load history → LLM call (LiteLLM)
+            → tool_call → MCPClient.call_tool() (если LLM вернул)
+              → mcp-gateway (:8083) → data-service → DB
+            → tool_result → следующий LLM call → final ответ
+          → yield AgentEvent(type="token"|"tool_call"|"tool_result"|"final"|...)
+        → SSE → Widget (Shadow DOM, token-by-token)
 ```
 
-**Типы SSE-событий:** `token`, `tool_call`, `tool_result`, `final`, `error`, `done`.
-**Ключевые файлы:** `api-service/src/api_service/agent/` — `orchestrator.py`, `event_stream.py`, `types.py`, `mcp_client.py`.
+**Альтернативный entry point (админка):**
+```
+Admin Dashboard (:8085) → proxyToApiService()
+  → api-service (:8081) → ... тот же chat_agent_handler()
+```
+
+**Важно:** `demo/web` (:8080) — это **рудимент MVP**, используется только для локальной разработки и тестов. В production/widget-сценарии не участвует. Виджет ходит напрямую в api-service.
+
+**Типы SSE-событий:** `token`, `tool_call`, `tool_result`, `final`, `error`, `done`, `audio` (для TTS).
+
+**⚠️ Важно про data-service:** Не semantic search. Поддерживает только точное совпадение (WHERE с LIKE/равенством) по полям entities + custom_queries (заранее утверждённые SELECT-запросы). Не строит JOIN'ы на лету — только то, что описано в конфиге tenant'а. LLM сама решает, какой инструмент вызвать.
+**Ключевые файлы:** `api-service/src/api_service/` — `server.py`, `agent/orchestrator.py`, `agent/event_stream.py`, `agent/types.py`, `agent/mcp_client.py`
+**Embed-виджет:** `api-service/embed/src/` — `index.ts`, `dom.ts`, `sse.ts`, `voice.ts`, `storage.ts`, `types.ts`
 
 ## 🏗️ 2a. MCP — Архитектура
 
@@ -99,12 +113,12 @@ Browser → POST /api/chat [X-Tenant-ID]
 
 | Сервис | Порт | Ключевая роль |
 |---|---|---|
-| **data-service** (Go) | :8084 | Generic CRUD/Query, интроспекция БД, rewrite |
-| **mcp-gateway** (Go) | :8083 | MCP SSE/JSON-RPC, composite инструменты |
-| **admin-dashboard** (Go) | :8085 | Web UI для администрирования (Alpine.js) |
-| **api-service** (Python) | :8081 | Оркестратор агента, LiteLLM, SSE-chat |
-| **rag-service** (Python) | :8082 | Поиск по документам (ChromaDB) |
-| **web** (Python) | :8080 | UI + reverse-proxy |
+| **api-service** (Python) | :8081 | **Мозг.** Embed-виджет (TS), оркестратор агента, LiteLLM, чат (SSE), agent CRUD, voice (STT/TTS), spending, guardrails, LLM provider store |
+| **data-service** (Go) | :8084 | Generic CRUD + custom_queries (только SELECT). **Не semantic search** — точное совпадение по полям. Безопасная обёртка над БД |
+| **mcp-gateway** (Go) | :8083 | MCP SSE/JSON-RPC, composite инструменты, tenant-aware tool registry |
+| **admin-dashboard** (Go) | :8085 | Web UI для администрирования (Alpine.js), proxy к api-service/data-service |
+| **rag-service** (Python) | :8082 | Поиск по документам (ChromaDB), опционально |
+| **demo/web** (Python) | :8080 | **Рудимент MVP.** Только для локальной разработки. Reverse-proxy ко всем сервисам |
 | **sdk** (Python) | — | Pydantic-модели и клиенты |
 | **helperium-go** (Go) | — | Shared Go-модели |
 
@@ -114,6 +128,7 @@ Browser → POST /api/chat [X-Tenant-ID]
 
 ## 🚀 3. Эксплуатация и разработка
 
+`./dev.sh restart` - основной способ перезапуска **всех** сервисов (полная пересборка в том числе фронта)
 **Детали:** [doc/agents/operations.md](doc/agents/operations.md)
 
 ## 🧪 4. Регрессионное тестирование
@@ -137,18 +152,14 @@ Browser → POST /api/chat [X-Tenant-ID]
 1. [ ] `make ci` — зелёный
 2. [ ] Pre-commit hooks — все Passed
 3. [ ] `uv run pytest tests/e2e/ -v` — 44 e2e теста
-4. [ ] Mutation score не упал (опционально)
 
-## 📝 10. CLA
+## 📊 10. Monitoring & Observability
 
-Проект использует CLA ([`CLA.md`](CLA.md)) — защита коммерческой модели. При первом PR бот CLA Assistant запрашивает подпись.
-
-## 📊 11. Monitoring & Observability
-
+На проекте используеться Grafana + Prometheus
 **Детали:** [doc/agents/monitoring.md](doc/agents/monitoring.md)
 
 ## ⚠️ Важные правила
 
-- **Никакого SQL в Python** — только HTTP к data-service
+- **Никакого SQL в Проекте** — только HTTP к data-service (либо генерация тестовой бд разрешаеться)
+- **Виджет — основной клиент.** embed/embed.js — единственный production-ready UI. demo/web — для тестов
 - **Generic-подход** — не хардкодить сущности в коде
-- **Stateless** — сервисы не хранят сессию локально (кроме SQLite-кэша)

@@ -9,7 +9,7 @@ FastAPI reverse-proxy для multi-tenant архитектуры helperium.
 - Проксирует API-запросы к `api-service:8081` (агент, чат, сессии)
 - Проксирует данные напрямую в `data-service:8084` (обход api-service для снижения latency)
 
-**Не демка.** Несмотря на название `demo-web`, это основной UI-слой — reverse-proxy для всего стека. Статические HTML/JS/CSS — это production-фронтенд, а не демо-заглушка.
+**Не демка.** Несмотря на название `demo-web`, это reverse-proxy для разработки и демо, **НЕ** production entry point. Основные клиенты (embed-виджет и admin dashboard) ходят напрямую к api-service, минуя demo-web. Статические HTML/JS/CSS — фронтенд для локальной разработки.
 - Проксирует RAG-запросы в `rag:8082` (документы)
 - Пробрасывает `X-Tenant-ID` для multi-tenancy изоляции
 
@@ -64,6 +64,9 @@ Browser → /api/tenant/school-a/data/students
 - `GET /api/backlog` — модель бэклога
 - `GET /api/session/history` — история сессий
 - `POST /api/chat` — SSE-стриминг чата с агентом
+- `POST /api/chat/{agent_name}` — SSE-стриминг чата с указанным агентом
+- `GET /api/tenants` — список доступных tenant'ов
+- `ANY /api/{path:path}` — catch-all прокси для неопределённых /api/* маршрутов
 
 ### Tenant Routing (демо-режим)
 - `GET|POST|... /api/tenant/{tenant_id}/{path:path}` — универсальный маршрут с tenant в URL:
@@ -141,7 +144,7 @@ async def _get_proxy_headers(request):
 | `DEMO_API_PORT` | `8081` | Порт API сервиса |
 | `DEMO_WEB_HOST` | `127.0.0.1` | Хост web сервиса |
 | `DEMO_WEB_PORT` | `8080` | Порт web сервиса |
-| `WEB_ORIGIN` | `*` | CORS origin |
+| `WEB_ORIGIN` | `http://localhost:8080` | CORS origin (comma-separated список, `*` для embed/production) |
 | `API_BEARER_TOKEN` | — | Опциональный bearer token для API |
 | `DATA_SERVICE_URL` | `http://127.0.0.1:8084` | Базовый URL data-service (прямой прокси) |
 | `RAG_SERVICE_URL` | `http://127.0.0.1:8082` | Базовый URL RAG-сервиса (прямой прокси) |
@@ -156,6 +159,10 @@ async def _get_proxy_headers(request):
 environment:
   - DEMO_API_HOST=api
   - DEMO_API_PORT=8081
+  - DATA_SERVICE_URL=http://data-service:8084
+  - RAG_SERVICE_URL=http://rag:8082
+  - API_BEARER_TOKEN=
+  - WEB_PROXY_TIMEOUT=30.0
 ```
 
 ## Запуск
@@ -226,7 +233,7 @@ go test ./data-service/... ./mcp-gateway/... -count=1
 | 404 на `/api/manifest` для tenant | Тенант не зарегистрирован в data-service | `uv run agent-db tenant list` → `uv run agent-db register <id> <scenario>` |
 | Web не проксирует на data-service | Не тот `X-Tenant-ID` или data-service giù | Проверить логи data-service, заголовок `X-Tenant-ID` |
 | SSE chat: `Connection refused` на 8081 | api-service не запущен | `cd api-service && uv run python -m api_service.server --port 8081` |
-| 502 Bad Gateway | Downstream сервис упал | Проверить логи соответствующего сервиса (data-service:808084, api:8081, rag:8082) |
+| 502 Bad Gateway | Downstream сервис упал | Проверить логи соответствующего сервиса (data-service:8084, api:8081, rag:8082) |
 
 ### Быстрый smoke-тест
 ```bash

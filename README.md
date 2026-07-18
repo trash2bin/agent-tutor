@@ -70,18 +70,37 @@ Unlike static RAG systems that require manual re-indexing, this platform queries
 The platform consists of six independent HTTP services. They communicate over REST and SSE to enable horizontal scaling across multiple machines. In single-machine deployments, they function as a cohesive monolith over localhost without containerization overhead.
 
 ```
-User -> web:8080 -> api:8081 -> mcp-gateway:8083 -> data-service:8084 -> DB
-       (JS script)   (FastAPI       (Go, MCP            (Go, config-   (SQLite /
-                     + LiteLLM)    SSE/JSON-RPC)        driven CRUD)    PostgreSQL)
+                      rag:8082 (Python, document search) -> ChromaDB
+                        ^
+                        | HTTP
                         |
-                        v
-                   rag:8082
-                (Python,
-              document search) -> ChromaDB (vector)
+Browser (Embed Widget → POST /api/agents/{name}/chat
+  JS script, Shadow DOM)   |
+                           v
+                    api:8081 (FastAPI + LiteLLM) → SSE stream ← Widget
+                           |
+                           | call_tool() via SSE (JSON-RPC)
+                           v
+              mcp-gateway:8083 (Go, MCP SSE/JSON-RPC)
+                           |
+                           | HTTP
+                           v
+              data-service:8084 (Go, config-driven CRUD)
+                           |
+                           | SQL (prepared statements, read-only by default)
+                           v
+                    Client DB (SQLite / PostgreSQL)
 ```
 
-- **Mechanical workloads** (CRUD proxy, MCP gateway, admin dashboard, reverse proxy) are written in Go for throughput and full async concurrency.
-- **AI workloads** (agent orchestration, LLM integration, RAG, embeddings) are written in Python using FastAPI, LiteLLM, and Sentence Transformers.
+**Admin Dashboard** (:8085, Go/Alpine.js) — управление tenant'ами, агентами, конфигами.
+Ходит напрямую в api-service и data-service, минуя mcp-gateway.
+
+**demo/web** (:8080) — **только для локальной разработки**, не production entry point.
+
+**Note:** data-service is **not** a semantic search engine. It supports exact WHERE (LIKE/equality) on entity fields, `list` (all records with pagination), `get_by_id` (single record), and custom_queries (pre-approved SELECT statements configured per tenant). LLM decides which tool to call and with which parameters.
+
+- **Mechanical workloads** (MCP gateway, admin dashboard, data-service) are written in Go for throughput and full async concurrency.
+- **AI workloads** (agent orchestration, LLM integration, embed widget serving, RAG, embeddings) are written in Python using FastAPI, LiteLLM, and Sentence Transformers.
 
 ### Multi-tenant isolation
 
@@ -95,6 +114,8 @@ Three layers of isolation are enforced and verified in CI:
 
 Composite mode allows a single SSE session to route across N tenants with prefixed tool names (`{tenantID}__tool_name`) for conflict-free resolution. Different agents can be assigned to different sections of a site (e.g., one agent for unauthenticated visitors, another for logged-in customers with access to order history).
 
+**Important:** The demo/web service (:8080) is **not** the real entry point. The embed widget (`embed.js`) communicates directly with api-service (:8081), bypassing demo/web entirely. The admin dashboard (:8085) talks to api-service and data-service directly. demo/web is a remanent of the MVP era, kept for local development convenience.
+
 ### Infrastructure flexibility
 
 - **LLM providers.** Any OpenAI-compatible endpoint: local Ollama, Mistral, OpenAI, Anthropic, or self-hosted models on private GPU infrastructure.
@@ -104,7 +125,7 @@ Composite mode allows a single SSE session to route across N tenants with prefix
 
 ## Security Model
 
-- **Read-only enforcement.** Write operations are blocked at the MCP gateway. The write-tool approval workflow exists in the admin dashboard but is disabled by default and treated as an extension point rather than a core feature.
+- **Read-only enforcement.** Write operations are blocked at the data-service level (config flag `read_only: true`). The MCP gateway simply doesn't register write tools when read_only is active. The write-tool approval workflow exists in the admin dashboard but is disabled by default and treated as an extension point rather than a core feature.
 - **Test-Driven Development.** CI pipeline enforces a failing-test-first workflow. Test counts are not hardcoded in documentation; the pipeline reports current coverage dynamically.
 - **Pentest coverage.** A comprehensive security checklist is maintained in `doc/PENTEST-CHEK.md`. Each attack vector is tracked from initial failing test through remediation to passing state.
 - **Tenant isolation.** Verified at three layers under concurrent load in end-to-end tests.
@@ -157,13 +178,14 @@ uv run agent-rag-ingest search "quantum computing"
 
 The test suite covers unit, integration, and end-to-end scenarios across both Go and Python services. GitHub Actions runs four jobs: `lint-python`, `test-python`, `lint-go`, `test-go`. Pre-commit hooks enforce linting locally before push. The `make ci` target simulates the full pipeline locally.
 
-Test counts are dynamic and reported by the pipeline. Current coverage exceeds 1100 tests across:
+Test counts are dynamic and reported by the pipeline. Run `make ci` locally or check the CI report for the current count. Key test areas:
 
-- `data-service`: 326 tests (CRUD, schema introspection, write-tool approval)
-- `rag`: 104 tests (chunking, embeddings, re-embedding pipeline)
-- `web`: 55 tests (reverse proxy, multi-tenant routing, SSE proxy)
-- `helperium-sdk`: 83 tests (shared models, HTTP clients)
-- E2E suites: data isolation, MCP tool routing, composite multi-tenant sessions
+- `data-service`: CRUD, schema introspection, write-tool approval
+- `rag`: chunking, embeddings, re-embedding pipeline
+- `demo/web`: reverse proxy, multi-tenant routing, SSE proxy
+- `helperium-sdk`: shared models, HTTP clients
+- `admin-dashboard`: tenant lifecycle, config management
+- E2E suites: data isolation, MCP tool routing, composite multi-tenant sessions, agent chat
 
 ## Embedded Widget
 
@@ -172,6 +194,7 @@ A single `<script>` tag injects a Shadow DOM-isolated chat widget into any websi
 ```html
 <script src="https://your-server.com/embed/embed.js"
         data-agent="shop-assistant"
+        data-api-base="https://your-server.com"
         data-title="Assistant"
         data-accent="#0f766e"
         data-position="right"
@@ -180,6 +203,8 @@ A single `<script>` tag injects a Shadow DOM-isolated chat widget into any websi
 ```
 
 Widget state is isolated via Shadow DOM — no CSS conflicts with the host site. Multiple independent widgets on one page are supported. Configuration is done entirely through `data-*` attributes (14+ parameters: size, position, colors, placeholder, header).
+
+**Note:** The widget sends requests directly to the api-service at `POST /api/chat/{agent}` (text) and `POST /api/chat/voice` (audio). It does **not** pass through demo/web. Tenant resolution happens server-side from the agent's stored configuration. Voice recording supports both Telegram-style hold-to-record (default) and classic toggle mode.
 
 See [`api-service/embed/README.md`](api-service/embed/README.md) for full documentation on the SSE protocol, CSP requirements, CSS variable customization, and multi-widget configurations.
 

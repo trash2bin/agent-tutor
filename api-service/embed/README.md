@@ -60,7 +60,7 @@
 | `data-lang` | auto | Язык: `"ru"` или `"en"`. Если не указан — определяется по `navigator.language` |
 | `data-voice-input` | `"true"` | Голосовой ввод: `"true"` или `"false"` |
 | `data-voice-output` | `"true"` | Голосовой вывод (TTS): `"true"` или `"false"` |
-| `data-voice-toggle` | `"classic"` | Режим голоса: `"classic"` (toggle on/off) или `"telegram"` (зажать = запись, текст = send) |
+| `data-voice-toggle` | `"telegram"` | Режим голоса: `"telegram"` (зажать = запись, отпустить = отправить; если есть текст в поле — показывает кнопку отправки вместо микрофона) или `"classic"` (toggle on/off) |
 
 ### Сообщения об ошибках
 
