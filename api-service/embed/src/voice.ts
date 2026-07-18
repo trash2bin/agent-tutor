@@ -6,7 +6,7 @@
  */
 
 import type { WidgetConfig } from './types';
-import { readSSEStream, type SSEReadCallbacks } from './sse-reader';
+import { readSSEStream, type SSEReadCallbacks } from './sse';
 import { ICONS } from './icons';
 
 /** Mutable state for voice recording session. */

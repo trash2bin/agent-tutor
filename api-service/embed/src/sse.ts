@@ -62,110 +62,137 @@ export interface StreamChatOpts {
 }
 
 /**
- * Internal SSE pump — reads chunks from a ReadableStream and dispatches
+ * Callbacks for raw SSE stream reading (without streamChat retry/fetch logic).
+ * Used by voice chat and restoreHistory to process SSE events.
+ */
+export interface SSEReadCallbacks {
+  onToken: (text: string) => void;
+  onFinal: (text: string) => void;
+  onToolCall: (name: string, displayName?: string) => void;
+  onAudio: (data: string) => void;
+  onDone: (raw: string, tools: string[]) => void;
+  onError: (text: string) => void;
+}
+
+/**
+ * Reads an SSE stream using async/await (no Promise chain) and dispatches
  * parsed JSON events to the appropriate callback.
  *
  * @param response - The fetch Response with a readable body.
- * @param targetNode - The assistant message bubble to update.
- * @param opts - Full streaming options.
+ * @param targetNode - The assistant message bubble to update (dataset tools/displayNames).
+ * @param callbacks - Event callbacks.
+ * @param lang - Language for fallback messages ('ru' or 'en').
  * @returns A promise that resolves when the stream is consumed.
  */
-function pumpSSE(
+export async function readSSEStream(
   response: Response,
   targetNode: HTMLDivElement,
-  opts: StreamChatOpts,
+  callbacks: SSEReadCallbacks,
+  lang: string = 'en',
 ): Promise<void> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
 
-  function pump(): Promise<void> {
-    return reader.read().then((result) => {
-      if (result.done) return;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
 
-      buffer += decoder.decode(result.value, { stream: true });
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop()!;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop()!;
 
-      for (const chunk of parts) {
-        const line = chunk.split('\n').find((l) => l.indexOf('data:') === 0);
-        if (!line) continue;
+    for (const chunk of parts) {
+      const line = chunk.split('\n').find((l) => l.startsWith('data:'));
+      if (!line) continue;
 
-        let payload: { type: string; text?: string; name?: string; display_name?: string; data?: string };
-        try {
-          payload = JSON.parse(line.slice(5).trim());
-        } catch {
-          continue;
-        }
-
-        /* Remove "thinking" class on first real data */
-        if (targetNode.classList.contains('at-thinking')) {
-          targetNode.classList.remove('at-thinking');
-        }
-
-        switch (payload.type) {
-          case 'token':
-            opts.callbacks.onToken(payload.text || '');
-            break;
-
-          case 'final':
-            opts.callbacks.onFinal(payload.text || '');
-            break;
-
-          case 'tool_call': {
-            const toolsRaw = targetNode.dataset.tools || '[]';
-            const displayNamesRaw = targetNode.dataset.displayNames || '{}';
-            const tools: string[] = JSON.parse(toolsRaw);
-            const displayNames: Record<string, string> = JSON.parse(displayNamesRaw);
-
-            if (payload.name && tools.indexOf(payload.name) === -1) {
-              tools.push(payload.name);
-              targetNode.dataset.tools = JSON.stringify(tools);
-            }
-            if (payload.display_name && payload.name && !displayNames[payload.name]) {
-              displayNames[payload.name] = payload.display_name;
-              targetNode.dataset.displayNames = JSON.stringify(displayNames);
-            }
-            opts.callbacks.onToolCall(payload.name || '', payload.display_name);
-            break;
-          }
-
-          case 'audio':
-            if (opts.config.voiceOutput && payload.data) {
-              opts.callbacks.onAudio(payload.data);
-            }
-            break;
-
-          case 'done':
-            if (targetNode.classList.contains('at-error')) return;
-            if (!targetNode.dataset.raw?.trim()) {
-              opts.callbacks.onFinal(
-                opts.config.lang === 'ru' ? 'Не удалось получить ответ.' : 'No response.',
-              );
-            }
-            let toolNames: string[] = [];
-            try {
-              toolNames = JSON.parse(targetNode.dataset.tools || '[]');
-            } catch { /* ignore */ }
-            opts.callbacks.onDone(targetNode.dataset.raw || '', toolNames);
-            targetNode.dataset.saved = 'true';
-            opts.scrollToBottom(opts.messagesEl);
-            break;
-
-          case 'error':
-            targetNode.classList.remove('at-thinking');
-            targetNode.classList.add('at-error');
-            targetNode.textContent = payload.text ||
-              (opts.config.lang === 'ru' ? 'Произошла ошибка.' : 'An error occurred.');
-            break;
-        }
+      let payload: {
+        type: string;
+        text?: string;
+        name?: string;
+        display_name?: string;
+        data?: string;
+      };
+      try {
+        payload = JSON.parse(line.slice(5).trim());
+      } catch {
+        continue;
       }
 
-      return pump();
-    });
-  }
+      if (targetNode.classList.contains('at-thinking')) {
+        targetNode.classList.remove('at-thinking');
+      }
 
-  return pump();
+      switch (payload.type) {
+        case 'token':
+          callbacks.onToken(payload.text || '');
+          break;
+
+        case 'final':
+          callbacks.onFinal(payload.text || '');
+          break;
+
+        case 'tool_call': {
+          const tools: string[] = JSON.parse(
+            targetNode.dataset.tools || '[]',
+          );
+          const displayNames: Record<string, string> = JSON.parse(
+            targetNode.dataset.displayNames || '{}',
+          );
+
+          if (payload.name && !tools.includes(payload.name)) {
+            tools.push(payload.name);
+            targetNode.dataset.tools = JSON.stringify(tools);
+          }
+          if (
+            payload.display_name &&
+            payload.name &&
+            !displayNames[payload.name]
+          ) {
+            displayNames[payload.name] = payload.display_name;
+            targetNode.dataset.displayNames = JSON.stringify(displayNames);
+          }
+          callbacks.onToolCall(payload.name || '', payload.display_name);
+          break;
+        }
+
+        case 'audio':
+          if (payload.data) {
+            callbacks.onAudio(payload.data);
+          }
+          break;
+
+        case 'done':
+          if (targetNode.classList.contains('at-error')) return;
+          if (!targetNode.dataset.raw?.trim()) {
+            callbacks.onFinal(
+              lang === 'ru'
+                ? 'Не удалось получить ответ.'
+                : 'No response.',
+            );
+          }
+          let toolNames: string[] = [];
+          try {
+            toolNames = JSON.parse(targetNode.dataset.tools || '[]');
+          } catch {
+            /* ignore */
+          }
+          callbacks.onDone(targetNode.dataset.raw || '', toolNames);
+          targetNode.dataset.saved = 'true';
+          break;
+
+        case 'error':
+          targetNode.classList.remove('at-thinking');
+          targetNode.classList.add('at-error');
+          targetNode.textContent =
+            payload.text ||
+            (lang === 'ru'
+              ? 'Произошла ошибка.'
+              : 'An error occurred.');
+          break;
+      }
+    }
+  }
 }
 
 /**
@@ -175,7 +202,7 @@ function pumpSSE(
  * - 429 Too Many Requests (with Retry-After header)
  * - Non-OK responses
  * - Connection errors
- * - Successful SSE streaming via pumpSSE
+ * - Successful SSE streaming via readSSEStream
  *
  * @param opts - Full streaming options.
  */
@@ -265,7 +292,7 @@ export function streamChat(opts: StreamChatOpts): void {
       }
 
       /* ── Successful SSE stream ── */
-      return pumpSSE(response, targetNode, opts);
+      return readSSEStream(response, targetNode, callbacks, config.lang);
     })
     .catch(() => {
       targetNode.classList.remove('at-thinking');
