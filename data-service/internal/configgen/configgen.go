@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/trash2bin/helperium/data-service/internal/datasource"
 	"github.com/trash2bin/helperium/helperium-go/config"
@@ -116,8 +117,13 @@ func Generate(schema *datasource.Schema, cfg *config.Config) *config.Config {
 	}
 
 	result := &config.Config{
-		Version:    1,
+		Version:    config.CurrentConfigVersion,
 		DataSource: cfg.DataSource,
+		Meta: &config.ConfigMeta{
+			ConfigVersion:    config.CurrentConfigVersion,
+			GeneratedAt:      time.Now().UTC().Format(time.RFC3339),
+			GeneratorVersion: "", // filled by build system
+		},
 	}
 
 	// Сортируем таблицы для детерминизма

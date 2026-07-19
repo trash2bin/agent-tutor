@@ -135,7 +135,7 @@ func (ts *TenantStore) ReloadTenant(ctx context.Context, tenantID string, config
 	// Build new router using existing connection, preserving approved tools
 	approvedTools := make(map[string]bool)
 	for _, p := range newCfg.ApprovedTools {
-		approvedTools[p] = true
+		approvedTools[p.Endpoint] = true
 	}
 	newRouter, err := NewRouterFromConfig(ts, newCfg, inst.AdapterSub, approvedTools)
 	if err != nil {
@@ -211,7 +211,7 @@ func buildTenantInstance(ctx context.Context, ts *TenantStore, registry *datasou
 	// Build approved tools map from config
 	approvedTools := make(map[string]bool)
 	for _, p := range cfg.ApprovedTools {
-		approvedTools[p] = true
+		approvedTools[p.Endpoint] = true
 	}
 	router, err := NewRouterFromConfig(ts, cfg, adapterSub, approvedTools)
 	if err != nil {

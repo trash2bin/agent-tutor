@@ -73,7 +73,9 @@ Admin Dashboard (:8085) → proxyToApiService()
 **Авто:** entities[], endpoints[] (GET /{entity}/{id}, GET /{entity}), mcp_tools[], stats.counters[], read_only: true
 **Вручную:** custom_queries{}, метод POST/PUT/DELETE, auth{}, mcp_tools[].description/display_name, introspection{}, approved_tools[], readonly_dsn
 
-Структура: `helperium-go/config/types.go:Config`
+**Схема:** `helperium-go/config/types.go:Config`. Версионируется через `Normalize()` — старые конфиги (v0, v1) апгрейдятся автоматически при загрузке.
+**Детали схемы:** [specs/config.schema.md](specs/config.schema.md)
+**Миграции:** [doc/agents/config-migration.md](doc/agents/config-migration.md)
 
 ## 🔌 2d. Adapter Pattern
 
@@ -114,7 +116,7 @@ Admin Dashboard (:8085) → proxyToApiService()
 | Сервис | Порт | Ключевая роль |
 |---|---|---|
 | **api-service** (Python) | :8081 | **Мозг.** Embed-виджет (TS), оркестратор агента, LiteLLM, чат (SSE), agent CRUD, voice (STT/TTS), spending, guardrails, LLM provider store |
-| **data-service** (Go) | :8084 | Generic CRUD + custom_queries (только SELECT). **Не semantic search** — точное совпадение по полям. Безопасная обёртка над БД |
+| **data-service** (Go) | :8084 | Generic CRUD + custom_queries (только SELECT). Config-driven — схема БД описывается JSON-конфигом (v2, с миграциями через `Normalize()`). **Не semantic search** — точное совпадение по полям. Безопасная обёртка над БД |
 | **mcp-gateway** (Go) | :8083 | MCP SSE/JSON-RPC, composite инструменты, tenant-aware tool registry |
 | **admin-dashboard** (Go) | :8085 | Web UI для администрирования (Alpine.js), proxy к api-service/data-service |
 | **rag-service** (Python) | :8082 | Поиск по документам (ChromaDB), опционально |
@@ -128,7 +130,7 @@ Admin Dashboard (:8085) → proxyToApiService()
 
 ## 🚀 3. Эксплуатация и разработка
 
-`./dev.sh restart` - основной способ перезапуска **всех** сервисов (полная пересборка в том числе фронта)
+`./scripts/dev.sh restart` - основной способ перезапуска **всех** сервисов (полная пересборка в том числе фронта)
 **Детали:** [doc/agents/operations.md](doc/agents/operations.md)
 
 ## 🧪 4. Регрессионное тестирование

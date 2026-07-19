@@ -61,7 +61,7 @@ type adminConfigResponse struct {
 	SkipRules           []config.SkipRule             `json:"skip_rules,omitempty"`
 	DisplayPrefixes     []string                    `json:"display_prefixes,omitempty"`
 	CustomPlurals       map[string]string             `json:"custom_plurals,omitempty"`
-	ApprovedTools       []string                     `json:"approved_tools,omitempty"`
+	ApprovedTools       []config.ApprovedTool       `json:"approved_tools,omitempty"`
 	DisabledDefaultRules []string                     `json:"disabled_default_rules,omitempty"`
 }
 

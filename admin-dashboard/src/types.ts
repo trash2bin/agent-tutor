@@ -79,7 +79,7 @@ export interface TenantConfig {
   skip_rules?: SkipRule[];
   display_prefixes?: string[];
   custom_plurals?: Record<string, string>;
-  approved_tools?: string[];
+  approved_tools?: ApprovedToolItem[];
   disabled_default_rules?: string[];
   stats?: { counters?: { entity?: string }[] };
 }
@@ -120,6 +120,11 @@ export interface ToolInfo {
   path?: string;
   method?: string;
   approved?: boolean;
+}
+
+export interface ApprovedToolItem {
+  endpoint: string;
+  methods?: string[];
 }
 
 export interface ManifestData {

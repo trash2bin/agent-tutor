@@ -345,7 +345,10 @@ func TestApprovedToolsInConfig(t *testing.T) {
 	cfg := newInMemoryConfig(t)
 	ro := readOnlyPtr()
 	cfg.DataSource.ReadOnly = ro
-	cfg.ApprovedTools = []string{"/orders", "/orders/{id}"}
+	cfg.ApprovedTools = []config.ApprovedTool{
+		{Endpoint: "/orders"},
+		{Endpoint: "/orders/{id}"},
+	}
 
 	// Add tenant
 	ctx := context.Background()
@@ -386,7 +389,7 @@ func TestApprovedToolsInConfig(t *testing.T) {
 
 	found := false
 	for _, p := range loadedCfg.ApprovedTools {
-		if p == "/orders" {
+		if p.Endpoint == "/orders" {
 			found = true
 		}
 	}

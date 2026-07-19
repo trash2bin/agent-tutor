@@ -1,161 +1,262 @@
-# data-service config — руководство
+# Tenant config schema
 
-> Архивировано. Валидация переехала в Go-типы (`helperium-go/config/types.go`).
-> Документ сохранён как человеко-читаемая справка по формату конфига.
+Human-readable reference for the JSON config that drives `data-service`.
+Current version: **2**.
 
-## Что это
+Validation lives in Go types (`helperium-go/config/types.go` — `Config.Validate()`).
+This file is documentation only.
 
-JSON-конфиг, который описывает:
+---
 
-1. **К какой БД подключаться** (`data_source`).
-2. **Какие сущности извлекать** из этой БД (`entities[]`).
-3. **Какие REST endpoints публиковать** (`endpoints[]`).
-4. **Какие MCP-инструменты отдавать агенту** (`mcp_tools[]`).
-5. **Какой SQL whitelist разрешён** для escape-hatch запросов (`custom_queries`).
-6. **Multi-tenancy настройки** (`auth`).
-
-data-service загружает конфиг при старте (фаза 3.0+), валидирует по
-`config.schema.json`, и работает по нему. Никакой доменной семантики
-в Go-коде нет.
-
-## Минимальный жизнеспособный конфиг
+## Top-level structure
 
 ```jsonc
 {
-  "version": 1,
-  "data_source": {
-    "driver": "sqlite",
-    "dsn": "university.db"
+  "version": 2,                          // schema version, Normalize() upgrades old ones
+  "meta": {                              // who/when generated this config
+    "config_version": 2,
+    "generated_at": "2026-07-11T12:00:00Z",
+    "generator_version": "1.2.0"
   },
-  "entities": [
+  "data_source": {                       // client DB connection (required)
+    "driver": "sqlite|postgres",
+    "dsn": "path or connection string",
+    "pool_size": 10,                     // max connections, optional
+    "read_only": true,                   // default true
+    "readonly_dsn": "..."                 // separate read-only user for agent (optional)
+  },
+  "introspection": {                     // auto-discovery settings (optional)
+    "enabled": true,
+    "include_schemas": ["public"],        // Postgres only
+    "exclude_tables": ["^audit_"]
+  },
+  "entities": [/* see below */],         // table → API mapping
+  "endpoints": [/* see below */],        // published REST endpoints
+  "custom_queries": {},                  // whitelist SQL for escape-hatch
+  "stats": { "counters": [] },           // counters for /stats
+  "mcp_tools": [/* see below */],        // MCP tool definitions
+  "auth": {/* see below */},             // multi-tenancy isolation (optional)
+  "server": {                            // HTTP limits (optional, env overrides)
+    "request_timeout_seconds": 30,
+    "body_limit_mb": 10,
+    "max_concurrent": 100
+  },
+  "approved_tools": [/* see below */],   // write-endpoints allowed in read-only mode
+  "skip_rules": [],                      // tables to exclude from generation
+  "disabled_default_rules": [],          // default skip rules to disable
+  "display_prefixes": [],                // table name prefixes to strip in display names
+  "custom_plurals": {}                   // plural overrides for tool naming
+}
+```
+
+All fields except `data_source` are optional. Missing optional fields are
+treated as safe defaults by the runtime.
+
+---
+
+## data_source
+
+```jsonc
+{
+  "driver": "sqlite",        // "sqlite" | "postgres"
+  "dsn": "university.db",    // file path or connection string, supports ${ENV} subst
+  "pool_size": 10,           // optional, default varies by driver
+  "read_only": true,         // default true — write disabled at app level
+  "readonly_dsn": "..."      // DB-level read-only user (optional, overrides app-level)
+}
+```
+
+Env substitution works in any string field:
+
+```jsonc
+"dsn": "postgres://user:${DB_PASSWORD}@host:5432/db?sslmode=require"
+```
+
+---
+
+## entities[]
+
+One entity per database table. Maps table columns to public API fields.
+
+```jsonc
+{
+  "name": "student",                    // public name (snake_case, used in API paths)
+  "table": "students",                  // real table name in DB
+  "id_column": "id",                    // primary key column
+  "description": "A student record",    // optional, used in MCP tool descriptions
+
+  "fields": [
     {
-      "name": "customer",
-      "table": "customers",
-      "id_column": "id",
-      "fields": [
-        { "name": "id",    "column": "id",    "type": "string" },
-        { "name": "email", "column": "email", "type": "string" }
-      ]
+      "name": "full_name",             // public field name
+      "column": "name",                // DB column name
+      "type": "string",                // see FieldType enum below
+      "nullable": false,               // optional, default false
+      "primary_key": false,            // optional, default false
+      "description": "Full name"       // optional
     }
   ],
-  "endpoints": [
-    { "method": "GET", "path": "/customers/{id}", "op": "get_by_id", "entity": "customer" },
-    { "method": "GET", "path": "/health",         "op": "builtin_health" }
-  ]
-}
-```
 
-После старта data-service автоматически отдаёт:
-
-- `GET /customers/{id}` — карточка клиента по ID
-- `GET /health` — статус сервиса и БД
-
-И регистрирует MCP-инструменты (если указаны в `mcp_tools[]`).
-
-## Подстановка переменных окружения
-
-В любых строковых полях конфига можно использовать `${ENV_VAR}` и
-`${ENV_VAR:-default}`:
-
-```jsonc
-"dsn": "${DB_DSN:-university.db}"
-"dsn": "postgres://user:${DB_PASSWORD}@host:5432/db"
-```
-
-Подстановка происходит **до** валидации схемой.
-
-## Операции endpoint'ов
-
-| `op`               | Что делает                                       | Требует          |
-|--------------------|--------------------------------------------------|------------------|
-| `builtin_health`   | `/health` (статус сервиса + БД)                  | —                |
-| `builtin_stats`    | `/stats` (счётчики по entities)                  | `stats` блок     |
-| `get_by_id`        | Запись по `id_column` через path `{id}`          | `entity`         |
-| `find`             | Поиск по `search_field` через query-параметр    | `entity`, `search_field` |
-| `list`             | Список всех записей entity                       | `entity`         |
-| `custom_query`     | Whitelist SQL из `custom_queries[query_id]`      | `query_id`       |
-
-## SQL Whitelist
-
-`custom_queries` — единственное место, где в конфиге встречается
-произвольный SQL. Жёсткие ограничения:
-
-- Только `SELECT` (regex `^\s*SELECT\b`).
-- Без `;` — никаких multiple statements.
-- `?` placeholder'ы для всех user-input.
-- Обязательный `max_rows` (1..10000) — защита от over-fetch.
-- `result_mapping` — JSON Schema типы для каждой колонки результата.
-
-Пример:
-
-```jsonc
-"student_grades": {
-  "sql": "SELECT g.id, g.grade FROM grades g WHERE g.student_id = ?",
-  "params": ["id"],
-  "result_mapping": {
-    "id":    { "type": "string" },
-    "grade": { "type": "string" }
-  },
-  "max_rows": 500
-}
-```
-
-Адаптер автоматически заменит `?` на нативный placeholder СУБД
-(`?` для SQLite, `$1` для PostgreSQL и т.д.).
-
-## Маппинг имён
-
-**Публичные имена** (`name` в entities, fields, endpoints) — то, что
-видят потребители (HTTP API, MCP, UI). Желательно snake_case.
-
-**Колонки БД** (`column` в fields) — то, что лежит в БД. Может
-совпадать с name, но не обязательно.
-
-Это разделение позволяет переименовать публичное API без миграции БД
-и наоборот.
-
-## Отношения между сущностями
-
-`relations[]` — это **документация**, а не JOIN'ы. JOIN'ы не
-строятся автоматически (иначе N+1 и непредсказуемые запросы).
-Для JOIN'ов используйте `custom_queries` и пишите SQL явно.
-
-## Multi-tenancy (фаза 3.7)
-
-```jsonc
-"auth": {
-  "strategy": "header",
-  "tenant_header": "X-Tenant-ID",
-  "row_filters": [
+  "relations": [                      // optional, documentation only (no auto-JOINs)
     {
-      "entity": "customer",
-      "where": "tenant_id = :tenant_id"
+      "field": "group",
+      "kind": "many_to_one",          // many_to_one | one_to_many | many_to_many
+      "table": "groups",
+      "local_fk": "group_id",
+      "target_fk": "",                // optional, for many_to_many
+      "junction_table": ""            // required for many_to_many
     }
   ]
 }
 ```
 
-data-service автоматически добавит `AND tenant_id = ?` ко всем
-запросам к entity `customer`, подставив значение из заголовка.
+Field types: `string | int | float | bool | json | datetime | date`
 
-## Валидация
+**Relations are documentation, not JOINs.** JOINs go through `custom_queries`.
 
-```bash
-# Через Python jsonschema:
-uv run python -c "
-import json, jsonschema
-schema = json.load(open('specs/config.schema.json'))
-cfg = json.load(open('my_config.json'))
-jsonschema.Draft202012Validator(schema).validate(cfg)
-print('OK')
-"
+---
+
+## endpoints[]
+
+```jsonc
+{
+  "method": "GET",                     // GET | POST | PUT | PATCH | DELETE
+  "path": "/students/{id}",            // supports {param} placeholders
+  "op": "get_by_id",                   // operation type
+  "entity": "student",                 // entity name (required for get_by_id/find/list)
+  "search_field": "full_name",         // field to search on (required for find)
+  "query_param": "full_name",          // query param name for search value
+  "query_id": "student_grades",        // custom_queries key (required for custom_query)
+  "description": "Returns a student by ID",
+  "params": [
+    {
+      "name": "limit",
+      "in": "query",                   // path | query | body
+      "type": "int",                   // string | int | float | bool
+      "array_of": "int",               // for array params (optional)
+      "enum_values": ["a", "b"],       // for enum params (optional)
+      "required": false,
+      "description": "Max records"
+    }
+  ]
+}
 ```
 
-В фазе 3.2 data-service будет валидировать конфиг сам при старте
-и при reload.
+| op | What it does | Requires |
+|----|-------------|----------|
+| `builtin_health` | `/health` — service + DB status | — |
+| `builtin_stats` | `/stats` — counters per entity | `stats` block |
+| `get_by_id` | Record by PK (`GET /{entity}/{id}`) | `entity` |
+| `find` | Search by field (`GET /{entity}?field=val`) | `entity`, `search_field` |
+| `list` | List all (`GET /{entity}`) | `entity` |
+| `distinct` | Distinct values of a field | `entity` |
+| `count` | Count of records | `entity` |
+| `custom_query` | Whitelist SQL from `custom_queries[key]` | `query_id` |
 
-## Версионирование
+---
 
-`version: 1` — текущая версия. При будущих несовместимых изменениях
-схемы значение инкрементируется, и data-service откажется грузить
-конфиг неподдерживаемой версии с понятным сообщением.
+## custom_queries{}
+
+Only place where arbitrary SQL appears. Strictly controlled.
+
+```jsonc
+{
+  "student_grades": {
+    "sql": "SELECT g.id, g.grade FROM grades g WHERE g.student_id = ?",
+    "params": ["student_id"],             // names match ? placeholders in order
+    "result_mapping": {                    // required for every result column
+      "id":    { "type": "string" },
+      "grade": { "type": "string" }
+    },
+    "max_rows": 500,                       // 1..10000, hard limit
+    "description": "Grades for a student"
+  }
+}
+```
+
+Rules:
+- Only `SELECT` (enforced by regex `^\s*SELECT\b`)
+- No `;` (multi-statement)
+- `?` placeholders for all user input
+- `max_rows` required (1..10000)
+- `result_mapping` required for every column
+
+Adapters translate `?` to native dialect (`?` for SQLite, `$1` for Postgres).
+
+---
+
+## mcp_tools[]
+
+MCP tool definitions for the AI agent. Typically auto-generated by `configgen`,
+but can be overridden.
+
+```jsonc
+{
+  "name": "find_student",              // tool name (snake_case)
+  "display_name": "Find Student",      // UI label (optional)
+  "endpoint": "/students",             // must match an endpoints[].path
+  "description": "Search students by name. Used when the user asks about a student.",
+  "params": []                         // same shape as endpoints[].params
+}
+```
+
+`mcp_tools[].endpoint` must reference an existing `endpoints[].path`.
+
+---
+
+## auth{}
+
+Multi-tenancy isolation. Optional. Without it — no row-level filtering.
+
+```jsonc
+{
+  "strategy": "header",                // "none" | "header"
+  "tenant_header": "X-Tenant-ID",      // header name for tenant ID
+  "row_filters": [                     // added as AND (column = :tenant_id)
+    { "entity": "customer", "where": "tenant_id = :tenant_id" }
+  ]
+}
+```
+
+---
+
+## approved_tools[]
+
+Write-endpoints approved in read-only mode. If `read_only: true` (default),
+only endpoints listed here accept POST/PUT/DELETE.
+
+Legacy format (`v1`, still accepted):
+```jsonc
+["/students", "/students/{id}"]
+```
+
+Current format (`v2`):
+```jsonc
+[
+  { "endpoint": "/students", "methods": ["POST"] },
+  { "endpoint": "/students/{id}", "methods": ["PUT", "DELETE"] }
+]
+```
+
+Empty `methods` means all methods for that endpoint are approved.
+
+---
+
+## Config lifecycle
+
+```
+Write path:
+  POST /admin/config/rewrite → configgen.Generate() → SaveTenantConfig()
+  POST /admin/tenants        → inline JSON → Validate() → SaveTenantConfig()
+
+Read path on startup:
+  Load(path):
+    1. os.ReadFile(path)
+    2. Envsubst(raw, os.LookupEnv)
+    3. json.Unmarshal → Config struct
+    4. Normalize()   → upgrades old versions to current
+    5. Validate()    → checks types, enums, cross-references
+    6. → chi.Router  → REST handlers → DB
+```
+
+See `doc/agents/config-migration.md` for schema versioning and migrations.
+See `doc/agents/tenant-lifecycle.md` for creation/deletion/persistence.

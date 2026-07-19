@@ -166,8 +166,11 @@ func (a AuthStrategy) Valid() bool {
 // Обязательные поля: Version, DataSource.
 // Все остальные — опциональные (могут быть nil/пустыми).
 type Config struct {
-	// Version — версия схемы конфига. На данный момент — всегда 1.
+	// Version — версия схемы конфига. Нормализуется через Normalize().
 	Version int `json:"version"`
+
+	// Meta — мета-информация о конфиге (когда/чем сгенерирован).
+	Meta *ConfigMeta `json:"meta,omitempty"`
 
 	// DataSource — подключение к клиентской БД. Обязательное.
 	DataSource DataSourceConfig `json:"data_source"`
@@ -196,24 +199,20 @@ type Config struct {
 	// Server — настройки HTTP-сервера (таймауты, лимиты). Опционально.
 	Server *ServerConfig `json:"server,omitempty"`
 
-	// ApprovedTools — список путей write-эндпоинтов, утверждённых для использования
-	// в read-only режиме. Каждый элемент — path из endpoints[].
-	// Если пустой или nil — write-доступ запрещён для всех эндпоинтов.
-	ApprovedTools []string `json:"approved_tools,omitempty"`
+	// ApprovedTools — список утверждённых write-эндпоинтов.
+	// v1: []string; v2: []ApprovedTool (читает оба формата через UnmarshalJSON).
+	ApprovedTools []ApprovedTool `json:"approved_tools,omitempty"`
 
 	// SkipRules — таблицы для исключения при генерации. Дополняет DefaultSkipRules.
 	SkipRules []SkipRule `json:"skip_rules,omitempty"`
 
 	// DisabledDefaultRules — список prefix дефолтных skip rules, которые нужно отключить.
-	// Если пустой — все дефолтные правила активны.
 	DisabledDefaultRules []string `json:"disabled_default_rules,omitempty"`
 
 	// DisplayPrefixes — префиксы имён таблиц, отрезаемые от display_name.
-	// Переопределяет DefaultDisplayPrefixes полностью (не дополняет).
 	DisplayPrefixes []string `json:"display_prefixes,omitempty"`
 
 	// CustomPlurals — кастомные plural-формы для tool display names.
-	// Ключ = singular имя entity, значение = plural. Дополняет default map.
 	CustomPlurals map[string]string `json:"custom_plurals,omitempty"`
 }
 
@@ -311,6 +310,9 @@ type Relation struct {
 
 	// TargetFK — имя FK-колонки в связанной таблице (для many_to_many).
 	TargetFK string `json:"target_fk,omitempty"`
+
+	// JunctionTable — имя junction-таблицы для many_to_many.
+	JunctionTable string `json:"junction_table,omitempty"`
 }
 
 // Endpoint — REST endpoint. method+path — публичный контракт, op — реализация.
@@ -351,10 +353,17 @@ type EndpointParam struct {
 	// In — расположение параметра (path / query / body).
 	In ParamIn `json:"in"`
 
-	// Type — тип параметра.
+	// Type — тип параметра для простых значений.
 	Type ParamType `json:"type,omitempty"`
 
-	// Required — обязательный ли параметр. nil если не задан.
+	// ArrayOf — для array-параметров: тип элементов.
+	// {"name":"ids", "type":"array", "array_of":"int"}
+	ArrayOf ParamType `json:"array_of,omitempty"`
+
+	// EnumValues — допустимые значения для enum-параметров.
+	EnumValues []string `json:"enum_values,omitempty"`
+
+	// Required — обязательный ли параметр.
 	Required *bool `json:"required,omitempty"`
 
 	// Description — описание параметра.
@@ -495,13 +504,20 @@ type ServerConfig struct {
 // Ранее валидация была во внешнем JSON Schema файле. Теперь все проверки
 // живут в Go-коде и не могут рассинхронизироваться с типами.
 func (c *Config) Validate() error {
+	// Auto-normalize: ensures backward compatibility even when
+	// Validate() is called without a preceding Normalize().
+	c.Normalize()
+
 	var errs []string
 
 	// ── Version ───────────────────────────────────────────────────────
-	if c.Version == 0 {
-		c.Version = 1 // default to 1 when not set
-	} else if c.Version != 1 {
-		errs = append(errs, fmt.Sprintf("version: unsupported value %d, expected 1", c.Version))
+	if c.Version != CurrentConfigVersion {
+		errs = append(errs, fmt.Sprintf("version: expected %d after Normalize, got %d", CurrentConfigVersion, c.Version))
+	}
+
+	// ── Meta ──────────────────────────────────────────────────────────
+	if c.Meta != nil && c.Meta.ConfigVersion != c.Version {
+		errs = append(errs, fmt.Sprintf("meta.config_version (%d) != version (%d)", c.Meta.ConfigVersion, c.Version))
 	}
 
 	// ── DataSource ────────────────────────────────────────────────────
@@ -544,6 +560,25 @@ func (c *Config) Validate() error {
 				errs = append(errs, fmt.Sprintf("entities[%d].fields[%d].type: unsupported %q", i, j, f.Type))
 			}
 		}
+
+		// ── Relations ────────────────────────────────────────────────
+		for k, r := range e.Relations {
+			if r.Field == "" {
+				errs = append(errs, fmt.Sprintf("entities[%d].relations[%d].field: required", i, k))
+			}
+			if !r.Kind.Valid() {
+				errs = append(errs, fmt.Sprintf("entities[%d].relations[%d].kind: unsupported %q", i, k, r.Kind))
+			}
+			if r.Table == "" {
+				errs = append(errs, fmt.Sprintf("entities[%d].relations[%d].table: required", i, k))
+			}
+			if r.LocalFK == "" {
+				errs = append(errs, fmt.Sprintf("entities[%d].relations[%d].local_fk: required", i, k))
+			}
+			if r.Kind == RelationManyToMany && r.JunctionTable == "" {
+				errs = append(errs, fmt.Sprintf("entities[%d].relations[%d]: junction_table required for many_to_many", i, k))
+			}
+		}
 	}
 
 	// ── Endpoints ─────────────────────────────────────────────────────
@@ -583,6 +618,9 @@ func (c *Config) Validate() error {
 			}
 			if p.Type != "" && !p.Type.Valid() {
 				errs = append(errs, fmt.Sprintf("endpoints[%d].params[%d].type: unsupported %q", i, j, p.Type))
+			}
+			if p.ArrayOf != "" && !p.ArrayOf.Valid() {
+				errs = append(errs, fmt.Sprintf("endpoints[%d].params[%d].array_of: unsupported %q", i, j, p.ArrayOf))
 			}
 		}
 	}
@@ -625,6 +663,18 @@ func (c *Config) Validate() error {
 	if c.Auth != nil {
 		if !c.Auth.Strategy.Valid() {
 			errs = append(errs, fmt.Sprintf("auth.strategy: unsupported %q", c.Auth.Strategy))
+		}
+	}
+
+	// ── ApprovedTools ────────────────────────────────────────────────
+	for i, at := range c.ApprovedTools {
+		if at.Endpoint == "" {
+			errs = append(errs, fmt.Sprintf("approved_tools[%d].endpoint: required", i))
+		}
+		for j, m := range at.Methods {
+			if !m.Valid() {
+				errs = append(errs, fmt.Sprintf("approved_tools[%d].methods[%d]: unsupported %q", i, j, m))
+			}
 		}
 	}
 

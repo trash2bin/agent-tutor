@@ -550,9 +550,9 @@ func (ts *TenantStore) adminTenantApproveToolHandler(w http.ResponseWriter, r *h
 	// Create a persist function that saves the approved tools back to config
 	persistFn := func() error {
 		// Sync ApprovedTools map back to Config.ApprovedTools list
-		paths := make([]string, 0, len(inst.ApprovedTools))
+		paths := make([]config.ApprovedTool, 0, len(inst.ApprovedTools))
 		for p := range inst.ApprovedTools {
-			paths = append(paths, p)
+			paths = append(paths, config.ApprovedTool{Endpoint: p})
 		}
 		inst.Config.ApprovedTools = paths
 
@@ -566,7 +566,7 @@ func (ts *TenantStore) adminTenantApproveToolHandler(w http.ResponseWriter, r *h
 		// Rebuild router with updated approved tools
 		approvedTools := make(map[string]bool)
 		for _, p := range inst.Config.ApprovedTools {
-			approvedTools[p] = true
+			approvedTools[p.Endpoint] = true
 		}
 		newRouter, err := NewRouterFromConfig(ts, inst.Config, inst.AdapterSub, approvedTools)
 		if err != nil {

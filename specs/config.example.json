@@ -1,5 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
+  "meta": {
+    "config_version": 2,
+    "generated_at": "2026-07-11T00:00:00Z",
+    "generator_version": ""
+  },
   "data_source": {
     "driver": "sqlite",
     "dsn": "../data-service/testdata/scenarios/shop/data.db",

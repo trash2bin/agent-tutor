@@ -149,11 +149,12 @@ describe('Types — type-level contracts', () => {
       endpoints: [{ path: '/products', method: 'GET' }],
       mcp_tools: [{ name: 'find_products' }],
       custom_queries: { top_products: 'SELECT * FROM products LIMIT 10' },
-      approved_tools: ['create_product'],
+      approved_tools: [{ endpoint: 'create_product' }],
       disabled_default_rules: ['sqlite_'],
     };
     expect(cfg.version).toBe(1);
-    expect(cfg.approved_tools).toContain('create_product');
+    expect(cfg.approved_tools).toBeDefined();
+    expect(cfg.approved_tools![0].endpoint).toBe('create_product');
   });
 
   // ── SkipRule ──

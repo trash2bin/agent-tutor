@@ -67,9 +67,9 @@ repos:
     hooks:
       - id: admin-dashboard-tests
         name: admin-dashboard JS tests
-        entry: admin-dashboard/tests
-        language: script
-        files: ^admin-dashboard/src/
+        entry: bash -c 'cd admin-dashboard/tests && npm test'
+        language: system
+        files: ^admin-dashboard/(src|tests)/
         pass_filenames: false
 
   - repo: https://github.com/gitleaks/gitleaks

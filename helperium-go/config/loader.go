@@ -13,7 +13,8 @@ import (
 //  1. os.ReadFile(path) — raw bytes.
 //  2. Envsubst(raw, os.LookupEnv) — подстановка ${ENV} / ${ENV:-default}.
 //  3. json.Unmarshal(envsubsted, &cfg) — типизированный парсинг.
-//  4. cfg.Validate() — семантическая валидация на Go.
+//  4. cfg.Normalize() — приведение к актуальной версии схемы.
+//  5. cfg.Validate() — семантическая валидация на Go.
 //
 // Валидация больше не требует внешнего файла config.schema.json —
 // enum'ы и cross-entity проверки живут в Go-типах.
@@ -38,7 +39,10 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: load %q: parse: %w", path, err)
 	}
 
-	// 4. Semantic validation via Go types.
+	// 4. Normalize to current schema version (handles v0, v1 → current).
+	cfg.Normalize()
+
+	// 5. Semantic validation via Go types.
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config: load %q: %w", path, err)
 	}
