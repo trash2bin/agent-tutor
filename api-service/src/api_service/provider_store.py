@@ -18,6 +18,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from pydantic import SecretStr
+
 from api_service.agent.models import ProviderConfig
 
 logger = logging.getLogger("api_service.provider_store")
@@ -119,7 +121,7 @@ class ProviderStore:
             self._providers[name] = ProviderConfig(
                 name=name,
                 model=model,
-                api_key=api_key,
+                api_key=SecretStr(api_key or ""),
                 api_base=api_base,
                 enabled=True,
                 source="env",
@@ -258,7 +260,7 @@ class ProviderStore:
             self._providers[name] = ProviderConfig(
                 name=name,
                 model=model,
-                api_key=api_key or "",
+                api_key=SecretStr(api_key or ""),
                 api_base=api_base or "",
                 enabled=enabled,
                 provider=provider or "",

@@ -883,11 +883,11 @@ async def toggle_llm_provider(name: str):
     from fastapi import HTTPException
 
     store = get_provider_store()
-    provider_data = store.get_provider(name)
+    provider_data = await store.get_provider(name)
     if not provider_data:
         raise HTTPException(status_code=404, detail=f"Provider '{name}' not found")
     new_enabled = not provider_data["enabled"]
-    result = store.set_enabled(name, new_enabled)
+    result = await store.set_enabled(name, new_enabled)
     return result
 
 
@@ -900,7 +900,7 @@ async def get_llm_config():
     from api_service.provider_store import get_provider_store
 
     store = get_provider_store()
-    providers = store.list_providers()
+    providers = await store.list_providers()
 
     return {
         "fallback_enabled": store.get_fallback_enabled(),
