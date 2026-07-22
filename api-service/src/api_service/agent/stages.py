@@ -397,16 +397,8 @@ class ToolExecutionStage:
             n = tc.get("name", "")
             if n and n not in display_names:
                 try:
-                    mcp_client = getattr(ctx.mcp_session, "client", None)
-                    if mcp_client is not None and hasattr(
-                        mcp_client, "get_display_name"
-                    ):
-                        dn = await mcp_client.get_display_name(ctx.turn.tenant_ids, n)
-                        display_names[n] = (
-                            n if not isinstance(dn, str) or not dn else dn
-                        )
-                    else:
-                        display_names[n] = n
+                    dn = await ctx.mcp_session.get_display_name(n)
+                    display_names[n] = n if not isinstance(dn, str) or not dn else dn
                 except Exception:
                     display_names[n] = n
 

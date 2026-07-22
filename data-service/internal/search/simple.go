@@ -157,14 +157,3 @@ func (s *SimpleStrategy) ParseRequest(r *http.Request, entity config.Entity, a A
 		Format: query.FormatFull, // Simple returns full by default.
 	}, nil
 }
-
-
-
-// selectClauseFull creates a SelectClause with all entity columns.
-func selectClauseFull(entity config.Entity, a Adapter) query.SelectClause {
-	cols := make([]string, 0, len(entity.Fields))
-	for _, f := range entity.Fields {
-		cols = append(cols, a.QuoteIdentifier(f.Column))
-	}
-	return query.SelectClause{Columns: cols}
-}

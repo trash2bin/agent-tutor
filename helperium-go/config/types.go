@@ -66,6 +66,15 @@ func (o Op) Valid() bool {
 	return false
 }
 
+// validStrategy проверяет, что имя strategy входит в whitelist.
+func validStrategy(s string) bool {
+	switch s {
+	case "grep", "filter", "search", "simple":
+		return true
+	}
+	return false
+}
+
 // RelationKind — тип связи между сущностями.
 type RelationKind string
 
@@ -631,6 +640,9 @@ func (c *Config) Validate() error {
 			}
 			if ep.Op == OpFind && ep.SearchField == "" && ep.Strategy == "" {
 				errs = append(errs, fmt.Sprintf("endpoints[%d].search_field: required for op=find", i))
+			}
+			if ep.Strategy != "" && !validStrategy(ep.Strategy) {
+				errs = append(errs, fmt.Sprintf("endpoints[%d].strategy: unknown %q, must be one of: grep, filter, search, simple", i, ep.Strategy))
 			}
 		case OpCustomQuery:
 			if ep.QueryID == "" {

@@ -394,6 +394,23 @@ class TestAutoShopStrategies:
         data = resp.json()
         assert data.get("total", 0) > 0
 
+    def test_search_combined_pattern_and_filter(self, auto_shop_tenant):
+        """grep 'глушитель' + category filter — combined path (RawWhere + Conditions)."""
+        tid, _ = auto_shop_tenant
+        resp = requests.get(
+            f"{data_service_url()}/auto_parts/search",
+            params={"pattern": "Глушитель", "category": "Выхлопная система"},
+            headers={"X-Tenant-ID": tid},
+            timeout=10,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("total", 0) > 0, f"Expected results, got {data}"
+        # All results should be mufflers from exhaust system
+        items = data.get("items", data.get("results", data.get("preview", [])))
+        item_text = json.dumps(items, ensure_ascii=False)
+        assert "Глушитель" in item_text
+
     def test_auto_parts_count(self, auto_shop_tenant):
         """count запчастей должен быть 35."""
         tid, _ = auto_shop_tenant
@@ -639,9 +656,8 @@ class TestClinicStrategies:
         tools = data.get("mcp_tools", data.get("tools", []))
         tool_names = [t.get("name") for t in tools]
 
-        for tool in ["search_doctors", "search_doctors", "search_appointments",
-                      "search_appointments", "search_patients", "search_patients",
-                      "search_prescriptions"]:
+        for tool in ["search_doctors", "search_appointments",
+                      "search_patients", "search_prescriptions"]:
             assert tool in tool_names, (
                 f"{tool} not found in tools: {[n for n in tool_names if n.startswith('grep') or n.startswith('filter')]}"
             )

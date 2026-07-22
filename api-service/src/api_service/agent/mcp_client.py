@@ -550,3 +550,7 @@ class _SessionProxy:
 
     async def get_schema(self) -> dict | None:
         return await self.client.get_schema(self.tenant_ids)
+
+    async def get_display_name(self, tool_name: str) -> str | None:
+        """Return the user-facing display name for a tool, or None if not available."""
+        return await self.client.get_display_name(self.tenant_ids, tool_name)

@@ -631,19 +631,19 @@ func TestSearchSecurity_FilterValueTooLong(t *testing.T) {
 func TestSearchSecurity_InTooManyValues(t *testing.T) {
 	s := NewSearchStrategy("id", "name")
 
-	// 101 values in IN — should error
+	// 51 values in IN, each short — maxInValues is 50
 	var b strings.Builder
-	for i := 0; i < 101; i++ {
+	for i := 0; i < 51; i++ {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		fmt.Fprintf(&b, "val%d", i)
+		fmt.Fprintf(&b, "v%d", i)
 	}
 
 	r := makeRequest(map[string]string{"category__in": b.String()})
 	_, err := s.ParseRequest(r, sampleEntity, testAdapter{})
 	if err == nil {
-		t.Fatal("Expected error for 101 IN values (max 100), got nil")
+		t.Fatal("Expected error for 51 IN values (max 50), got nil")
 	}
 	if !contains(err.Error(), "too many values") {
 		t.Errorf("Expected 'too many values' error, got: %v", err)

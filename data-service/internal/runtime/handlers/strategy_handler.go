@@ -56,11 +56,7 @@ func NewStrategyHandler(c *Context, strategy search.Strategy, entityName string,
 				return
 			}
 			if tenantWhere != "" {
-				if plan.RawWhere != "" {
-					sqlStr = "SELECT COUNT(*) FROM (" + sqlStr + ") AS _cnt WHERE " + tenantWhere
-				} else {
-					sqlStr = "SELECT COUNT(*) FROM (" + sqlStr + ") AS _cnt WHERE " + tenantWhere
-				}
+				sqlStr = "SELECT COUNT(*) FROM (" + sqlStr + ") AS _cnt WHERE " + tenantWhere
 				args = append(args, tenantArgs...)
 			}
 			rows, err := c.DB.QueryContext(r.Context(), sqlStr, args...)

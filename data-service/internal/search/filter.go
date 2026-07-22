@@ -3,7 +3,6 @@ package search
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/trash2bin/helperium/data-service/internal/query"
@@ -291,79 +290,4 @@ func (s *FilterStrategy) ParseRequest(r *http.Request, entity config.Entity, a A
 		Order:   parseOrder(q, entity, a),
 		Format:  parseFormat(q),
 	}, nil
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-// makeEqCondition создаёт Condition для точного сравнения по типу поля.
-func makeEqCondition(qName string, f config.EntityField, val string) (query.Condition, error) {
-	typed, err := convertValue(val, f.Type)
-	if err != nil {
-		return query.Condition{}, err
-	}
-	return query.Condition{
-		Field:    qName,
-		Operator: query.OpEq,
-		Value:    typed,
-	}, nil
-}
-
-// makeComparison создаёт Condition для оператора сравнения.
-func makeComparison(qName, op string, f config.EntityField, val string) (query.Condition, error) {
-	typed, err := convertValue(val, f.Type)
-	if err != nil {
-		return query.Condition{}, err
-	}
-
-	var operator query.Operator
-	switch op {
-	case "gt":
-		operator = query.OpGt
-	case "lt":
-		operator = query.OpLt
-	case "gte":
-		operator = query.OpGte
-	case "lte":
-		operator = query.OpLte
-	default:
-		return query.Condition{}, fmt.Errorf("unknown comparison op: %s", op)
-	}
-
-	return query.Condition{
-		Field:    qName,
-		Operator: operator,
-		Value:    typed,
-	}, nil
-}
-
-// convertValue преобразует строковое значение в типизированное по FieldType.
-func convertValue(val string, ft config.FieldType) (any, error) {
-	switch ft {
-	case config.FieldTypeInt:
-		return strconv.ParseInt(strings.TrimSpace(val), 10, 64)
-	case config.FieldTypeFloat:
-		return strconv.ParseFloat(strings.TrimSpace(val), 64)
-	case config.FieldTypeBool:
-		return strconv.ParseBool(strings.TrimSpace(val))
-	default:
-		return val, nil
-	}
-}
-
-
-
-// fieldTypeToParamType конвертирует FieldType в ParamType.
-func fieldTypeToParamType(ft config.FieldType) config.ParamType {
-	switch ft {
-	case config.FieldTypeInt:
-		return config.ParamTypeInt
-	case config.FieldTypeFloat:
-		return config.ParamTypeFloat
-	case config.FieldTypeBool:
-		return config.ParamTypeBool
-	default:
-		return config.ParamTypeString
-	}
 }

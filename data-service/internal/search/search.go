@@ -54,8 +54,8 @@ func NewSearchStrategy(idCol, nameCol string) *SearchStrategy {
 		maxRegexLen:       200,   // ReDoS защита
 		maxTokens:         10,    // макс токенов
 		maxFields:         20,    // макс полей для grep
-		maxFilterValueLen: 1000,  // макс длина filter value
-		maxInValues:       100,   // макс значений IN
+		maxFilterValueLen: 200,   // макс длина filter value
+		maxInValues:       50,    // макс значений IN
 		maxPatternLen:     2000,  // макс длина pattern
 		maxFilters:        15,    // макс field__op фильтров
 		maxTotalConditions: 25,   // макс всего условий (tokens + filters)
@@ -488,9 +488,6 @@ func (s *SearchStrategy) ParseRequest(r *http.Request, entity config.Entity, a A
 	}
 
 	limit := parseLimitParam(q, 10)
-	if hasFilters {
-		limit = parseLimitParam(q, 10)
-	}
 
 	return &query.QueryPlan{
 		Select:       selectClause(entity, q, a),

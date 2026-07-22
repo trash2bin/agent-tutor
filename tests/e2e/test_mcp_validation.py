@@ -180,6 +180,20 @@ class TestSearchWithRequired:
             )
             print(f"  ✅ {name}({{}}) → isError: {text[:100]}")
 
+    def test_search_long_regex_returns_is_error(self, tool_list):
+        """search_* with very long regex pattern → isError (ReDoS protection)."""
+        long_pattern = "a" * 300  # exceeds maxRegexLen=200 but under maxPatternLen=2000
+        result = mcp_call(
+            "search_catalog_product", {"pattern": long_pattern, "regex": True},
+            tenant_ids=_TENANT, timeout=30,
+        )
+        is_error = result.result.get("isError", False)
+        content = result.result.get("content", [])
+        text = "".join(c.get("text", "") for c in content if "text" in c)
+        assert is_error, f"Long regex should give isError. Got: {text[:200]}"
+        assert "too long" in text.lower() or "max" in text.lower(), f"Should mention length limit: {text[:200]}"
+        print(f"\n  ✅ long regex → isError: {text[:200]}")
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. Все тулы: проверка что required поля заданы
