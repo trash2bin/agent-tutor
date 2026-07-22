@@ -3,8 +3,6 @@ package search
 import (
 	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
 
 	"github.com/trash2bin/helperium/data-service/internal/query"
 	"github.com/trash2bin/helperium/helperium-go/config"
@@ -147,7 +145,7 @@ func (s *SimpleStrategy) ParseRequest(r *http.Request, entity config.Entity, a A
 	}
 
 	// Default to standard limit=50 for simple strategy.
-	limit := parseSimpleLimit(q)
+	limit := parseLimitParam(q, 50)
 
 	return &query.QueryPlan{
 		Select: selectClauseFull(entity, a),
@@ -160,26 +158,7 @@ func (s *SimpleStrategy) ParseRequest(r *http.Request, entity config.Entity, a A
 	}, nil
 }
 
-// parseSimpleLimit — default 50 for simple strategy.
-func parseSimpleLimit(q map[string][]string) int {
-	vals, ok := q["limit"]
-	if !ok || len(vals) == 0 {
-		return 50
-	}
-	v, err := parseInt(vals[0])
-	if err != nil || v <= 0 {
-		return 50
-	}
-	if v > 1000 {
-		return 1000
-	}
-	return v
-}
 
-// parseInt parses an int from string.
-func parseInt(s string) (int, error) {
-	return strconv.Atoi(strings.TrimSpace(s))
-}
 
 // selectClauseFull creates a SelectClause with all entity columns.
 func selectClauseFull(entity config.Entity, a Adapter) query.SelectClause {

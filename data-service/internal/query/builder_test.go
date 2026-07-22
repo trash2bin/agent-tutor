@@ -796,3 +796,169 @@ func TestBuild_NotFlag_Neq(t *testing.T) {
 		t.Errorf("SQL = %q, want %q", sql, wantSQL)
 	}
 }
+
+// =============================================================================
+// Tests: RenderConditions
+// =============================================================================
+
+func TestRenderConditions_Empty(t *testing.T) {
+	eng := NewEngine(sqliteAdapter{})
+	phIdx := 1
+	where, args, err := eng.RenderConditions(nil, "AND", &phIdx)
+	if err != nil {
+		t.Fatalf("RenderConditions: unexpected error: %v", err)
+	}
+	if where != "" {
+		t.Errorf("where = %q, want empty", where)
+	}
+	if len(args) != 0 {
+		t.Errorf("args = %v, want []", args)
+	}
+	if phIdx != 1 {
+		t.Errorf("phIdx = %d, want 1 (unchanged)", phIdx)
+	}
+}
+
+func TestRenderConditions_SingleCondition(t *testing.T) {
+	eng := NewEngine(sqliteAdapter{})
+	phIdx := 1
+	conds := []Condition{Eq(`"status"`, "active")}
+	where, args, err := eng.RenderConditions(conds, "AND", &phIdx)
+	if err != nil {
+		t.Fatalf("RenderConditions: unexpected error: %v", err)
+	}
+	if where != `"status" = ?` {
+		t.Errorf("where = %q, want %q", where, `"status" = ?`)
+	}
+	if len(args) != 1 || args[0] != "active" {
+		t.Errorf("args = %v, want [active]", args)
+	}
+	if phIdx != 2 {
+		t.Errorf("phIdx = %d, want 2", phIdx)
+	}
+}
+
+func TestRenderConditions_MultipleConditions(t *testing.T) {
+	eng := NewEngine(sqliteAdapter{})
+	phIdx := 1
+	conds := And(
+		Eq(`"category"`, "electronics"),
+		Gt(`"price"`, 100),
+		Lt(`"stock"`, 50),
+	)
+	where, args, err := eng.RenderConditions(conds, "AND", &phIdx)
+	if err != nil {
+		t.Fatalf("RenderConditions: unexpected error: %v", err)
+	}
+
+	want := `"category" = ? AND "price" > ? AND "stock" < ?`
+	if where != want {
+		t.Errorf("where = %q, want %q", where, want)
+	}
+	if len(args) != 3 || fmt.Sprint(args) != "[electronics 100 50]" {
+		t.Errorf("args = %v, want [electronics 100 50]", args)
+	}
+	if phIdx != 4 {
+		t.Errorf("phIdx = %d, want 4", phIdx)
+	}
+}
+
+func TestRenderConditions_Postgres(t *testing.T) {
+	eng := NewEngine(postgresAdapter{})
+	phIdx := 1
+	conds := And(
+		Eq(`"status"`, "active"),
+		Gt(`"age"`, 18),
+	)
+	where, args, err := eng.RenderConditions(conds, "AND", &phIdx)
+	if err != nil {
+		t.Fatalf("RenderConditions: unexpected error: %v", err)
+	}
+
+	want := `"status" = $1 AND "age" > $2`
+	if where != want {
+		t.Errorf("where = %q, want %q", where, want)
+	}
+	if len(args) != 2 || args[0] != "active" || args[1] != 18 {
+		t.Errorf("args = %v, want [active 18]", args)
+	}
+}
+
+func TestRenderConditions_CustomSeparator(t *testing.T) {
+	eng := NewEngine(sqliteAdapter{})
+	phIdx := 1
+	conds := []Condition{
+		Eq(`"a"`, 1),
+		Eq(`"b"`, 2),
+	}
+	where, args, err := eng.RenderConditions(conds, "OR", &phIdx)
+	if err != nil {
+		t.Fatalf("RenderConditions: unexpected error: %v", err)
+	}
+
+	want := `"a" = ? OR "b" = ?`
+	if where != want {
+		t.Errorf("where = %q, want %q", where, want)
+	}
+	if len(args) != 2 || args[0] != 1 || args[1] != 2 {
+		t.Errorf("args = %v, want [1 2]", args)
+	}
+}
+
+func TestRenderConditions_WithInOp(t *testing.T) {
+	eng := NewEngine(sqliteAdapter{})
+	phIdx := 1
+	conds := []Condition{In(`"status"`, "active", "pending")}
+	where, args, err := eng.RenderConditions(conds, "AND", &phIdx)
+	if err != nil {
+		t.Fatalf("RenderConditions: unexpected error: %v", err)
+	}
+
+	want := `"status" IN (?, ?)`
+	if where != want {
+		t.Errorf("where = %q, want %q", where, want)
+	}
+	if len(args) != 2 || args[0] != "active" || args[1] != "pending" {
+		t.Errorf("args = %v, want [active pending]", args)
+	}
+	if phIdx != 3 {
+		t.Errorf("phIdx = %d, want 3", phIdx)
+	}
+}
+
+func TestRenderConditions_WithILike_SQLite(t *testing.T) {
+	eng := NewEngine(sqliteAdapter{})
+	phIdx := 1
+	conds := []Condition{ILike(`"name"`, "%test")}
+	where, args, err := eng.RenderConditions(conds, "AND", &phIdx)
+	if err != nil {
+		t.Fatalf("RenderConditions: unexpected error: %v", err)
+	}
+
+	// SQLite: COLLATE NOCASE LIKE
+	want := `"name" COLLATE NOCASE LIKE ?`
+	if where != want {
+		t.Errorf("where = %q, want %q", where, want)
+	}
+	if len(args) != 1 {
+		t.Errorf("args = %v, want [percent-escaped]", args)
+	}
+}
+
+func TestRenderConditions_WithILike_Postgres(t *testing.T) {
+	eng := NewEngine(postgresAdapter{})
+	phIdx := 1
+	conds := []Condition{ILike(`"email"`, "%example.com")}
+	where, args, err := eng.RenderConditions(conds, "AND", &phIdx)
+	if err != nil {
+		t.Fatalf("RenderConditions: unexpected error: %v", err)
+	}
+
+	want := `"email" ILIKE $1`
+	if where != want {
+		t.Errorf("where = %q, want %q", where, want)
+	}
+	if len(args) != 1 || args[0] != `\%example.com` {
+		t.Errorf("args = %v, want [percent-escaped]", args)
+	}
+}

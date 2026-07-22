@@ -448,74 +448,23 @@ func (s *SearchStrategy) ParseRequest(r *http.Request, entity config.Entity, a A
 	// Часть 2: фильтры → Condition-based WHERE
 	if hasFilters {
 		if len(allWhereParts) > 0 {
-			// AND between grep and filter parts — handled via RawWhere + Conditions
-			// This is complex: we can't mix RawWhere and Condition[] in the engine cleanly.
-			// Instead, convert conditions into RawWhere.
-			var filterWhereParts []string
-			for _, cond := range conditions {
-				qName := cond.Field
-				switch cond.Operator {
-				case query.OpEq:
-					ph := a.TranslatePlaceholder(phIdx)
-					phIdx++
-					op := "="
-					if cond.Not {
-						op = "!="
-					}
-					filterWhereParts = append(filterWhereParts, fmt.Sprintf("%s %s %s", qName, op, ph))
-					allArgs = append(allArgs, cond.Value)
-				case query.OpGt:
-					ph := a.TranslatePlaceholder(phIdx)
-					phIdx++
-					filterWhereParts = append(filterWhereParts, fmt.Sprintf("%s > %s", qName, ph))
-					allArgs = append(allArgs, cond.Value)
-				case query.OpGte:
-					ph := a.TranslatePlaceholder(phIdx)
-					phIdx++
-					filterWhereParts = append(filterWhereParts, fmt.Sprintf("%s >= %s", qName, ph))
-					allArgs = append(allArgs, cond.Value)
-				case query.OpLt:
-					ph := a.TranslatePlaceholder(phIdx)
-					phIdx++
-					filterWhereParts = append(filterWhereParts, fmt.Sprintf("%s < %s", qName, ph))
-					allArgs = append(allArgs, cond.Value)
-				case query.OpLte:
-					ph := a.TranslatePlaceholder(phIdx)
-					phIdx++
-					filterWhereParts = append(filterWhereParts, fmt.Sprintf("%s <= %s", qName, ph))
-					allArgs = append(allArgs, cond.Value)
-				case query.OpILike:
-					ph := a.TranslatePlaceholder(phIdx)
-					phIdx++
-					if a.IsPostgres() {
-						filterWhereParts = append(filterWhereParts, fmt.Sprintf("%s ILIKE %s", qName, ph))
-					} else {
-						filterWhereParts = append(filterWhereParts, fmt.Sprintf("%s COLLATE NOCASE LIKE %s", qName, ph))
-					}
-					allArgs = append(allArgs, cond.Value)
-				case query.OpIn:
-					var placeholders []string
-					for _, v := range cond.Values {
-						ph := a.TranslatePlaceholder(phIdx)
-						phIdx++
-						placeholders = append(placeholders, ph)
-						allArgs = append(allArgs, v)
-					}
-					filterWhereParts = append(filterWhereParts, fmt.Sprintf("%s IN (%s)", qName, strings.Join(placeholders, ", ")))
-				default:
-					continue
-				}
+			// Use Engine to render conditions to SQL — avoids duplicating
+			// renderCondition logic from query/builder.go.
+			// search.Adapter satisfies query.AdapterSubset, so pass a directly.
+			queryEngine := query.NewEngine(a)
+			whereFragment, condArgs, err := queryEngine.RenderConditions(conditions, "AND", &phIdx)
+			if err != nil {
+				return nil, fmt.Errorf("render conditions: %w", err)
 			}
-			if len(filterWhereParts) > 0 {
-				allWhereParts = append(allWhereParts, "("+strings.Join(filterWhereParts, " AND ")+")")
-			}
+			allWhereParts = append(allWhereParts, "("+whereFragment+")")
+			allArgs = append(allArgs, condArgs...)
 		} else {
 			// Only filters — use Condition-based Where (clean, engine handles it)
 			return &query.QueryPlan{
 				Select:  selectClause(entity, q, a),
 				From:    a.QuoteIdentifier(entity.Table),
 				Where:   conditions,
-				Limit:   parseFilterLimit(q),
+				Limit:   parseLimitParam(q, 10),
 				Offset:  parseOffset(q),
 				Order:   parseOrder(q, entity, a),
 				Format:  parseFormat(q),
@@ -531,7 +480,7 @@ func (s *SearchStrategy) ParseRequest(r *http.Request, entity config.Entity, a A
 			return &query.QueryPlan{
 				Select:  selectClause(entity, q, a),
 				From:    a.QuoteIdentifier(entity.Table),
-				Limit:   parseLimit(q),
+				Limit:   parseLimitParam(q, 10),
 				Offset:  parseOffset(q),
 				Order:   parseOrder(q, entity, a),
 				Format:  parseFormat(q),
@@ -544,9 +493,9 @@ func (s *SearchStrategy) ParseRequest(r *http.Request, entity config.Entity, a A
 		return nil, fmt.Errorf("no search conditions could be built from the given parameters")
 	}
 
-	limit := parseLimit(q)
+	limit := parseLimitParam(q, 10)
 	if hasFilters {
-		limit = parseFilterLimit(q)
+		limit = parseLimitParam(q, 10)
 	}
 
 	return &query.QueryPlan{

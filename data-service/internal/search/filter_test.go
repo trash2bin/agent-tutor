@@ -322,6 +322,69 @@ func TestFilterStrategy_Description(t *testing.T) {
 	}
 }
 
+func TestFilterSecurity_MaxFilters_Exceeded(t *testing.T) {
+	s := NewFilterStrategy("id", "name")
+
+	// 16 filter conditions — should exceed maxFilters=15
+	params := map[string]string{
+		"name":          "a",
+		"name__like":    "b",
+		"name__neq":     "c",
+		"name__in":      "d",
+		"description":   "e",
+		"description__like": "f",
+		"description__neq":  "g",
+		"description__in":   "h",
+		"category":      "i",
+		"category__like": "j",
+		"category__neq":  "k",
+		"category__in":   "l",
+		"price":         "1",
+		"price__gt":     "2",
+		"price__gte":    "3",
+		"price__lt":     "4",
+	}
+	r := makeRequest(params)
+	_, err := s.ParseRequest(r, sampleEntity, testAdapter{})
+	if err == nil {
+		t.Fatal("ParseRequest: expected error for 16 filter conditions (max 15), got nil")
+	}
+	if !contains(err.Error(), "too many filter conditions") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+func TestFilterSecurity_MaxFilters_EdgeCase15(t *testing.T) {
+	s := NewFilterStrategy("id", "name")
+
+	// Exactly 15 filter conditions — should be allowed
+	params := map[string]string{
+		"name":          "a",
+		"name__like":    "b",
+		"name__neq":     "c",
+		"name__in":      "d",
+		"description":   "e",
+		"description__like": "f",
+		"description__neq":  "g",
+		"description__in":   "h",
+		"category":      "i",
+		"category__like": "j",
+		"category__neq":  "k",
+		"category__in":   "l",
+		"price":         "1",
+		"price__gt":     "2",
+		"price__gte":    "3",
+	}
+	r := makeRequest(params)
+	plan, err := s.ParseRequest(r, sampleEntity, testAdapter{})
+	if err != nil {
+		t.Fatalf("ParseRequest: unexpected error for 15 filter conditions: %v", err)
+	}
+	if plan == nil {
+		t.Fatal("Expected non-nil plan")
+	}
+}
+
 // =============================================================================
 // Tests: SimpleStrategy
 // =============================================================================

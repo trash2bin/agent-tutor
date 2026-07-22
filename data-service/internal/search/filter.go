@@ -16,8 +16,9 @@ import (
 // Supports field__op syntax: {field}__eq, {field}__gt, {field}__like, etc.
 // Short form {field} = exact match (eq).
 type FilterStrategy struct {
-	idCol    string
-	nameCol  string
+	idCol      string
+	nameCol    string
+	maxFilters int
 }
 
 const (
@@ -29,7 +30,11 @@ const (
 
 // NewFilterStrategy creates a FilterStrategy.
 func NewFilterStrategy(idCol, nameCol string) *FilterStrategy {
-	return &FilterStrategy{idCol: idCol, nameCol: nameCol}
+	return &FilterStrategy{
+		idCol:      idCol,
+		nameCol:    nameCol,
+		maxFilters: 15,
+	}
 }
 
 func (s *FilterStrategy) Name() string { return "filter" }
@@ -267,6 +272,11 @@ func (s *FilterStrategy) ParseRequest(r *http.Request, entity config.Entity, a A
 		}
 	}
 
+	// ── Security: max filters limit ─────────────────────────────────
+	if len(conditions) > s.maxFilters {
+		return nil, fmt.Errorf("too many filter conditions: %d (max %d)", len(conditions), s.maxFilters)
+	}
+
 	// ── Error if no filter conditions: LLM must learn to pass parameters.
 	if len(conditions) == 0 {
 		return nil, fmt.Errorf("at least one filter parameter is required. Examples: category='brakes', price__gt=1000")
@@ -276,7 +286,7 @@ func (s *FilterStrategy) ParseRequest(r *http.Request, entity config.Entity, a A
 		Select:  selectClause(entity, q, a),
 		From:    a.QuoteIdentifier(entity.Table),
 		Where:   conditions,
-		Limit:   parseFilterLimit(q),
+		Limit:   parseLimitParam(q, 10),
 		Offset:  parseOffset(q),
 		Order:   parseOrder(q, entity, a),
 		Format:  parseFormat(q),
@@ -342,21 +352,7 @@ func convertValue(val string, ft config.FieldType) (any, error) {
 	}
 }
 
-// parseFilterLimit извлекает limit для filter (default 10).
-func parseFilterLimit(q map[string][]string) int {
-	vals, ok := q["limit"]
-	if !ok || len(vals) == 0 {
-		return 10
-	}
-	v, err := strconv.Atoi(strings.TrimSpace(vals[0]))
-	if err != nil || v <= 0 {
-		return 10
-	}
-	if v > 1000 {
-		return 1000
-	}
-	return v
-}
+
 
 // fieldTypeToParamType конвертирует FieldType в ParamType.
 func fieldTypeToParamType(ft config.FieldType) config.ParamType {

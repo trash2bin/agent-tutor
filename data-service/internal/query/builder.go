@@ -121,7 +121,30 @@ func (e *Engine) build(plan QueryPlan, count bool) (sql string, args []any, err 
 	return b.String(), args, nil
 }
 
+// RenderConditions converts []Condition to a WHERE clause fragment using the
+// engine's adapter for placeholder generation and SQL dialect.
+// separator is placed between conditions (typically " AND ").
+// phIdx must point to the current placeholder index (1-based).
+// After return, *phIdx is incremented by the number of placeholders used.
+func (e *Engine) RenderConditions(conds []Condition, separator string, phIdx *int) (string, []any, error) {
+	if len(conds) == 0 {
+		return "", nil, nil
+	}
+	parts := make([]string, 0, len(conds))
+	var args []any
+	for _, c := range conds {
+		clause, extraArgs, err := e.renderCondition(c, phIdx)
+		if err != nil {
+			return "", nil, err
+		}
+		parts = append(parts, clause)
+		args = append(args, extraArgs...)
+	}
+	return strings.Join(parts, " "+separator+" "), args, nil
+}
+
 // buildColumnList — строит SELECT-список из колонок или "*".
+
 func (e *Engine) buildColumnList(cols []string) string {
 	if len(cols) == 0 {
 		return "*"

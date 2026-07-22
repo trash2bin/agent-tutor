@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/trash2bin/helperium/data-service/internal/query"
 	"github.com/trash2bin/helperium/data-service/internal/runtime"
@@ -56,7 +57,6 @@ func NewStrategyHandler(c *Context, strategy search.Strategy, entityName string,
 			}
 			if tenantWhere != "" {
 				if plan.RawWhere != "" {
-					// Wrap in subquery for RawWhere (same as SELECT path)
 					sqlStr = "SELECT COUNT(*) FROM (" + sqlStr + ") AS _cnt WHERE " + tenantWhere
 				} else {
 					sqlStr = "SELECT COUNT(*) FROM (" + sqlStr + ") AS _cnt WHERE " + tenantWhere
@@ -87,10 +87,6 @@ func NewStrategyHandler(c *Context, strategy search.Strategy, entityName string,
 			return
 		}
 
-		// Count for pagination (tenant-aware), вычисляется до tenant filter
-		// чтобы потом включить tenant условия
-		countSQL := countQuery(sqlStr)
-
 		// Apply tenant filter
 		if tenantWhere != "" {
 			if plan.RawWhere != "" {
@@ -102,16 +98,19 @@ func NewStrategyHandler(c *Context, strategy search.Strategy, entityName string,
 					"strategy", strategy.Name(), "entity", entityName)
 				sqlStr = "SELECT * FROM (" + sqlStr + ") AS _t WHERE " + tenantWhere
 				args = append(args, tenantArgs...)
-				// COUNT тоже нужно пересчитать через подзапрос после tenant filter
-				countSQL = countQuery(sqlStr)
 			} else if len(plan.Where) > 0 {
-				sqlStr += " AND " + tenantWhere
-				args = append(args, tenantArgs...)
+				// Condition-based WHERE: вставляем tenant фильтр ПЕРЕД LIMIT,
+				// а не после него. LIMIT генерится Build() в конце SQL.
+				// Также переставляем args: WHERE args, tenant args, LIMIT/OFFSET args.
+				sqlStr, args = insertTenantBeforeLimit(sqlStr, args, " AND "+tenantWhere, tenantArgs)
 			} else {
-				sqlStr += " WHERE " + tenantWhere
-				args = append(args, tenantArgs...)
+				// Нет условий — вставляем tenant WHERE ПЕРЕД LIMIT.
+				sqlStr, args = insertTenantBeforeLimit(sqlStr, args, " WHERE "+tenantWhere, tenantArgs)
 			}
 		}
+
+		// Count for pagination — пересчитываем с tenant filter (если был применён).
+		countSQL := countQuery(sqlStr)
 
 		total := runCountQuery(r.Context(), c.DB, countSQL, args)
 
@@ -134,6 +133,53 @@ func NewStrategyHandler(c *Context, strategy search.Strategy, entityName string,
 		result := query.FormatRows(results, total, plan.Format, strategy.EntityIDCol(), strategy.EntityNameCol())
 		RespondJSON(w, http.StatusOK, result)
 	}
+}
+
+// insertTenantBeforeLimit вставляет SQL-фрагмент (tenantWhere) перед LIMIT/OFFSET
+// клаузулой и перестраивает args чтобы порядок был правильным:
+//
+//	WHERE args → tenant args → LIMIT/OFFSET args
+//
+// Без этого, если просто дописать tenantWhere в конец, он окажется ПОСЛЕ LIMIT
+// (неверный SQL). А если просто вставить перед LIMIT без перестройки args,
+// tenant args окажутся в позиции LIMIT и наоборот.
+func insertTenantBeforeLimit(sql string, args []any, tenantClause string, tenantArgs []any) (string, []any) {
+	upper := strings.ToUpper(sql)
+	lastLimit := strings.LastIndex(upper, " LIMIT ")
+	lastOffset := strings.LastIndex(upper, " OFFSET ")
+
+	// Count how many trailing args belong to LIMIT/OFFSET
+	limitOffsetCount := 0
+	if lastOffset >= 0 {
+		limitOffsetCount++ // OFFSET arg
+	}
+	if lastLimit >= 0 {
+		limitOffsetCount++ // LIMIT arg
+	}
+
+	// Split args: WHERE args vs LIMIT/OFFSET args
+	whereArgsLen := len(args) - limitOffsetCount
+	if whereArgsLen < 0 {
+		whereArgsLen = 0
+	}
+	whereArgs := args[:whereArgsLen]
+	limitOffsetArgs := args[whereArgsLen:]
+
+	// Rebuild: WHERE args + tenant args + LIMIT/OFFSET args
+	newArgs := make([]any, 0, len(args)+len(tenantArgs))
+	newArgs = append(newArgs, whereArgs...)
+	newArgs = append(newArgs, tenantArgs...)
+	newArgs = append(newArgs, limitOffsetArgs...)
+
+	// Insert tenant clause before LIMIT
+	var newSQL string
+	if lastLimit >= 0 {
+		newSQL = sql[:lastLimit] + tenantClause + sql[lastLimit:]
+	} else {
+		newSQL = sql + tenantClause
+	}
+
+	return newSQL, newArgs
 }
 
 // runtimeToQueryAdapter bridges runtime.AdapterSubset to query.AdapterSubset.

@@ -99,6 +99,20 @@ class TestBuildToolResult:
         assert "TOOL_ERROR" in tr.reminder
         assert "'find_student'" in tr.reminder
         assert "FAILED" in tr.reminder
+        assert "find_student(pattern='your search query')" in tr.reminder
+
+    def test_error_reminder_uses_actual_tool_name(self):
+        """Error reminder example should reference the actual tool name, not a hardcoded one."""
+        result = _mock_result(
+            [{"type": "text", "text": "Missing required pattern"}], is_error=True
+        )
+        tr = MCPClient._build_tool_result("search_doctors", result)
+        assert tr.ok is False
+        assert "TOOL_ERROR" in tr.reminder
+        assert "'search_doctors'" in tr.reminder
+        # The example in the reminder must use the actual tool name, not 'search_auto_parts'
+        assert "search_doctors(pattern='your search query')" in tr.reminder
+        assert "search_auto_parts" not in tr.reminder
 
     def test_empty_result(self):
         """Empty or null text should produce ok=True with data=None."""
@@ -259,6 +273,7 @@ class TestCallTool:
         assert "TOOL_ERROR" in tr.reminder
         assert "'get_student'" in tr.reminder
         assert "FAILED" in tr.reminder
+        assert "get_student(pattern='your search query')" in tr.reminder
 
     @pytest.mark.asyncio
     async def test_call_tool_reconnect_on_failure(self, mcp_client: MCPClient):

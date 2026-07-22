@@ -221,7 +221,7 @@ func (s *GrepStrategy) ParseRequest(r *http.Request, entity config.Entity, a Ada
 		From:        a.QuoteIdentifier(entity.Table),
 		RawWhere:    strings.Join(whereParts, " AND "),
 		RawWhereArgs: args,
-		Limit:       parseLimit(q),
+		Limit:       parseLimitParam(q, 10),
 		Offset:      parseOffset(q),
 		Order:       parseOrder(q, entity, a),
 		Format:      parseFormat(q),
@@ -234,7 +234,7 @@ func (s *GrepStrategy) listPlan(q map[string][]string, entity config.Entity, a A
 	return &query.QueryPlan{
 		Select: selectClause(entity, q, a),
 		From:   a.QuoteIdentifier(entity.Table),
-		Limit:  parseLimit(q),
+		Limit:  parseLimitParam(q, 10),
 		Offset: parseOffset(q),
 		Order:  parseOrder(q, entity, a),
 		Format: parseFormat(q),
@@ -292,21 +292,23 @@ func parseBoolParam(q map[string][]string, name string, def bool) bool {
 	}
 }
 
-// parseLimit извлекает limit из query params.
-func parseLimit(q map[string][]string) int {
+// parseLimitParam извлекает limit из query params с заданным default.
+func parseLimitParam(q map[string][]string, defaultLimit int) int {
 	vals, ok := q["limit"]
 	if !ok || len(vals) == 0 {
-		return 10
+		return defaultLimit
 	}
 	v, err := strconv.Atoi(strings.TrimSpace(vals[0]))
 	if err != nil || v <= 0 {
-		return 10
+		return defaultLimit
 	}
 	if v > 1000 {
 		return 1000
 	}
 	return v
 }
+
+
 
 // parseOffset извлекает offset из query params.
 func parseOffset(q map[string][]string) int {

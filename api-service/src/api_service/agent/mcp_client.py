@@ -491,7 +491,7 @@ class MCPClient:
                 reminder=(
                     f"[TOOL_ERROR] '{name}' FAILED: {error_text[:250]}. "
                     "You MUST pass a non-empty 'pattern' parameter! "
-                    "Example: search_auto_parts(pattern='oil filter'). "
+                    f"Example: {name}(pattern='your search query'). "
                     "NEVER call with empty arguments."
                 ),
                 ok=False,
