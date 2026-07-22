@@ -591,6 +591,72 @@ func TestGrepSecurity_NonRegexPatternNoLimit(t *testing.T) {
 }
 
 // =============================================================================
+// ReDoS security tests
+// =============================================================================
+
+func TestGrep_RejectsLongRegex(t *testing.T) {
+	s := NewGrepStrategy("id", "name")
+	// 201-char regex pattern — exceeds maxRegexLen (200)
+	pattern := ""
+	for i := 0; i < 201; i++ {
+		pattern += "a"
+	}
+	r := makeRequest(map[string]string{"pattern": pattern, "regex": "true"})
+	plan, err := s.ParseRequest(r, sampleEntity, testAdapter{})
+	if err == nil {
+		t.Fatalf("Expected error for 201-char regex, got plan=%+v", plan)
+	}
+	if !strings.Contains(err.Error(), "regex pattern too long") {
+		t.Errorf("Expected 'regex pattern too long' error, got: %v", err)
+	}
+}
+
+func TestGrep_AcceptsBoundaryRegex(t *testing.T) {
+	s := NewGrepStrategy("id", "name")
+	// 200-char regex pattern — exactly at maxRegexLen boundary
+	pattern := ""
+	for i := 0; i < 200; i++ {
+		pattern += "a"
+	}
+	r := makeRequest(map[string]string{"pattern": pattern, "regex": "true"})
+	plan, err := s.ParseRequest(r, sampleEntity, testAdapter{})
+	if err != nil {
+		t.Fatalf("Expected no error for 200-char regex, got: %v", err)
+	}
+	if plan == nil {
+		t.Fatal("Expected non-nil plan")
+	}
+}
+
+func TestGrep_CatastrophicBacktrackingPattern(t *testing.T) {
+	s := NewGrepStrategy("id", "name")
+	// Catastrophic backtracking pattern (a+)+b$ — length < 200, should be accepted
+	pattern := `(a+)+b$`
+	r := makeRequest(map[string]string{"pattern": pattern, "regex": "true"})
+	plan, err := s.ParseRequest(r, sampleEntity, testAdapter{})
+	if err != nil {
+		t.Fatalf("Expected no error for catastrophic backtracking pattern, got: %v", err)
+	}
+	if plan == nil {
+		t.Fatal("Expected non-nil plan")
+	}
+}
+
+func TestGrep_RawRegexLike(t *testing.T) {
+	s := NewGrepStrategy("id", "name")
+	// Realistic short regex: license plate pattern
+	pattern := `^[A-Z]{2}\d{4}[A-Z]{2}$`
+	r := makeRequest(map[string]string{"pattern": pattern, "regex": "true"})
+	plan, err := s.ParseRequest(r, sampleEntity, testAdapter{})
+	if err != nil {
+		t.Fatalf("Expected no error for realistic regex, got: %v", err)
+	}
+	if plan == nil {
+		t.Fatal("Expected non-nil plan")
+	}
+}
+
+// =============================================================================
 // Helpers
 // =============================================================================
 
