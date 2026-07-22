@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/trash2bin/helperium/data-service/internal/query"
+	"github.com/trash2bin/helperium/helperium-go/config"
 )
 
 // =============================================================================
@@ -227,7 +228,7 @@ func TestFilterStrategy_SortBy(t *testing.T) {
 		t.Fatalf("buildSQL: unexpected error: %v", err)
 	}
 
-	if !contains(sql, `ORDER BY "price" DESC`) {
+	if !strings.Contains(sql, `ORDER BY "price" DESC`) {
 		t.Errorf("Expected ORDER BY price DESC: %q", sql)
 	}
 }
@@ -250,13 +251,13 @@ func TestFilterStrategy_MultipleConditions(t *testing.T) {
 	}
 
 	// All three conditions should appear.
-	if !contains(sql, `"category" = ?`) {
+	if !strings.Contains(sql, `"category" = ?`) {
 		t.Errorf("Missing category condition: %q", sql)
 	}
-	if !contains(sql, `"active" = ?`) {
+	if !strings.Contains(sql, `"active" = ?`) {
 		t.Errorf("Missing active condition: %q", sql)
 	}
-	if !contains(sql, `"price" >= ?`) {
+	if !strings.Contains(sql, `"price" >= ?`) {
 		t.Errorf("Missing price>= condition: %q", sql)
 	}
 }
@@ -314,7 +315,200 @@ func TestFilterStrategy_ToolParams(t *testing.T) {
 	}
 }
 
-func TestFilterStrategy_Description(t *testing.T) {
+func TestFilter_UnknownFieldSkipped(t *testing.T) {
+	s := NewFilterStrategy("id", "name")
+	// Unknown field param should be silently ignored; only category is valid.
+	r := makeRequest(map[string]string{"category": "Electronics", "bogus_field": "x"})
+	plan, err := s.ParseRequest(r, sampleEntity, testAdapter{})
+	if err != nil {
+		t.Fatalf("ParseRequest: unexpected error: %v", err)
+	}
+	if plan == nil {
+		t.Fatal("Expected non-nil plan")
+	}
+	// Should have exactly 1 condition (category, not bogus_field)
+	if len(plan.Where) != 1 {
+		t.Errorf("Expected 1 condition (category), got %d", len(plan.Where))
+	}
+}
+
+func TestFilter_PKSkippedWithValidField(t *testing.T) {
+	s := NewFilterStrategy("id", "name")
+	// PK field combined with valid field — should work.
+	r := makeRequest(map[string]string{"id": "5", "category": "Electronics"})
+	plan, err := s.ParseRequest(r, sampleEntity, testAdapter{})
+	if err != nil {
+		t.Fatalf("ParseRequest: unexpected error: %v", err)
+	}
+	if plan == nil {
+		t.Fatal("Expected non-nil plan")
+	}
+	// Should have exactly 1 condition (category, not id which is PK)
+	if len(plan.Where) != 1 {
+		t.Errorf("Expected 1 condition (category only), got %d", len(plan.Where))
+	}
+}
+
+func TestFilter_FloatComparison(t *testing.T) {
+	s := NewFilterStrategy("id", "name")
+	r := makeRequest(map[string]string{"price__gt": "50.5"})
+	plan, err := s.ParseRequest(r, sampleEntity, testAdapter{})
+	if err != nil {
+		t.Fatalf("ParseRequest: unexpected error: %v", err)
+	}
+	if len(plan.Where) != 1 {
+		t.Fatalf("Expected 1 condition, got %d", len(plan.Where))
+	}
+	val, ok := plan.Where[0].Value.(float64)
+	if !ok {
+		t.Fatalf("Expected float64 value, got %T=%v", plan.Where[0].Value, plan.Where[0].Value)
+	}
+	if val != 50.5 {
+		t.Errorf("Value = %f, want 50.5", val)
+	}
+}
+
+func TestFilter_StringComparison(t *testing.T) {
+	s := NewFilterStrategy("id", "name")
+	// Comparison on a string field (e.g. date as string).
+	r := makeRequest(map[string]string{"name__gt": "m"})
+	plan, err := s.ParseRequest(r, sampleEntity, testAdapter{})
+	if err != nil {
+		t.Fatalf("ParseRequest: unexpected error: %v", err)
+	}
+	sql, _, err := buildSQL(plan, testAdapter{})
+	if err != nil {
+		t.Fatalf("buildSQL: unexpected error: %v", err)
+	}
+	wantSQL := `SELECT "id", "name" FROM "products" WHERE "name" > ? LIMIT ?`
+	if sql != wantSQL {
+		t.Errorf("SQL = %q\nwant %q", sql, wantSQL)
+	}
+}
+
+func TestFilter_DateTimeComparison(t *testing.T) {
+	// Entity with a datetime/string field for date filtering.
+	entity := config.Entity{
+		Name:     "events",
+		Table:    "events",
+		IDColumn: "id",
+		Fields: []config.EntityField{
+			{Name: "id", Column: "id", Type: config.FieldTypeInt, PrimaryKey: boolPtr(true)},
+			{Name: "event_date", Column: "event_date", Type: config.FieldTypeString},
+			{Name: "name", Column: "name", Type: config.FieldTypeString},
+		},
+	}
+	s := NewFilterStrategy("id", "name")
+	r := makeRequest(map[string]string{"event_date__gte": "2024-01-15"})
+	plan, err := s.ParseRequest(r, entity, testAdapter{})
+	if err != nil {
+		t.Fatalf("ParseRequest: unexpected error: %v", err)
+	}
+	if len(plan.Where) != 1 {
+		t.Fatalf("Expected 1 condition, got %d", len(plan.Where))
+	}
+	val, ok := plan.Where[0].Value.(string)
+	if !ok {
+		t.Fatalf("Expected string value for date, got %T=%v", plan.Where[0].Value, plan.Where[0].Value)
+	}
+	if val != "2024-01-15" {
+		t.Errorf("Value = %q, want 2024-01-15", val)
+	}
+}
+
+func TestFilter_MakeEqConditionInvalidConversion(t *testing.T) {
+	// Invalid bool value should return error.
+	f := config.EntityField{Name: "active", Column: "active", Type: config.FieldTypeBool}
+	_, err := makeEqCondition(`"active"`, f, "notabool")
+	if err == nil {
+		t.Error("Expected error for invalid bool conversion, got nil")
+	}
+
+	// Invalid int value should return error.
+	f2 := config.EntityField{Name: "qty", Column: "qty", Type: config.FieldTypeInt}
+	_, err = makeEqCondition(`"qty"`, f2, "notanumber")
+	if err == nil {
+		t.Error("Expected error for invalid int conversion, got nil")
+	}
+
+	// Invalid float value should return error.
+	f3 := config.EntityField{Name: "price", Column: "price", Type: config.FieldTypeFloat}
+	_, err = makeEqCondition(`"price"`, f3, "notanumber")
+	if err == nil {
+		t.Error("Expected error for invalid float conversion, got nil")
+	}
+}
+
+func TestFilter_MakeComparisonFloat(t *testing.T) {
+	f := config.EntityField{Name: "price", Column: "price", Type: config.FieldTypeFloat}
+	cond, err := makeComparison(`"price"`, "gte", f, "100.5")
+	if err != nil {
+		t.Fatalf("makeComparison: %v", err)
+	}
+	val, ok := cond.Value.(float64)
+	if !ok {
+		t.Fatalf("Expected float64 value, got %T=%v", cond.Value, cond.Value)
+	}
+	if val != 100.5 {
+		t.Errorf("Value = %f, want 100.5", val)
+	}
+}
+
+func TestFilter_EntityIDNameCol(t *testing.T) {
+	s := NewFilterStrategy("id", "name")
+	if got := s.EntityIDCol(); got != "id" {
+		t.Errorf("EntityIDCol() = %q, want %q", got, "id")
+	}
+	if got := s.EntityNameCol(); got != "name" {
+		t.Errorf("EntityNameCol() = %q, want %q", got, "name")
+	}
+}
+
+func TestFilter_MakeEqConditionNonString(t *testing.T) {
+	// Direct test of unexported makeEqCondition with non-string types.
+	f := config.EntityField{Name: "price", Column: "price", Type: config.FieldTypeFloat}
+	cond, err := makeEqCondition(`"price"`, f, "99.5")
+	if err != nil {
+		t.Fatalf("makeEqCondition: %v", err)
+	}
+	val, ok := cond.Value.(float64)
+	if !ok {
+		t.Fatalf("Expected float64 value, got %T=%v", cond.Value, cond.Value)
+	}
+	if val != 99.5 {
+		t.Errorf("Value = %f, want 99.5", val)
+	}
+
+	// Bool type
+	f2 := config.EntityField{Name: "active", Column: "active", Type: config.FieldTypeBool}
+	cond2, err := makeEqCondition(`"active"`, f2, "true")
+	if err != nil {
+		t.Fatalf("makeEqCondition: %v", err)
+	}
+	val2, ok := cond2.Value.(bool)
+	if !ok {
+		t.Fatalf("Expected bool value, got %T=%v", cond2.Value, cond2.Value)
+	}
+	if !val2 {
+		t.Errorf("Value = false, want true")
+	}
+
+	// Int type
+	f3 := config.EntityField{Name: "qty", Column: "qty", Type: config.FieldTypeInt}
+	cond3, err := makeEqCondition(`"qty"`, f3, "42")
+	if err != nil {
+		t.Fatalf("makeEqCondition: %v", err)
+	}
+	val3, ok := cond3.Value.(int64)
+	if !ok {
+		t.Fatalf("Expected int64 value, got %T=%v", cond3.Value, cond3.Value)
+	}
+	if val3 != 42 {
+		t.Errorf("Value = %d, want 42", val3)
+	}
+}
+
+func TestFilter_Description(t *testing.T) {
 	s := NewFilterStrategy("id", "name")
 	desc := s.ToolDescription(sampleEntity)
 	if desc == "" {
@@ -349,7 +543,7 @@ func TestFilterSecurity_MaxFilters_Exceeded(t *testing.T) {
 	if err == nil {
 		t.Fatal("ParseRequest: expected error for 16 filter conditions (max 15), got nil")
 	}
-	if !contains(err.Error(), "too many filter conditions") {
+	if !strings.Contains(err.Error(), "too many filter conditions") {
 		t.Errorf("Unexpected error: %v", err)
 	}
 }
@@ -442,7 +636,7 @@ func TestSimpleStrategy_SearchField(t *testing.T) {
 	}
 
 	// SQLite: ILIKE → "name" COLLATE NOCASE LIKE ? for cyrillic support
-	if !contains(sql, `"name" COLLATE NOCASE LIKE ?`) {
+	if !strings.Contains(sql, `"name" COLLATE NOCASE LIKE ?`) {
 		t.Errorf("Expected COLLATE NOCASE on name: %q", sql)
 	}
 	if len(args) < 1 {
@@ -467,7 +661,7 @@ func TestSimpleStrategy_ExactFilter(t *testing.T) {
 		t.Fatalf("buildSQL: unexpected error: %v", err)
 	}
 
-	if !contains(sql, `"category" = ?`) {
+	if !strings.Contains(sql, `"category" = ?`) {
 		t.Errorf("Expected category = ?: %q", sql)
 	}
 	if len(args) < 1 || args[0] != "electronics" {
@@ -549,11 +743,11 @@ func TestGrepStrategy_PostgresPlaceholders(t *testing.T) {
 	}
 
 	// Postgres: ILIKE and $N placeholders.
-	if !contains(sql, "ILIKE") {
+	if !strings.Contains(sql, "ILIKE") {
 		t.Errorf("Expected ILIKE for Postgres: %q", sql)
 	}
 	// Should have $N placeholders.
-	if contains(sql, "?") {
+	if strings.Contains(sql, "?") {
 		t.Errorf("Should not have SQLite placeholder '?' in Postgres mode: %q", sql)
 	}
 	if len(args) == 0 {

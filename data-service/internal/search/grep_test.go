@@ -642,6 +642,97 @@ func TestGrep_CatastrophicBacktrackingPattern(t *testing.T) {
 	}
 }
 
+func TestGrep_ListPlanFallback(t *testing.T) {
+	s := NewGrepStrategy("id", "name")
+	// Entity with NO string fields should trigger listPlan fallback.
+	noStrEntity := config.Entity{
+		Name:     "items",
+		Table:    "items",
+		IDColumn: "id",
+		Fields: []config.EntityField{
+			{Name: "id", Column: "id", Type: config.FieldTypeInt, PrimaryKey: boolPtr(true)},
+			{Name: "price", Column: "price", Type: config.FieldTypeFloat},
+			{Name: "active", Column: "active", Type: config.FieldTypeBool},
+		},
+	}
+	r := makeRequest(map[string]string{"pattern": "test"})
+	plan, err := s.ParseRequest(r, noStrEntity, testAdapter{})
+	if err != nil {
+		t.Fatalf("ParseRequest: unexpected error for no-string entity: %v", err)
+	}
+	if plan == nil {
+		t.Fatal("Expected non-nil plan")
+	}
+	// Fallback = listPlan = no WHERE clause (since no string fields to search)
+	if len(plan.Where) != 0 {
+		t.Errorf("Expected no WHERE for no-string entity, got %d conditions", len(plan.Where))
+	}
+	// Default limit for grep
+	if plan.Limit != 10 {
+		t.Errorf("Limit = %d, want 10", plan.Limit)
+	}
+}
+
+func TestGrep_TokenizeEmptyString(t *testing.T) {
+	result := tokenize("")
+	if result != nil {
+		t.Errorf("tokenize('') = %v, want nil", result)
+	}
+}
+
+func TestGrep_TokenizeSpacesOnly(t *testing.T) {
+	result := tokenize("   ")
+	if result != nil {
+		t.Errorf("tokenize('   ') = %v, want nil", result)
+	}
+}
+
+func TestGrep_RegexInvertPostgres(t *testing.T) {
+	s := NewGrepStrategy("id", "name")
+	r := makeRequest(map[string]string{"pattern": "^ABC", "regex": "true", "invert": "true"})
+	plan, err := s.ParseRequest(r, sampleEntity, testAdapterPG{})
+	if err != nil {
+		t.Fatalf("ParseRequest: unexpected error: %v", err)
+	}
+
+	eng := query.NewEngine(wrapAdapter{a: testAdapterPG{}})
+	sql, _, err := eng.Build(*plan)
+	if err != nil {
+		t.Fatalf("buildSQL: unexpected error: %v", err)
+	}
+
+	// Postgres: invert uses !~
+	if !contains(sql, "!~") {
+		t.Errorf("Expected !~ (invert REGEXP) for Postgres, got: %q", sql)
+	}
+}
+
+func TestGrep_InvalidFormat(t *testing.T) {
+	s := NewGrepStrategy("id", "name")
+	r := makeRequest(map[string]string{"pattern": "test", "format": "bogus"})
+	plan, err := s.ParseRequest(r, sampleEntity, testAdapter{})
+	if err != nil {
+		t.Fatalf("ParseRequest: unexpected error: %v", err)
+	}
+	// Invalid format should default to compact
+	if plan.Format != query.FormatCompact {
+		t.Errorf("Format = %d (want FormatCompact=%d) for invalid format 'bogus'", plan.Format, query.FormatCompact)
+	}
+}
+
+func TestGrep_InvalidSortBy(t *testing.T) {
+	s := NewGrepStrategy("id", "name")
+	r := makeRequest(map[string]string{"pattern": "test", "sort_by": "nonexistent_field"})
+	plan, err := s.ParseRequest(r, sampleEntity, testAdapter{})
+	if err != nil {
+		t.Fatalf("ParseRequest: unexpected error: %v", err)
+	}
+	// Invalid sort_by should result in no ORDER clause
+	if len(plan.Order) != 0 {
+		t.Errorf("Expected no Order for invalid sort_by, got %v", plan.Order)
+	}
+}
+
 func TestGrep_RawRegexLike(t *testing.T) {
 	s := NewGrepStrategy("id", "name")
 	// Realistic short regex: license plate pattern
