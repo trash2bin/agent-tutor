@@ -608,18 +608,20 @@ def _format_tool_calls_for_message(tool_calls: list[dict]) -> list[dict]:
     """Format tool_calls from LLM response into message-compatible format."""
     result = []
     for tc in tool_calls:
+        raw_args = tc.get("arguments", tc.get("function", {}).get("arguments", {}))
+        # Protect against double-encoding: if arguments is already a JSON string,
+        # use as-is (LAYER 1 LiteLLM passes string). Only json.dumps if it's a dict.
+        if isinstance(raw_args, dict):
+            serialized = json.dumps(raw_args, ensure_ascii=False)
+        else:
+            serialized = raw_args
         result.append(
             {
                 "id": tc.get("id", f"call_{uuid.uuid4().hex[:8]}"),
                 "type": "function",
                 "function": {
                     "name": tc.get("name", tc.get("function", {}).get("name", "")),
-                    "arguments": json.dumps(
-                        tc.get(
-                            "arguments", tc.get("function", {}).get("arguments", {})
-                        ),
-                        ensure_ascii=False,
-                    ),
+                    "arguments": serialized,
                 },
             }
         )

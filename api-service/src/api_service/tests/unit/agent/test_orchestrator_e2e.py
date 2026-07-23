@@ -280,3 +280,87 @@ class TestLLMAgentBasic:
         assert len(error_events) > 0, (
             f"Должна быть ошибка от guard. Типы событий: {[e.type for e in events]}"
         )
+
+
+# ── New-style orchestrator tests (LLMProvider protocol, not old LLMClient) ──
+
+
+class TestLLMAgentWithProtocolProvider:
+    """LLMAgent.stream_events() c TestLLMProvider (protocol-based, not legacy adapter)."""
+
+    @pytest.mark.asyncio
+    async def test_tool_call_then_final(self, conv_manager):
+        """Tool call (LAYER 1) -> result -> final."""
+        from .helpers import TestLLMProvider, TestMCPProvider, llm_response
+
+        llm = TestLLMProvider()
+        llm.queue(
+            llm_response.tool_call("test_tool", {"key": "value"}),
+            llm_response.final("Bот данные!"),
+        )
+        mcp = TestMCPProvider()
+        mcp.add_tool(
+            "test_tool", {"id": "s1", "name": "Alice"}, description="Test tool"
+        )
+
+        agent = LLMAgent(
+            llm_client=llm, mcp_client=mcp, conversation_manager=conv_manager
+        )
+
+        events: list[AgentEvent] = []
+        async for event in agent.stream_events(
+            "найди данные", session_id="test-protocol"
+        ):
+            events.append(event)
+
+        event_types = [e.type for e in events]
+
+        assert "tool_call" in event_types, f"Ожидался tool_call: {event_types}"
+        assert "tool_result" in event_types, f"Ожидался tool_result: {event_types}"
+        assert "final" in event_types, f"Ожидался final: {event_types}"
+
+        # Проверяем что tool_call данные есть
+        tool_call_events = [e for e in events if e.type == "tool_call"]
+        assert tool_call_events[0].data.get("name") == "test_tool"
+
+        # Проверяем что финал содержит данные
+        final_events = [e for e in events if e.type == "final"]
+        final_content = ""
+        for ev in final_events:
+            if isinstance(ev.data, dict):
+                final_content = ev.data.get("content", "")
+        assert "Alice" in final_content or "данные" in final_content, (
+            f"Финал не содержит данных: {final_content[:200]}"
+        )
+
+        # Нет ошибок
+        errors = [e for e in events if e.type == "error"]
+        assert len(errors) == 0, f"Неожиданные ошибки: {errors}"
+
+    @pytest.mark.asyncio
+    async def test_text_tool_calls(self, conv_manager):
+        """Tool calls как JSON в content (LAYER 2) -> result -> final."""
+        from .helpers import TestLLMProvider, TestMCPProvider, llm_response
+
+        llm = TestLLMProvider()
+        llm.queue(
+            llm_response.text_tool_calls([("test_tool", {"key": "value"})]),
+            llm_response.final("Готово!"),
+        )
+        mcp = TestMCPProvider()
+        mcp.add_tool("test_tool", {"id": "s1", "name": "Alice"})
+
+        agent = LLMAgent(
+            llm_client=llm, mcp_client=mcp, conversation_manager=conv_manager
+        )
+
+        events: list[AgentEvent] = []
+        async for event in agent.stream_events(
+            "найди данные", session_id="test-text-tools"
+        ):
+            events.append(event)
+
+        event_types = [e.type for e in events]
+        assert "tool_call" in event_types, f"Текст-тул не сработал: {event_types}"
+        assert "tool_result" in event_types
+        assert "final" in event_types

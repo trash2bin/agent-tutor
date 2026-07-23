@@ -4,81 +4,70 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import uuid
 from typing import Any
 
-from .types import ParsedToolCall, ToolCall
+from .types import ParsedToolCall
 
 logger = logging.getLogger("api_service.agent.tool_parser")
 
 
 class ToolCallParser:
-    """Parses tool calls from LLM responses in various formats."""
+    """Parses tool calls from LLM responses.
+
+    Priority:
+    1. Native ``tool_calls`` field (OpenAI-style) — used by ``legacy_adapters.py``.
+       In the new pipeline (LAYER 1), LiteLLM handles this before ToolCallParser
+       is reached, but the legacy adapter path still needs it.
+    2. JSON in ``content`` — fallback for models that write tool calls as text.
+       Supports: NDJSON (line-delimited), JSON array, single dict, OpenAI wrapper.
+    """
 
     def extract_tool_calls(self, message: dict[str, Any]) -> list[ParsedToolCall]:
         """Extract tool calls from a message, handling native and JSON formats."""
-        # Try native tool_calls format
-        native_calls = self._extract_native_tool_calls(message)
+        # 1. Native tool_calls (OpenAI-style) — used by legacy_adapters.py
+        native_calls = message.get("tool_calls")
         if native_calls:
-            return native_calls
+            return self._from_native_tool_calls(native_calls)
 
-        # Try parsing JSON from content
+        # 2. JSON in content (fallback for models that write tool calls as text)
         text_content = message.get("content") or ""
         if not text_content:
             return []
 
         return self._extract_json_tool_calls(text_content)
 
-    def _extract_native_tool_calls(
-        self, message: dict[str, Any]
-    ) -> list[ParsedToolCall]:
-        """Extract tool calls from native OpenAI-style tool_calls field."""
+    @staticmethod
+    def _from_native_tool_calls(native_calls: list[dict]) -> list[ParsedToolCall]:
+        """Convert native OpenAI-style tool_calls to ParsedToolCall list."""
         calls: list[ParsedToolCall] = []
-        native_calls = message.get("tool_calls") or []
-
         for item in native_calls:
             function = item.get("function") or {}
             name = function.get("name")
             if not name:
                 continue
-
+            raw_args = function.get("arguments", "{}")
+            if isinstance(raw_args, str):
+                try:
+                    parsed_args = json.loads(raw_args)
+                except (json.JSONDecodeError, TypeError):
+                    parsed_args = {}
+            else:
+                parsed_args = raw_args
             calls.append(
                 ParsedToolCall(
                     id=item.get("id") or f"call_{name}_{uuid.uuid4().hex[:8]}",
-                    name=name or "",
-                    arguments=self.parse_tool_arguments(function.get("arguments", {})),
+                    name=name,
+                    arguments=parsed_args,
                 )
             )
-
         return calls
 
     def _extract_json_tool_calls(self, text_content: str) -> list[ParsedToolCall]:
-        """Extract tool calls from JSON blocks or custom tags in text content."""
+        """Extract tool calls from JSON blocks in text content."""
         calls: list[ParsedToolCall] = []
 
-        # 1. Handle <tool_call> tags (e.g. <invoke name="foo">...)
-        tag_matches = re.findall(
-            r"<invoke\s+name=['\"]([^'\"]+)['\"]([^>]*)>", text_content
-        )
-        for name, extra in tag_matches:
-            calls.append(
-                ParsedToolCall(
-                    id=f"call_{name}_{uuid.uuid4().hex[:8]}",
-                    name=name or "",
-                    arguments={},
-                )
-            )
-        if calls:
-            return calls
-
         potential_jsons: list[str] = []
-
-        # Try markdown JSON blocks
-        md_matches = re.findall(
-            r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", text_content, re.DOTALL
-        )
-        potential_jsons.extend(md_matches)
 
         # Try NDJSON (line-delimited JSON) — каждая строка это отдельный тул
         # Некоторые модели (MiniMax) пишут тулы построчно без массива:
@@ -239,26 +228,3 @@ class ToolCallParser:
         except json.JSONDecodeError:
             logger.debug("[TOOL_PARSER] Failed to parse tool arguments: %s", text[:100])
             return {}
-
-    def format_for_model(self, tool_calls: list[ParsedToolCall]) -> list[ToolCall]:
-        """Format tool calls for LLM consumption."""
-        import json as json_module
-
-        formatted: list[ToolCall] = []
-        for tool_call in tool_calls:
-            name: str = tool_call["name"]
-            if not name:
-                continue
-            formatted.append(
-                ToolCall(
-                    id=tool_call["id"] or f"call_{name}_{uuid.uuid4().hex[:8]}",
-                    type="function",
-                    function={
-                        "name": name,
-                        "arguments": json_module.dumps(
-                            tool_call["arguments"] or {}, ensure_ascii=False
-                        ),
-                    },
-                )
-            )
-        return formatted

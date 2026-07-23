@@ -239,7 +239,7 @@ flowchart TB
 
 1. [ ] `make ci` — зелёный (Go + Python + agent pipeline unit tests)
 2. [ ] Pre-commit hooks — все Passed
-3. [ ] `uv run pytest src/api_service/tests/unit/agent/ -v` — 151 agent-тестов (58 pipeline unit + 93 legacy)
+3. [ ] `uv run pytest src/api_service/tests/unit/agent/ -v` — 198 agent-тестов (парсинг, пайплайн, оркестратор)
 4. [ ] `go test ./data-service/... ./helperium-go/...` — 690 тестов, зелёные
 5. [ ] **LLM E2E** (только перед PR, дорогие по токенам):
     ```bash

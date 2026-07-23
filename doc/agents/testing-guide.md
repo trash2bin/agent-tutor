@@ -19,14 +19,18 @@ uv run pytest helperium-sdk/tests/                  # SDK — 83 теста
 
 ```bash
 cd api-service
-uv run pytest src/api_service/tests/unit/agent/test_stages.py -v         # 22 Stage-теста
-uv run pytest src/api_service/tests/unit/agent/test_middlewares.py -v     # 8 Middleware-тестов
-uv run pytest src/api_service/tests/unit/agent/test_error_flow.py -v     # 18 Error-flow тестов
-uv run pytest src/api_service/tests/unit/agent/test_orchestrator_e2e.py -v  # 3 интеграционных
-uv run pytest src/api_service/tests/unit/agent/test_orchestrator_fixes.py -v  # 7 регрессионных
+uv run pytest src/api_service/tests/unit/agent/test_stages.py -v                    # 25 Stage-тестов
+uv run pytest src/api_service/tests/unit/agent/test_middlewares.py -v                # 8 Middleware-тестов
+uv run pytest src/api_service/tests/unit/agent/test_error_flow.py -v                # 18 Error-flow тестов
+uv run pytest src/api_service/tests/unit/agent/test_orchestrator_e2e.py -v           # 5 интеграционных (+TestLLMAgentWithProtocolProvider)
+uv run pytest src/api_service/tests/unit/agent/test_orchestrator_fixes.py -v         # 7 регрессионных
+uv run pytest src/api_service/tests/unit/agent/test_tool_parser_extensive.py -v      # 48 парсинг-тестов (unit + pipeline E2E)
+uv run pytest src/api_service/tests/unit/agent/test_tool_parser.py -v                # 1 уникальный unit-тест
 ```
 
-Все 151 тест зелёные, работают без запущенных сервисов.
+Все **198 тестов** зелёные, работают без запущенных сервисов. Основная масса — тесты на парсинг
+JSON-тулов из LLM ответа (`test_tool_parser_extensive.py`): ToolCallParser unit, Safety Net,
+pipeline E2E, token leak, iteration budget.
 
 ## 2. Go Unit/Integration
 

@@ -43,47 +43,7 @@ class TestToolParser:
     def setup_method(self):
         self.parser = ToolCallParser()
 
-    # ── 1. Native tool_calls (OpenAI-стиль) ─────────────────────────
-
-    def test_native_tool_calls(self):
-        """OpenAI-style tool_calls field."""
-        msg = {
-            "tool_calls": [
-                {
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {"name": "get_product", "arguments": '{"id": 1}'},
-                },
-            ],
-            "content": None,
-        }
-        result = self.parser.extract_tool_calls(msg)
-        assert len(result) == 1
-        assert result[0]["name"] == "get_product"
-        assert result[0]["arguments"] == {"id": 1}
-
-    def test_native_tool_calls_multiple(self):
-        """Несколько native tool_calls."""
-        msg = {
-            "tool_calls": [
-                {
-                    "id": "call_a",
-                    "type": "function",
-                    "function": {"name": "get_a", "arguments": '{"id": 1}'},
-                },
-                {
-                    "id": "call_b",
-                    "type": "function",
-                    "function": {"name": "get_b", "arguments": '{"id": 2}'},
-                },
-            ],
-        }
-        result = self.parser.extract_tool_calls(msg)
-        assert len(result) == 2
-        assert result[0]["name"] == "get_a"
-        assert result[1]["name"] == "get_b"
-
-    # ── 2. JSON array в content ─────────────────────────────────────
+    # ── 1. JSON array в content ─────────────────────────────────────
 
     def test_json_array_in_content(self):
         """Content=[{'name':'x', 'arguments':{...}}]."""
@@ -176,52 +136,9 @@ class TestToolParser:
         # arguments может быть dict или str — проверяем что парсится
         assert result[0]["arguments"] == {"name": "Castrol"}
 
-    # ── 4. Markdown code blocks ────────────────────────────────────
+    # ── 4. Wrapped in {"tool_calls": [...]} ───────────────────────
 
-    def test_markdown_json_array_block(self):
-        """```json\n[{...}]\n```"""
-        content = '```json\n[{"name": "get_product", "arguments": {"id": 1}}]\n```'
-        result = self.parser.extract_tool_calls({"content": content})
-        assert len(result) == 1, f"markdown block: {result}"
-
-    def test_markdown_json_single_block(self):
-        """```json\n{...}\n```"""
-        content = '```json\n{"name": "get_product", "arguments": {"id": 1}}\n```'
-        result = self.parser.extract_tool_calls({"content": content})
-        assert len(result) == 1, f"markdown single: {result}"
-
-    def test_markdown_no_lang_tag(self):
-        """```\n[...]\n```"""
-        content = '```\n[{"name": "get_product", "arguments": {"id": 1}}]\n```'
-        result = self.parser.extract_tool_calls({"content": content})
-        assert len(result) == 1
-
-    # ── 5. "Tool Calls:" prefix ────────────────────────────────────
-
-    def test_tool_calls_prefix(self):
-        """Tool Calls: [{...}, {...}]"""
-        content = 'Tool Calls: [{"name": "get_product", "arguments": {"id": 1}}]'
-        result = self.parser.extract_tool_calls({"content": content})
-        assert len(result) == 1
-
-    def test_tool_call_prefix(self):
-        """Tool Call: [{...}]"""
-        content = 'Tool Call: [{"name": "get_product", "arguments": {"id": 1}}]'
-        result = self.parser.extract_tool_calls({"content": content})
-        assert len(result) == 1
-
-    # ── 6. <invoke> tags ──────────────────────────────────────────
-
-    def test_invoke_tag(self):
-        """<invoke name=\"x\">...</invoke>"""
-        content = (
-            '<invoke name="get_product"><parameter name="id">1</parameter></invoke>'
-        )
-        result = self.parser.extract_tool_calls({"content": content})
-        assert len(result) == 1
-        assert result[0]["name"] == "get_product"
-
-    # ── 7. Wrapped in {"tool_calls": [...]} ───────────────────────
+    # ── 5. Wrapped in {"tool_calls": [...]} ───────────────────────
 
     def test_wrapped_tool_calls(self):
         """Content={'tool_calls': [...]}"""
@@ -231,7 +148,7 @@ class TestToolParser:
         result = self.parser.extract_tool_calls({"content": content})
         assert len(result) == 1
 
-    # ── 8. Empty / no tool calls ──────────────────────────────────
+    # ── 6. Empty / no tool calls ──────────────────────────────────
 
     def test_empty_content(self):
         """Пустой контент."""
@@ -267,7 +184,7 @@ class TestToolParser:
         result = self.parser.extract_tool_calls({"content": content})
         assert len(result) == 0, "Не должно парсить массив без name/function"
 
-    # ── 9. Edge cases ────────────────────────────────────────────
+    # ── 7. Edge cases ────────────────────────────────────────────
 
     def test_mixed_with_extra_text(self):
         """Тул в контенте с префиксом/суффиксом."""
@@ -280,7 +197,7 @@ class TestToolParser:
         assert len(result) == 1, f"Mixed content with extra text: {result}"
 
     def test_special_chars_in_args(self):
-        """Кириллица, спецсимволы в аргументах."""
+        """Кириллица, спецсимволы, юникод в аргументах."""
         content = json.dumps(
             [
                 {
@@ -293,28 +210,65 @@ class TestToolParser:
         assert len(result) == 1
         assert "моторное" in result[0]["arguments"]["pattern"]
 
-    def test_unicode_args(self):
-        """Юникодные аргументы."""
-        content = '{"name": "search", "arguments": {"q": "масло"}}'
-        result = self.parser.extract_tool_calls({"content": content})
-        assert len(result) == 1
-        assert result[0]["arguments"]["q"] == "масло"
+        # NDJSON с юникодом
+        unicode_content = '{"name": "search", "arguments": {"q": "масло"}}'
+        unicode_result = self.parser.extract_tool_calls({"content": unicode_content})
+        assert len(unicode_result) == 1
+        assert unicode_result[0]["arguments"]["q"] == "масло"
 
-    def test_hybrid_native_plus_text_not_supported(self):
-        """Если есть native tool_calls — текст игнорируется (current contract)."""
-        msg = {
-            "tool_calls": [
-                {
-                    "id": "c1",
-                    "type": "function",
-                    "function": {"name": "native_tool", "arguments": "{}"},
-                },
-            ],
-            "content": '{"name": "text_tool", "arguments": {}}',
-        }
-        result = self.parser.extract_tool_calls(msg)
+    # ── 8. _from_native_tool_calls (new static) ────────────────────
+
+    def test_from_native_tool_calls_single(self):
+        """Одиночный native tool_call."""
+        native = [
+            {
+                "id": "call_abc",
+                "type": "function",
+                "function": {"name": "get_product", "arguments": '{"id": 1}'},
+            }
+        ]
+        result = ToolCallParser._from_native_tool_calls(native)
         assert len(result) == 1
-        assert result[0]["name"] == "native_tool"
+        assert result[0]["name"] == "get_product"
+        assert result[0]["arguments"] == {"id": 1}
+        assert result[0]["id"] == "call_abc"
+
+    def test_from_native_tool_calls_multiple(self):
+        """Несколько native tool_calls."""
+        native = [
+            {"id": "c1", "function": {"name": "get_a", "arguments": '{"id": 1}'}},
+            {"id": "c2", "function": {"name": "get_b", "arguments": '{"id": 2}'}},
+        ]
+        result = ToolCallParser._from_native_tool_calls(native)
+        assert len(result) == 2
+        assert result[0]["name"] == "get_a"
+        assert result[1]["name"] == "get_b"
+
+    def test_from_native_tool_calls_no_id(self):
+        """Native tool_call без id — генерируется."""
+        native = [{"function": {"name": "get_x", "arguments": "{}"}}]
+        result = ToolCallParser._from_native_tool_calls(native)
+        assert len(result) == 1
+        assert result[0]["name"] == "get_x"
+        assert result[0]["arguments"] == {}
+        assert result[0]["id"].startswith("call_")
+
+    def test_from_native_tool_calls_invalid_json_args(self):
+        """Native tool_call с битым JSON в arguments — не падает."""
+        native = [{"function": {"name": "get_x", "arguments": "not-json"}}]
+        result = ToolCallParser._from_native_tool_calls(native)
+        assert len(result) == 1
+        assert result[0]["arguments"] == {}
+
+    def test_from_native_tool_calls_skips_no_name(self):
+        """Native tool_call без name — скипается."""
+        native = [
+            {"function": {"name": ""}},
+            {"function": {"name": "get_x", "arguments": "{}"}},
+        ]
+        result = ToolCallParser._from_native_tool_calls(native)
+        assert len(result) == 1
+        assert result[0]["name"] == "get_x"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -528,25 +482,15 @@ class TestE2EPipeline:
         assert llm.call_count == 4, f"4 LLM вызова: {llm.call_count}"
 
     @pytest.mark.asyncio
-    async def test_safety_net_blocks_raw_json_final(self):
-        """Safety net блокирует JSON который парсер не смог извлечь."""
-
-        # NDJSON теперь парсится нормально парсером — проверяем safety net
-        # на формате который парсер не ловит: текст + JSON тула в середине
-        # (парсер ищет изолированный JSON, найдёт его и вернёт как тул,
-        #  но пусть safety net будет как дополнительная проверка ниже)
-
-        # Используем формат где тулы завёрнуты в "tool_calls" ключ
-        # внутри объекта — это успешно парсится, проверим что финал чистый
+    async def test_safety_net_blocks_unparseable_json(self):
+        """Safety net блокирует JSON когда парсер не смог — error event."""
         llm = TestLLMProvider()
+        # Парсер НЕ парсит NDJSON с неверной структурой, но safety net блокирует
         llm.queue(
-            llm_response.final(
-                '{"tool_calls": [{"name": "get_product", "arguments": {"id": 1}}]}'
-            ),
-            llm_response.final("Готово!"),
+            llm_response.final('{"name": "get_product", "arguments": "broken}'),
         )
         mcp = TestMCPProvider()
-        mcp.add_tool("get_product", {})
+        mcp.add_tool("get_product", {"id": 1})
 
         pipeline = Pipeline(
             stages=[LLMStage(), ToolExecutionStage()],
@@ -556,16 +500,49 @@ class TestE2EPipeline:
         events = await collect_events(pipeline.run(ctx))
 
         event_types = [t for t, _ in events]
-
-        # Парсер справился с этим форматом — должны быть tool_call и tool_result
-        assert "tool_call" in event_types, (
-            f"Парсер должен был найти tool_call: {event_types}"
+        assert "error" in event_types, f"Safety net не сработал: {event_types}"
+        assert "tool_call" not in event_types, (
+            f"Тул не должен выполниться: {event_types}"
         )
-        # В финале не должно быть JSON
-        final_events = [(t, d) for t, d in events if t == "final"]
-        for _, fd in final_events:
-            content = fd.get("content", "") if isinstance(fd, dict) else str(fd)
-            assert "[{" not in content, f"JSON утек в final: {content[:200]}"
+
+    @pytest.mark.asyncio
+    async def test_layer1_arguments_not_double_encoded(self):
+        """LAYER 1 tool_calls: arguments не double-encoded в message history.
+
+        LiteLLM передаёт arguments как dict. _format_tool_calls_for_message()
+        должен сериализовать в JSON-строку ровно один раз.
+        """
+        import json as _json
+
+        llm = TestLLMProvider()
+        llm.queue(
+            llm_response.tool_call("get_product", {"id": 42}),
+            llm_response.final("OK"),
+        )
+        mcp = TestMCPProvider()
+        mcp.add_tool("get_product", {"id": 42, "name": "Test"})
+
+        pipeline = Pipeline(
+            stages=[LLMStage(), ToolExecutionStage()],
+            middlewares=[SpendingMiddleware(), BacklogMiddleware()],
+        )
+        ctx = await make_pipeline_ctx(llm_provider=llm, mcp_provider=mcp)
+        await collect_events(pipeline.run(ctx))
+
+        # Проверяем message history: assistant сообщение с tool_calls
+        tool_call_msgs = [m for m in ctx.turn.messages if m.get("tool_calls")]
+        assert len(tool_call_msgs) > 0, "Нет tool_calls в message history"
+
+        for msg in tool_call_msgs:
+            for tc in msg["tool_calls"]:
+                args_str = tc["function"]["arguments"]
+                # Должна быть JSON-строка с ключами
+                try:
+                    parsed = _json.loads(args_str)
+                    assert isinstance(parsed, dict), f"Аргументы не dict: {parsed}"
+                    assert "id" in parsed, f"В аргументах нет id: {parsed}"
+                except _json.JSONDecodeError:
+                    pytest.fail(f"Arguments невалидный JSON: {args_str}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -905,28 +882,4 @@ class TestRealWorldFormats:
                 final_content = fd.get("content", "")
         assert "Castrol" in final_content, (
             f"Обычный текст исказился: {final_content[:200]}"
-        )
-
-    @pytest.mark.asyncio
-    async def test_markdown_code_block_json(self):
-        """```json\n[{...}]\n``` — markdown code block."""
-        content = '```json\n[{"name": "get_product", "arguments": {"id": 1}}]\n```'
-        llm = TestLLMProvider()
-        llm.queue(
-            llm_response.final(content),
-            llm_response.final("OK"),
-        )
-        mcp = TestMCPProvider()
-        mcp.add_tool("get_product", {"id": 1})
-
-        pipeline = Pipeline(
-            stages=[LLMStage(), ToolExecutionStage()],
-            middlewares=[SpendingMiddleware(), BacklogMiddleware()],
-        )
-        ctx = await make_pipeline_ctx(llm_provider=llm, mcp_provider=mcp)
-        events = await collect_events(pipeline.run(ctx))
-
-        event_types = [t for t, _ in events]
-        assert "tool_call" in event_types, (
-            f"Markdown block не распарсился: {event_types}"
         )

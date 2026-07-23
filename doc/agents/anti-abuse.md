@@ -14,39 +14,30 @@
 
 ## Search Strategy Abuse Prevention
 
-LLM склонна вызывать инструменты с пустыми аргументами (`search_auto_parts({})`), что приводит к дампу всей таблицы и перерасходу. Внедрены 3 уровня защиты:
+LLM склонна вызывать инструменты с пустыми аргументами (`grep_products({})`), что приводит к дампу всей таблицы и перерасходу. Внедрены 3 уровня защиты:
 
 ### Уровень 1 — JSON Schema Validation (MCP Gateway)
-- `search_*` тулы имеют `pattern` с `required: true` + `minLength: 1`
+- `grep_*` и `filter_*` тулы имеют `pattern` с `required: true` + `minLength: 1`
 - MCP гейтвей отклоняет pre-request если `pattern` отсутствует или пустой → `isError: true`
 - Реализуется через `Strategy.ToolParams()`, которая задаёт `Required: &t`
 
 ### Уровень 2 — Server-side guard (data-service)
-- `search.go`: `ParseRequest()` проверяет `pattern != ""` и `len(pattern) >= 1`, возвращает 400 при нарушении
-- `search.go`: `maxFilters=15`, `maxTotalConditions=25` — защита от ReDoS/token flood
-- `filter.go`: `parseFilterLimit` default `10`
+- `grep.go`: `ParseRequest()` проверяет `pattern != ""` и `len(pattern) >= 1`, возвращает 400 при нарушении
+- `grep.go`: `maxPatternLen=500`, `maxRegexLen=200`, `maxTokens=10` — защита от ReDoS
+- `filter.go`: `maxFilterValueLen=200`, `maxInValues=50`, `parseFilterLimit=10`
 - `Config.MCPTool` carries `Required: &t` — приходит через manifest в mcp-gateway и проверяется там
 
-### Уровень 3 — LLM Prompt Engineering
-- `llm.go`: hints описывают эффективный воркфлоу `distinct → count → search`
-- `llm.go`: explicit примеры `search_auto_parts(pattern='oil filter')`
-- `_build_tool_result` (api-service): error message содержит конкретный пример вызова
-- `llm.go` hints не содержат relationship tools (`products_by_category`) — они убраны из манифеста
-
-### Filtering старых/relationship тулов
-`mcp.go:GenerateMCPTools()` строит `hasStrategy` map. Если entity входит в strategy:
-- `find_*` не генерируется (вместо него `search_*`)
-- `list_*` не генерируется (вместо него `search_*`)
-- `products_by_category` и прочие relationship тулы не генерируются
+### Уровень 3 — Empty Hints (schema tool)
+- При `total=0` grep/filter возвращают `empty_hint` с подсказкой: `"Try schema_{entity}() to discover available values"`
+- LLM видит подсказку и вызывает `schema_{entity}()` вместо циклических пустых попыток
 
 ### Security limits per strategy
 
 | Strategy | Limits |
 |----------|--------|
-| `search` (search.go) | `maxFilters=15`, `maxTotalConditions=25`, `pattern minLength=1` |
-| `grep` (grep.go) | `maxFilterValueLen`, `maxRegexLen` (default 200), `maxValues` for `field__in` (default 100) |
-| `filter` (filter.go) | `parseFilterLimit` default 10 |
-| `simple` (simple.go) | — |
+| `grep` (grep.go) | `maxPatternLen=500`, `maxRegexLen=200`, `maxTokens=10`, `maxFields=20` |
+| `filter` (filter.go) | `maxFilterValueLen=200`, `maxInValues=50`, `maxFilters=15` |
+| `schema` (schema.go) | нет — только discovery (read-only) |
 
 ### Logging
 - `stages.py`: логгирует `name`, `arguments`, `iteration` до/после/при ошибке

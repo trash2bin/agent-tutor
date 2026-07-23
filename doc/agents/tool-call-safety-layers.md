@@ -140,8 +140,19 @@ ctx.had_tool_calls_this_iteration = False
 
 ## Тесты
 
-Все 53 теста в `test_tool_parser_extensive.py` + 5 в `test_json_tool_calls_parsing.py` покрывают:
-- Все форматы NDJSON/массив/markdown/inline
-- Утечку токенов в трёх сценариях
-- Iteration budget на tool-round
-- OpenAPI-style function wrapper
+Тесты в `test_tool_parser_extensive.py` (48 тестов) + `test_orchestrator_e2e.py`
+(`TestLLMAgentWithProtocolProvider`, 2 теста) покрывают:
+
+| Категория | Класс | Тестов | Что проверяет |
+|-----------|-------|--------|---------------|
+| Unit: ToolCallParser | `TestToolParser` | ~23 | NDJSON, JSON array, dict, OpenAI wrapper, _from_native_tool_calls, edge cases |
+| Unit: Safety Net | `TestSafetyNet` | 12 | catch/allows — false positive prevention |
+| Pipeline E2E | `TestE2EPipeline` | 6 | NDJSON/array/OpenAI → pipeline → tool executes → final |
+| Token leak | `TestTokenLeak` | 3 | content_tokens не утекают с сырым JSON |
+| Iteration budget | `TestIterationBudget` | 1 | tool-раунды не расходуют iteration |
+| Real-world formats | `TestRealWorldFormats` | 4 | NDJSON, mixed, OpenAI, wrapper object |
+
+**Ключевые регрессии:**
+- Double-encoding fix: `test_layer1_arguments_not_double_encoded`
+- Safety net pipeline: `test_safety_net_blocks_unparseable_json`
+- Full orchestrator LAYER 1/LAYER 2: `TestLLMAgentWithProtocolProvider` (`test_orchestrator_e2e.py`)

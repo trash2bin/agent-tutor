@@ -439,7 +439,7 @@ class TestMCPProvider:
 
     # ── MCPToolProvider protocol implementation ─────────────────────────
 
-    async def get_session(self, tenant_ids=None):  # noqa: ANN401
+    def get_session(self, tenant_ids=None):  # noqa: ANN401
         return _TestSessionProxy(self)
 
     async def list_tools(self, session) -> list[dict]:  # noqa: ANN401
@@ -468,11 +468,21 @@ class TestMCPProvider:
 
 
 class _TestSessionProxy:
-    """Thin proxy that delegates back to TestMCPProvider."""
+    """Thin proxy that delegates back to TestMCPProvider.
+
+    Also supports ``async with`` (for LLMAgent.stream_events()),
+    and direct use without context manager (for make_pipeline_ctx()).
+    """
 
     def __init__(self, provider: TestMCPProvider) -> None:
         self._provider = provider
         self.tenant_ids: list[str] = []
+
+    async def __aenter__(self) -> _TestSessionProxy:
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        pass
 
     async def list_tools(self) -> list[dict]:
         return await self._provider.list_tools(self)
@@ -645,7 +655,7 @@ async def make_pipeline_ctx(
     )
 
     # Use session proxy (same pattern as production MCPClient)
-    mcp_session = await mcp.get_session()
+    mcp_session = mcp.get_session()
 
     ctx = PipelineContext(
         turn=turn,
