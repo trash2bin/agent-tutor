@@ -130,6 +130,9 @@ func (s *GrepStrategy) ParseRequest(r *http.Request, entity config.Entity, a Ada
 				if f.Column == "tenant_id" {
 					continue
 				}
+				if f.ExcludeFromSearch {
+					continue
+				}
 				searchFields = append(searchFields, f)
 			}
 		}

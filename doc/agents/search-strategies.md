@@ -33,8 +33,6 @@ DB.QueryContext(sql, args...)
 |---|---|---|
 | RawWhere (строковая конкатенация) | **Condition-based** (Expression AST) | Безопасность, tenant isolation |
 | `search_{entity}` (grep+filter) | **Нет** — только grep / filter отдельно | LLM проще понять отдельные тулы |
-| `find_*`, `list_*` | **Нет** | replaced by grep/filter |
-| `simple_{entity}` | **Нет** | backward compat больше не нужен |
 | Strategy interface как entry | **DataSource interface** | Подготовка к не-SQL бэкендам |
 | RawWhere tenant isolation (костыль) | **Condition-based tenant filter** | Гарантированная изоляция |
 | Ошибки БД наружу | **Generic error + structured log** | Безопасность |
@@ -317,8 +315,6 @@ HTTP response → {"error": "query_failed", "message": "Query execution failed. 
 | `get_by_id` | `get_{entity}` | configgen direct |
 | `count` | `count_{entity}` | configgen direct |
 | `distinct` | `distinct_{entity}` | configgen direct |
-
-**Больше не генерируются:** `search_*`, `simple_*`, `find_*`, `list_*`, relationship tools.
 
 ## DataSource Interface (для не-SQL бэкендов)
 

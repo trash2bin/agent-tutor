@@ -491,12 +491,11 @@ class TestAutoShopStrategies:
             f"schema_auto_parts not found in tools: {[n for n in tool_names if 'schema' in n]}"
         )
 
-        # Не должно быть устаревших тулов search_*/simple_*
-        # find_* и list_* — легитимны (backward compat для не-strategy entity)
-        bad_search = [n for n in tool_names if n.startswith(("search_", "simple_"))]
-        assert len(bad_search) == 0, f"Old search_*/simple_* tools still present: {bad_search}"
+        # Не должно быть устаревших тулов
+        bad_old = [n for n in tool_names if n.startswith(("search_", "simple_", "find_", "list_")) or "_by_" in n]
+        assert len(bad_old) == 0, f"Legacy tools still present: {bad_old}"
 
-        print(f"\n  ✅ Manifest: grep, filter, schema — правильные тулы (find_* OK как legacy)")
+        print(f"\n  ✅ Manifest: только grep, filter, schema — нет легаси ({len(tool_names)} total)")
 
     def test_orders_filter_by_status(self, auto_shop_tenant):
         """Filter заказов по статусу."""

@@ -784,7 +784,7 @@ async def list_llm_providers():
     """List all LLM providers with masked API keys."""
     store = get_provider_store()
     return {
-        "providers": store.list_providers(),
+        "providers": await store.list_providers(),
         "fallback_enabled": store.get_fallback_enabled(),
     }
 
@@ -807,7 +807,7 @@ async def get_llm_provider(name: str):
     from fastapi import HTTPException
 
     store = get_provider_store()
-    provider = store.get_provider(name)
+    provider = await store.get_provider(name)
     if not provider:
         raise HTTPException(status_code=404, detail=f"Provider '{name}' not found")
     return provider
@@ -829,7 +829,7 @@ async def add_llm_provider(body: dict):
 
     store = get_provider_store()
     try:
-        result = store.add_provider(
+        result = await store.add_provider(
             name=body["name"],
             model=body["model"],
             provider=body.get("provider", ""),
@@ -855,7 +855,7 @@ async def update_llm_provider(name: str, body: dict):
     from fastapi import HTTPException
 
     store = get_provider_store()
-    result = store.update_provider(
+    result = await store.update_provider(
         name=name,
         model=body.get("model"),
         provider=body.get("provider"),
@@ -875,7 +875,7 @@ async def delete_llm_provider(name: str):
     from fastapi import HTTPException
 
     store = get_provider_store()
-    if not store.delete_provider(name):
+    if not await store.delete_provider(name):
         raise HTTPException(status_code=404, detail=f"Provider '{name}' not found")
     return {"deleted": True}
 

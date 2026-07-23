@@ -26,6 +26,7 @@ from .models import CompletionRequest
 from .pipeline import PipelineContext
 from .prompts import FALLBACK_GENERIC
 from .token_estimator import trim_for_fallback
+from .tool_parser import ToolCallParser
 from .types import (
     AgentEvent,
     ErrorEventData,
@@ -376,12 +377,20 @@ class LLMStage:
             iteration=ctx.turn.iteration,
         )
 
-        # ── Стримим токены ────────────────────────────────────────────
-        for token in response.content_tokens:
-            yield AgentEvent("token", {"data": token})
-
-        # ── Определяем outcome ────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════
+        # LAYER 1 — LiteLLM returned structured tool_calls
+        # ──────────────────────────────────────────────────────────────────
+        # Either the model natively supports function calling, or
+        # add_function_to_prompt parsed the text response back into
+        # msg.tool_calls. In either case, no manual parsing needed.
+        # content_tokens are NOT streamed here — they contain the raw
+        # LLM output which may include inline JSON tool definitions.
+        # Streaming happens ONLY in the final path (LAYER 3).
+        # ══════════════════════════════════════════════════════════════════
         if response.tool_calls:
+            # LiteLLM вернула структурированные tool_calls
+            # (родная поддержка модели + add_function_to_prompt)
+            ctx.had_tool_calls_this_iteration = True
             ctx.turn.pending_calls = response.tool_calls
             yield AgentEvent(
                 "status",
@@ -403,6 +412,86 @@ class LLMStage:
             return  # let ToolExecutionStage handle calls
 
         elif response.content:
+            # ══════════════════════════════════════════════════════════════
+            # LAYER 2 — Fallback: ToolCallParser extracts tools from text
+            # ──────────────────────────────────────────────────────────────
+            # If LiteLLM didn't parse tool calls (model returned JSON as
+            # plain text despite add_function_to_prompt), try to extract
+            # them from content manually. Supports: NDJSON, JSON arrays,
+            # OpenAI-style function wrappers, markdown code blocks, inline.
+            # Still does NOT stream content_tokens — they contain raw JSON.
+            # ══════════════════════════════════════════════════════════════
+            parser = ToolCallParser()
+            parsed = parser.extract_tool_calls({"content": response.content})
+            if parsed:
+                logger.info(
+                    "[LLM_STAGE][TOOL_PARSER] Extracted %d tool calls from JSON text "
+                    "(LiteLLM didn't parse them, fallback parser caught them)",
+                    len(parsed),
+                )
+                # Pre-resolve name from function dict if needed
+                pending = []
+                for tc in parsed:
+                    name = tc.get("name", "")
+                    args = tc.get("arguments", {})
+                    call_id = tc.get("id", f"call_{uuid.uuid4().hex[:8]}")
+                    pending.append({"name": name, "arguments": args, "id": call_id})
+                ctx.had_tool_calls_this_iteration = True
+                ctx.turn.pending_calls = pending
+                yield AgentEvent(
+                    "status",
+                    StatusEventData(
+                        phase="tool_calls",
+                        iteration=ctx.turn.iteration,
+                    ),
+                )
+                formatted_tc = _format_tool_calls_for_message(pending)
+                assistant_msg: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": response.content or "",
+                }
+                if formatted_tc:
+                    assistant_msg["tool_calls"] = formatted_tc
+                ctx.turn.messages.append(assistant_msg)
+                ctx.turn.turn_messages.append(assistant_msg)
+                return  # let ToolExecutionStage handle calls
+
+            # ══════════════════════════════════════════════════════════════
+            # LAYER 3 — Safety net: block raw JSON from reaching the user
+            # ──────────────────────────────────────────────────────────────
+            # If both LAYER 1 and LAYER 2 failed (unrecognised format,
+            # malformed JSON, mixed text+JSON that parser missed), check
+            # if the content still looks like tool calls via heuristic
+            # pattern matching. If yes, emit error instead of final.
+            # content_tokens are NEVER emitted in this path.
+            # ══════════════════════════════════════════════════════════════
+            if _looks_like_raw_json_tool_calls(response.content):
+                logger.warning(
+                    "[LLM_STAGE][SAFETY_NET] BLOCKED final: content looks like raw "
+                    "JSON tool calls (LiteLLM+ToolParser both failed). "
+                    "Content[0:200]=%s",
+                    response.content[:200],
+                )
+                err_msg = (
+                    "Ошибка: модель вернула необработанный JSON-запрос. "
+                    "Попробуйте переформулировать вопрос."
+                )
+                ctx.turn.final_content = err_msg
+                ctx.should_stop = True
+                yield AgentEvent("error", {"message": err_msg})
+                return
+
+            # ══════════════════════════════════════════════════════════════
+            # TRUE FINAL — stream tokens to the user
+            # ──────────────────────────────────────────────────────────────
+            # We only reach here if ALL THREE LAYERS above concluded that
+            # the response is NOT tool calls — it's a genuine final answer.
+            # content_tokens are safe to stream. This is the ONLY path
+            # that yields token events to the user.
+            # ══════════════════════════════════════════════════════════════
+            for token in response.content_tokens:
+                yield AgentEvent("token", {"data": token})
+
             ctx.turn.final_content = response.content
             assistant_msg = {
                 "role": "assistant",
@@ -472,6 +561,49 @@ class LLMStage:
                 ),
             )
             return
+
+
+def _looks_like_raw_json_tool_calls(content: str) -> bool:
+    """Safety net: проверка что ``final`` не уйдёт с голым JSON тулов.
+
+    Если контент похож на JSON с ``name`` + ``arguments`` или
+    ``function`` + ``name`` — блокируем. Даже если парсер не нашёл.
+    Лучше error чем leak.
+    """
+    stripped = content.strip()
+
+    # NDJSON или массив
+    if stripped.startswith("{") and "name" in stripped and "arguments" in stripped:
+        return True
+    if stripped.startswith("[") and "name" in stripped and "arguments" in stripped:
+        return True
+    if "Tool Calls" in stripped or "tool_calls" in stripped:
+        return True
+    if "name" in stripped and "arguments" in stripped:
+        # Must have the structure: {"name"..."arguments"...}
+        try:
+            import json as _json
+
+            parsed = _json.loads(stripped)
+            # array of tool-like objects or a single tool-like object
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, dict):
+                        n = item.get("name", "") or (item.get("function") or {}).get(
+                            "name", ""
+                        )
+                        if n:
+                            return True
+            elif isinstance(parsed, dict):
+                n = parsed.get("name", "") or (parsed.get("function") or {}).get(
+                    "name", ""
+                )
+                if n and ("arguments" in parsed or "args" in parsed):
+                    return True
+        except (_json.JSONDecodeError, TypeError):
+            pass
+
+    return False
 
 
 def _format_tool_calls_for_message(tool_calls: list[dict]) -> list[dict]:

@@ -70,8 +70,6 @@ mcp-gateway: buildTools() — строит toolDefs из cfg.MCPTools
 | `count_{entity}` | Direct | configgen inline |
 | `distinct_{entity}` | Direct | configgen inline |
 
-**Больше не генерируются:** `search_*`, `simple_*`, `find_*`, `list_*`, relationship tools.
-
 ## Три уровня защиты от пустых/опасных вызовов
 
 | Уровень | Где | Что проверяет |

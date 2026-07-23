@@ -67,10 +67,9 @@ func (o Op) Valid() bool {
 }
 
 // validStrategy проверяет, что имя strategy входит в whitelist.
-// LEGACY: "search" и "simple" будут удалены в следующем коммите.
 func validStrategy(s string) bool {
 	switch s {
-	case "grep", "filter", "search", "simple", "schema":
+	case "grep", "filter", "schema":
 		return true
 	}
 	return false
@@ -339,6 +338,10 @@ type EntityField struct {
 
 	// Description — описание поля.
 	Description string `json:"description,omitempty"`
+
+	// ExcludeFromSearch — не участвует в поиске (grep/filter).
+	// Полезно для PII-полей (email, phone, passport).
+	ExcludeFromSearch bool `json:"exclude_from_search,omitempty"`
 }
 
 // Relation — связь между сущностями.
@@ -654,7 +657,7 @@ func (c *Config) Validate() error {
 				errs = append(errs, fmt.Sprintf("endpoints[%d].search_field: required for op=find", i))
 			}
 			if ep.Strategy != "" && !validStrategy(ep.Strategy) {
-				errs = append(errs, fmt.Sprintf("endpoints[%d].strategy: unknown %q, must be one of: grep, filter, search, simple, schema", i, ep.Strategy))
+				errs = append(errs, fmt.Sprintf("endpoints[%d].strategy: unknown %q, must be one of: grep, filter, schema", i, ep.Strategy))
 			}
 		case OpCustomQuery:
 			if ep.QueryID == "" {

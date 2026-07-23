@@ -58,13 +58,16 @@ func (s *SchemaStrategy) ParseRequest(r *http.Request, entity config.Entity, a A
 
 // FieldInfo возвращает информацию о поле для schema-ответа.
 func (s *SchemaStrategy) FieldInfo(entity config.Entity) []config.EntityField {
-	// Исключаем PK и tenant_id из schema
+	// Исключаем PK, tenant_id, ExcludeFromSearch из schema
 	var fields []config.EntityField
 	for _, f := range entity.Fields {
 		if f.PrimaryKey != nil && *f.PrimaryKey {
 			continue
 		}
 		if f.Column == "tenant_id" {
+			continue
+		}
+		if f.ExcludeFromSearch {
 			continue
 		}
 		fields = append(fields, f)

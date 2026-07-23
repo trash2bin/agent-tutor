@@ -27,6 +27,9 @@ func stringFields(entity config.Entity) []config.EntityField {
 		if f.Column == "tenant_id" {
 			continue // Tenant isolation: не допускаем поиск по tenant_id
 		}
+		if f.ExcludeFromSearch {
+			continue // PII/excluded: не участвует в поиске
+		}
 		if f.Type == config.FieldTypeString {
 			result = append(result, f)
 		}

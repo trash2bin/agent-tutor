@@ -340,10 +340,13 @@ def setup_module() -> None:
     filter_count = len([n for n in names if n.startswith("filter_")])
     schema_count = len([n for n in names if n.startswith("schema_")])
     search_count = len([n for n in names if n.startswith("search_")])
+    find_count = len([n for n in names if n.startswith(("find_", "list_")) or "_by_" in n])
     print(f"     Total tools: {len(names)}")
     print(f"     grep_*: {grep_count}, filter_*: {filter_count}, schema_*: {schema_count}")
     print(f"     search_*: {search_count} (should be 0)")
+    print(f"     find_*/list_*/_by_*: {find_count} (should be 0)")
     assert search_count == 0, f"search_* tools should not exist! Found: {search_count}"
+    assert find_count == 0, f"legacy find_*/list_*/_by_* tools should not exist! Found: {find_count}"
 
     # Check API is healthy
     resp = requests.get(f"{api_service_url()}/health", timeout=5)
@@ -452,10 +455,10 @@ class TestLLME2E:
         assert len(result1["tool_calls"]) > 0 or result1["final_text"], f"First query failed: {result1.get('errors',[])}"
         assert len(result2["tool_calls"]) > 0 or result2["final_text"], f"Second query failed: {result2.get('errors',[])}"
 
-        # No search_* in either
+        # No legacy tools in either
         for name, r in [("first", result1), ("second", result2)]:
-            bad = [tc.get("name") for tc in r["tool_calls"] if tc.get("name", "").startswith("search_")]
-            assert len(bad) == 0, f"{name} query used search_*: {bad}"
+            bad = [tc.get("name") for tc in r["tool_calls"] if tc.get("name", "").startswith(("search_", "simple_", "find_", "list_")) or "_by_" in tc.get("name", "")]
+            assert len(bad) == 0, f"{name} query used legacy tools: {bad}"
 
     # ── helpers ──
 
@@ -549,6 +552,6 @@ class TestLLME2E:
         if errors and not has_tools and not has_response:
             pytest.fail(f"LLM pipeline failed: {errors}")
 
-        # No search_* tools
-        bad = [tc for tc in tool_calls if tc.get("name", "").startswith("search_")]
-        assert len(bad) == 0, f"search_* tools still used: {[b.get('name') for b in bad]}"
+        # No legacy tools
+        bad = [tc for tc in tool_calls if tc.get("name", "").startswith(("search_", "simple_", "find_", "list_")) or "_by_" in tc.get("name", "")]
+        assert len(bad) == 0, f"Legacy tools still used: {[b.get('name') for b in bad]}"

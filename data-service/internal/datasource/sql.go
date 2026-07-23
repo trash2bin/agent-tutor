@@ -84,6 +84,9 @@ func searchableStringFields(entity config.Entity) []config.EntityField {
 		if f.Column == "tenant_id" {
 			continue
 		}
+		if f.ExcludeFromSearch {
+			continue
+		}
 		if f.Type == config.FieldTypeString {
 			result = append(result, f)
 		}
@@ -91,7 +94,7 @@ func searchableStringFields(entity config.Entity) []config.EntityField {
 	return result
 }
 
-// filterableFields возвращает все поля для фильтрации (исключая PK, tenant_id).
+// filterableFields возвращает все поля для фильтрации (исключая PK, tenant_id, ExcludeFromSearch).
 func filterableFields(entity config.Entity) []config.EntityField {
 	var result []config.EntityField
 	for _, f := range entity.Fields {
@@ -99,6 +102,9 @@ func filterableFields(entity config.Entity) []config.EntityField {
 			continue
 		}
 		if f.Column == "tenant_id" {
+			continue
+		}
+		if f.ExcludeFromSearch {
 			continue
 		}
 		result = append(result, f)

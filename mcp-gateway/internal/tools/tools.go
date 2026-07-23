@@ -412,19 +412,6 @@ func deriveToolName(ep config.Endpoint) string {
 	switch ep.Op {
 	case config.OpGetByID:
 		return "get_" + entityName
-	case config.OpFind:
-		return "find_" + entityName
-	case config.OpList:
-		return "list_" + entityName
-	case config.OpCustomQuery:
-		if ep.QueryID != "" {
-			return ep.QueryID
-		}
-		// Sanitise: strip { and } — Mistral rejects these in function names.
-		path := strings.Trim(ep.Path, "/")
-		path = strings.ReplaceAll(path, "{", "")
-		path = strings.ReplaceAll(path, "}", "")
-		return strings.ReplaceAll(path, "/", "_")
 	default:
 		return ""
 	}
@@ -452,31 +439,12 @@ func buildDefaultDesc(ep config.Endpoint, entities []config.Entity) string {
 	case config.OpGetByID:
 		desc := fmt.Sprintf(
 			"Returns data about %s by its unique identifier. "+
-				"Use when you already know the record ID (e.g. from find_%s or list_%s).",
-			entityName, entityName, entityName)
+				"Use after grep_%s when you have a specific ID.",
+			entityName, entityName)
 		if entityDesc != "" {
 			desc += fmt.Sprintf(" %s: %s", entityName, entityDesc)
 		}
 		return desc
-	case config.OpFind:
-		desc := fmt.Sprintf(
-			"Searches for %s by text query.",
-			entityName)
-		if ep.SearchField != "" {
-			desc += fmt.Sprintf(" Search is done on the '%s' field.", ep.SearchField)
-		}
-		desc += " If no search parameter is provided, returns full list of all records."
-		if entityDesc != "" {
-			desc += fmt.Sprintf(" %s: %s", entityName, entityDesc)
-		}
-		return desc
-	case config.OpList:
-		return fmt.Sprintf("Returns full list of all %s.", entityName)
-	case config.OpCustomQuery:
-		if entityName != "" {
-			return fmt.Sprintf("Executes custom query: %s", entityName)
-		}
-		return "Executes custom query"
 	default:
 		return fmt.Sprintf("Executes query %s", ep.Path)
 	}
@@ -528,28 +496,7 @@ func deriveParams(ep config.Endpoint, entities []config.Entity) []config.Endpoin
 		})
 	}
 
-	// 4. For find/list: add search query param — с явной подсказкой, что он опционален
-	if ep.Op == config.OpFind || ep.Op == config.OpList {
-		qp := ep.QueryParam
-		if qp == "" {
-			qp = ep.SearchField
-		}
-		if qp != "" {
-			required := false
-			desc := fmt.Sprintf("Text query to search %s by name. If omitted, returns all records.", ep.Entity)
-			if ep.SearchField != "" {
-				desc = fmt.Sprintf("Text query to search %s by field '%s'. If omitted, returns all records.",
-					ep.Entity, ep.SearchField)
-			}
-			params = append(params, config.EndpointParam{
-				Name:        qp,
-				In:          config.ParamInQuery,
-				Type:        config.ParamTypeString,
-				Required:    &required,
-				Description: desc,
-			})
-		}
-	}
+
 
 	return params
 }

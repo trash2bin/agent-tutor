@@ -21,7 +21,7 @@ func GenerateMCPTools(endpoints []config.Endpoint, entities []config.Entity, dis
 			continue
 		}
 
-		// Strategy-based endpoints (grep, filter, simple, search)
+		// Strategy-based endpoints (grep, filter, schema)
 		// Use the strategy's ToolName/ToolDescription/ToolParams.
 		if ep.Strategy != "" {
 			// Find entity config for strategy params
@@ -43,7 +43,6 @@ func GenerateMCPTools(endpoints []config.Endpoint, entities []config.Entity, dis
 		}
 
 		var toolName, desc, displayName string
-		ent := entityMap[ep.Entity]
 
 		switch ep.Op {
 		case config.OpGetByID:
@@ -53,31 +52,6 @@ func GenerateMCPTools(endpoints []config.Endpoint, entities []config.Entity, dis
 					"Use after grep_%s when you have a specific ID.",
 				ep.Entity, ep.Entity)
 			displayName = toolDisplayName(string(config.OpGetByID), ep.Entity, displayPrefixes, customPlurals)
-
-		case config.OpFind:
-			// LEGACY: find_* — будет удалён в следующем коммите.
-			// LLM должна использовать grep_{entity}(pattern=...) вместо find_{entity}.
-			toolName = fmt.Sprintf("find_%s", ep.Entity)
-			filters := compactFilterSummary(ent)
-			if filters != "" {
-				desc = fmt.Sprintf(
-					"[LEGACY] Search %s by name (partial match). Filters: %s.",
-					pluralizeEntity(ep.Entity, displayPrefixes, customPlurals), filters)
-			} else {
-				desc = fmt.Sprintf(
-					"[LEGACY] Search %s by text query. Use grep_%s(pattern='...') instead.",
-					pluralizeEntity(ep.Entity, displayPrefixes, customPlurals), ep.Entity)
-			}
-			displayName = toolDisplayName(string(config.OpFind), ep.Entity, displayPrefixes, customPlurals)
-
-		case config.OpList:
-			// LEGACY: list_* — будет удалён в следующем коммите.
-			// LLM должна использовать grep_{entity}(limit=...) или filter_{entity}.
-			toolName = fmt.Sprintf("list_%s", ep.Entity)
-			desc = fmt.Sprintf(
-				"[LEGACY] List all %s. Use grep_%s(pattern='...') or filter_%s() instead.",
-				pluralizeEntity(ep.Entity, displayPrefixes, customPlurals), ep.Entity, ep.Entity)
-			displayName = toolDisplayName(string(config.OpList), ep.Entity, displayPrefixes, customPlurals)
 
 		case config.OpDistinct:
 			toolName = fmt.Sprintf("distinct_%s", ep.Entity)
@@ -96,38 +70,7 @@ func GenerateMCPTools(endpoints []config.Endpoint, entities []config.Entity, dis
 				pluralizeEntity(ep.Entity, displayPrefixes, customPlurals))
 			displayName = toolDisplayName(string(config.OpCount), ep.Entity, displayPrefixes, customPlurals)
 
-		case config.OpCustomQuery:
-			// LEGACY: relationship tools (*_by_*) — будет удалён в следующем коммите.
-			// LLM должна использовать filter_{entity}({fk_field}=...) вместо _by_* тулов.
-			// Short name: {child_plural}_by_{parent} (e.g. "products_by_brand")
-			pathParts := strings.Split(strings.Trim(ep.Path, "/"), "/")
-			parentName := ""
-			if len(pathParts) >= 1 {
-				parentName = pathParts[0]
-			}
-			if parentName == "" {
-				parts := strings.Split(ep.QueryID, "_by_")
-				if len(parts) == 2 {
-					parentName = parts[1]
-				}
-			}
-			childShort := ep.Entity
-			for _, pfx := range displayPrefixes {
-				childShort = strings.TrimPrefix(childShort, pfx)
-			}
-			parentShort := parentName
-			for _, pfx := range displayPrefixes {
-				parentShort = strings.TrimPrefix(parentShort, pfx)
-			}
-			toolName = fmt.Sprintf("%s_by_%s", pluralizeEntity(ep.Entity, displayPrefixes, customPlurals), parentShort)
-			displayName = fmt.Sprintf("%s by %s", pluralizeEntity(ep.Entity, displayPrefixes, customPlurals), parentShort)
 
-			// Strategic description: guides LLM workflow
-			desc = fmt.Sprintf(
-				"[LEGACY] Get all %s for a given %s. "+
-					"Use filter_%s({fk_field}=...) instead — it is more flexible.",
-				pluralizeEntity(ep.Entity, displayPrefixes, customPlurals), parentShort,
-				pluralizeEntity(ep.Entity, displayPrefixes, customPlurals))
 		}
 
 		if toolName != "" {
@@ -166,26 +109,6 @@ func deriveToolParams(ep config.Endpoint) []config.EndpointParam {
 			Required:    &required,
 			Description: fmt.Sprintf("Unique identifier for %s", ep.Entity),
 		})
-	}
-
-	// 2. Query param для поиска (find/list)
-	if ep.Op == config.OpFind || ep.Op == config.OpList {
-		qp := ep.QueryParam
-		if qp == "" {
-			qp = ep.SearchField
-		}
-		if qp != "" {
-			required := false
-			desc := fmt.Sprintf("Text query to search %s by field '%s'. If omitted, returns all records.",
-				ep.Entity, ep.SearchField)
-			params = append(params, config.EndpointParam{
-				Name:        qp,
-				In:          config.ParamInQuery,
-				Type:        config.ParamTypeString,
-				Required:    &required,
-				Description: desc,
-			})
-		}
 	}
 
 	return params

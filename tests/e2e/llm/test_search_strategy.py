@@ -109,8 +109,8 @@ class TestSearchMCP:
         assert len(filter_tools) > 0, f"No filter_*! Names: {names}"
         assert len(schema_tools) > 0, f"No schema_*! Names: {names}"
 
-        bad_old = [n for n in names if n.startswith(("search_", "simple_", "find_", "list_"))]
-        assert len(bad_old) == 0, f"Old tools still present: {bad_old}"
+        bad_old = [n for n in names if n.startswith(("search_", "simple_", "find_", "list_")) or "_by_" in n]
+        assert len(bad_old) == 0, f"Legacy tools still present: {bad_old}"
         print(f"\n  ✅ grep_* tools ({len(grep_tools)}): {grep_tools}")
         print(f"  ✅ filter_* tools ({len(filter_tools)}): {filter_tools}")
         print(f"  ✅ schema_* tools ({len(schema_tools)}): {schema_tools}")

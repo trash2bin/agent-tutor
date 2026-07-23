@@ -18,6 +18,19 @@ from .models import CompletionRequest, CompletionResponse, UsageInfo
 
 logger = logging.getLogger("api_service.agent.litellm_provider")
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAYER 1 (primary): LiteLLM's built-in function-to-prompt conversion
+# ═══════════════════════════════════════════════════════════════════════════════
+# Contract: LiteLLM wraps tools/{'function':{...}} into a text prompt for
+# models without native function calling (Ollama, local models, MiniMax).
+# It then parses the model's text response back into msg.tool_calls so
+# LLMStage sees structured tool_calls. This is the FIRST line of defence.
+#
+# If this flag is OFF, models without native tool support write JSON tool
+# calls as plain text in content — which may leak to the user unless
+# LAYER 2 (ToolCallParser) or LAYER 3 (safety net) catch it.
+litellm.add_function_to_prompt = True
+
 
 class LiteLLMProvider:
     """Реализует LLMProvider через LiteLLM.
@@ -103,6 +116,13 @@ class LiteLLMProvider:
                         "arguments": tc.function.arguments or "{}",
                     },
                 }
+            )
+
+        if tool_calls:
+            logger.info(
+                "[LITELLM_PROVIDER] Model returned %d tool_calls via native/"
+                "add_function_to_prompt path (not fallback parser)",
+                len(tool_calls),
             )
 
         reasoning: str | None = getattr(msg, "reasoning_content", None)

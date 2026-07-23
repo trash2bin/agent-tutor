@@ -109,10 +109,11 @@ class LLMAgent:
             ],
         )
 
-        # ── Settings ────────────────────────────────────────────────────
-        self.max_iterations = settings.agent_max_iterations
-        self.max_empty_rounds = settings.agent_max_empty_rounds
-        self.max_turn_tokens = settings.agent_max_turn_tokens
+        # ── Settings (live, not cached) ──────────────────────────────────
+        # Settings are mutated at runtime by LiveAbuseProvider.apply_runtime_settings().
+        # We keep a reference to the settings module and read values fresh on each
+        # request instead of caching them in __init__.
+        self._settings = settings
 
     # ── Public entry points ──────────────────────────────────────────────
 
@@ -212,8 +213,9 @@ class LLMAgent:
                 model = provider_data.get("model", "")
                 if not model:
                     continue
-                if not provider_data.get("api_key"):
-                    continue
+                # Allow empty api_key — local providers (Ollama, local) don't need one.
+                # LiteLLM handles auth-less calls gracefully when api_key is empty.
+                # The key requirement was blocking local Ollama providers from working.
                 found = (name, provider_data)
                 break
 
@@ -275,9 +277,9 @@ class LLMAgent:
                         spending=async_spending,
                         backlog=async_backlog,
                         guard_checker=get_guard_checker(),
-                        max_iterations=self.max_iterations,
-                        max_empty_rounds=self.max_empty_rounds,
-                        max_turn_tokens=self.max_turn_tokens,
+                        max_iterations=self._settings.agent_max_iterations,
+                        max_empty_rounds=self._settings.agent_max_empty_rounds,
+                        max_turn_tokens=self._settings.agent_max_turn_tokens,
                     )
 
                     async for event in self._pipeline.run(pipeline_ctx):

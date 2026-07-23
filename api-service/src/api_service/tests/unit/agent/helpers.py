@@ -166,6 +166,132 @@ class llm_response:
         )
 
     @staticmethod
+    def text_tool_calls_mixed(
+        prefix_text: str,
+        calls: list[tuple[str, dict[str, Any]]],
+        suffix_text: str = "",
+        format: str = "json_array",
+        reasoning: str | None = None,
+    ) -> CompletionResponse:
+        """Model returns text + JSON tool calls смиксованные вместе.
+
+        Реальный сценарий с MiniMax (и многими локальными моделями):
+        модель пишет "Нашёл 4 позиции. Давайте посмотрим:Tool Calls: [{...}]"
+        или "Вот что я нашёл:\n{"name": "get_product", ...}".
+
+        Параметры:
+            prefix_text: текст до JSON (естественный язык)
+            calls: список (name, args) тулов
+            suffix_text: текст после JSON
+            format: "json_array" | "ndjson" | "openai_tool_calls" | "inline"
+            reasoning: reasoning_content (опционально)
+        """
+        import json as _json
+
+        if format == "ndjson":
+            # Line-delimited JSON: каждая строка отдельный тул
+            lines = []
+            for name, args in calls:
+                lines.append(
+                    _json.dumps({"name": name, "arguments": args}, ensure_ascii=False)
+                )
+            json_part = "\n".join(lines)
+        elif format == "openai_tool_calls":
+            # OpenAI формат с type="function"
+            arr = []
+            for i, (name, args) in enumerate(calls):
+                arr.append(
+                    {
+                        "id": f"call_{i}",
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": _json.dumps(args, ensure_ascii=False),
+                        },
+                    }
+                )
+            json_part = _json.dumps(arr, ensure_ascii=False)
+        elif format == "inline":
+            # NDJSON mixed in text
+            lines = []
+            lines.append(prefix_text.rstrip())
+            for name, args in calls:
+                lines.append(
+                    _json.dumps({"name": name, "arguments": args}, ensure_ascii=False)
+                )
+            lines.append(suffix_text)
+            text = "\n".join(lines)
+            tokens = list(text)
+            return CompletionResponse(
+                content=text,
+                content_tokens=tokens,
+                tool_calls=[],
+                reasoning_content=reasoning,
+                usage=UsageInfo(
+                    prompt_tokens=10,
+                    completion_tokens=len(tokens),
+                    total_tokens=10 + len(tokens),
+                ),
+                cost=0.001,
+            )
+        else:
+            # json_array: стандартный массив
+            arr = []
+            for name, args in calls:
+                arr.append({"name": name, "arguments": args})
+            json_part = _json.dumps(arr, ensure_ascii=False)
+
+        text = prefix_text.rstrip() + json_part + suffix_text
+        tokens = list(text)
+        return CompletionResponse(
+            content=text,
+            content_tokens=tokens,
+            tool_calls=[],
+            reasoning_content=reasoning,
+            usage=UsageInfo(
+                prompt_tokens=10,
+                completion_tokens=len(tokens),
+                total_tokens=10 + len(tokens),
+            ),
+            cost=0.001,
+        )
+
+    @staticmethod
+    def text_tool_calls(
+        calls: list[tuple[str, dict[str, Any]]],
+        reasoning: str | None = None,
+    ) -> CompletionResponse:
+        """Model returns tool calls AS JSON TEXT in content, not structured tool_calls.
+
+        Некоторые модели (MiniMax, локальные) не умеют возвращать
+        структурированные tool_calls через поле ``tool_calls``,
+        и пишут их как JSON-массив в content.
+        Этот фабричный метод эмулирует такое поведение для тестирования
+        парсинга в ``LLMStage``.
+
+        Пример: content = '[{{"name": "get_product", "arguments": {{"id": 1}}}}]'
+        """
+        import json as _json
+
+        arr = []
+        for name, args in calls:
+            arr.append({"name": name, "arguments": args})
+        text = _json.dumps(arr, ensure_ascii=False)
+        tokens = list(text)
+        return CompletionResponse(
+            content=text,
+            content_tokens=tokens,
+            tool_calls=[],  # NOT tool_calls — должен парситься из content
+            reasoning_content=reasoning,
+            usage=UsageInfo(
+                prompt_tokens=10,
+                completion_tokens=len(tokens),
+                total_tokens=10 + len(tokens),
+            ),
+            cost=0.001,
+        )
+
+    @staticmethod
     def error(message: str = "Simulated LLM error") -> CompletionResponse:
         """If you want to simulate an exception, don't use this — raise in complete() instead.
         This returns an empty response that will be treated as empty_round."""

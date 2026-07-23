@@ -83,6 +83,9 @@ func (s *FilterStrategy) ToolParams(entity config.Entity) []config.EndpointParam
 		if field.PrimaryKey != nil && *field.PrimaryKey {
 			continue
 		}
+		if field.ExcludeFromSearch {
+			continue // PII/excluded: не участвует в фильтрации
+		}
 
 		pt := fieldTypeToParamType(field.Type)
 
@@ -151,6 +154,9 @@ func (s *FilterStrategy) ParseRequest(r *http.Request, entity config.Entity, a A
 	// ── Build field map ─────────────────────────────────────────────
 	fieldMap := make(map[string]config.EntityField, len(entity.Fields))
 	for _, f := range entity.Fields {
+		if f.ExcludeFromSearch {
+			continue // PII/excluded: не участвует в фильтрации
+		}
 		fieldMap[f.Name] = f
 	}
 

@@ -167,6 +167,9 @@ func collectEmptyHint(ctx context.Context, db runtime.AdapterSubset, entity conf
 		if f.Column == "tenant_id" {
 			continue
 		}
+		if f.ExcludeFromSearch {
+			continue
+		}
 
 		qCol := a.QuoteIdentifier(f.Column)
 		distinctSQL := fmt.Sprintf("SELECT DISTINCT %s FROM %s WHERE %s IS NOT NULL ORDER BY %s LIMIT 5", qCol, qTable, qCol, qCol)

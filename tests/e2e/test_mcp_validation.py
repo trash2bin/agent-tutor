@@ -452,7 +452,7 @@ class TestLimitHasMaxBound:
 
 
 class TestNoLegacyTools:
-    """После v4 search_*, simple_*, find_*, list_* тулы не должны генерироваться
+    """После v4 search_*, simple_*, find_*, list_*, _by_* тулы не должны генерироваться
     для entity с grep/filter/schema стратегией."""
 
     def test_no_search_tools(self, tenant_context):
@@ -474,6 +474,16 @@ class TestNoLegacyTools:
                 f"simple_* тулы удалены в v4, но найден: {name}"
             )
         print(f"  ✅ Нет simple_* тулов")
+
+    def test_no_find_list_by_tools(self, tenant_context):
+        """find_*, list_*, _by_* тулы не должны генерироваться."""
+        tid, tools = tenant_context
+        names = [t["name"] for t in tools]
+        bad = [n for n in names if n.startswith(("find_", "list_")) or "_by_" in n]
+        assert len(bad) == 0, (
+            f"find_*/list_*/_by_* тулы удалены в v4, но найдены: {bad}"
+        )
+        print(f"  ✅ Нет find_*/list_*/_by_* тулов ({len(tools)} total)")
 
     def test_has_grep_filter_schema(self, tenant_context):
         """grep_*, filter_*, schema_* должны быть."""

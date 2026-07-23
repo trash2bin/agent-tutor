@@ -15,7 +15,7 @@ import (
 //   - как сгенерировать MCP tool definition (имя, описание, параметры)
 //   - какие колонки сущности использовать для компактного формата
 type Strategy interface {
-	// Name — уникальное имя стратегии ("grep", "filter", "simple", "list").
+	// Name — уникальное имя стратегии ("grep", "filter", "schema").
 	Name() string
 
 	// ParseRequest разбирает HTTP-запрос и entity в QueryPlan.

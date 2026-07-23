@@ -14,7 +14,7 @@ import (
 func TestMCPManifestHandler_WithTools(t *testing.T) {
 	cfg := &config.Config{
 		Endpoints: []config.Endpoint{
-			{Path: "/students", Op: "list", Entity: "student", Method: "GET"},
+			{Path: "/students", Op: "get_by_id", Entity: "student", Method: "GET"},
 		},
 		Entities: []config.Entity{
 			{
@@ -26,7 +26,7 @@ func TestMCPManifestHandler_WithTools(t *testing.T) {
 		},
 		CustomQueries: map[string]config.CustomQuery{},
 		MCPTools: []config.MCPTool{
-			{Name: "list_students", Description: "List all students"},
+			{Name: "get_student", Description: "Get student by ID"},
 		},
 	}
 
@@ -40,9 +40,9 @@ func TestMCPManifestHandler_WithTools(t *testing.T) {
 		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	// При всегда-регенерации имя тула = list_student (из entity name), не list_students
-	if !strings.Contains(body, "list_student") {
-		t.Errorf("response should contain list_student: %s", body)
+	// Регенерация: имя тула = get_student из endpoint
+	if !strings.Contains(body, "get_student") {
+		t.Errorf("response should contain get_student: %s", body)
 	}
 	if !strings.Contains(body, `"endpoints"`) {
 		t.Errorf("response should contain endpoints: %s", body)
@@ -53,7 +53,7 @@ func TestMCPManifestHandler_WithTools(t *testing.T) {
 func TestMCPManifestHandler_GenerateTools(t *testing.T) {
 	cfg := &config.Config{
 		Endpoints: []config.Endpoint{
-			{Path: "/students", Op: "list", Entity: "student", Method: "GET"},
+			{Path: "/students/{id}", Op: "get_by_id", Entity: "student", Method: "GET"},
 		},
 		Entities: []config.Entity{
 			{

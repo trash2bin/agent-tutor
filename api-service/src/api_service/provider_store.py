@@ -319,9 +319,9 @@ class ProviderStore:
 
             # Специальное значение __clear__ для очистки ключа
             if api_key == "__clear__":
-                cfg.api_key = ""  # type: ignore[assignment]
+                cfg.api_key = SecretStr("")  # type: ignore[assignment]
             elif api_key is not None and api_key != "":
-                cfg.api_key = api_key  # type: ignore[assignment]
+                cfg.api_key = SecretStr(api_key)  # type: ignore[assignment]
 
             self._save()
 
@@ -360,8 +360,10 @@ class ProviderStore:
     def get_active_router_config(self) -> list[dict[str, Any]]:
         """Возвращает конфигурацию для litellm.Router.
 
-        Только enabled провайдеры с model и api_key.
-        Ключи возвращаются полностью (для использования в коде).
+        Только enabled провайдеры с model.
+        api_key может быть пустым — LiteLLM сама решает пускать или нет.
+        (Оллима, локальные инференсы работают без ключа.)
+
         **Synchronous** — вызывается из ``create_fallback_client()``
         который может работать без event loop.
 
@@ -376,8 +378,6 @@ class ProviderStore:
             if not cfg.model:
                 continue
             api_key_str = cfg.api_key.get_secret_value() if cfg.api_key else ""
-            if not api_key_str:
-                continue
             entry: dict[str, Any] = {
                 "model_name": name,
                 "litellm_params": {

@@ -76,6 +76,9 @@ class PipelineContext:
     # Tool call counter (per turn, across all iterations)
     tool_call_count: int = 0
 
+    # True если в текущей итерации были tool_calls (не расходуем iteration)
+    had_tool_calls_this_iteration: bool = False
+
     # Состояние pipeline (не путать с turn)
     last_response: CompletionResponse | None = None
     should_stop: bool = False
@@ -242,7 +245,11 @@ class Pipeline:
                     break
 
             # ── Next iteration ─────────────────────────────────────────
-            ctx.turn.iteration += 1
+            # Не расходуем iteration когда в этом раунде были tool_calls
+            # (LLM сделала полезную работу, а не просто думала).
+            if not ctx.had_tool_calls_this_iteration:
+                ctx.turn.iteration += 1
+            ctx.had_tool_calls_this_iteration = False
             ctx.turn.pending_calls = []
 
         # ── Фаза 2: финализация ──────────────────────────────────────

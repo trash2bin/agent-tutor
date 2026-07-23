@@ -1,17 +1,20 @@
-# AGENTS.md — Технический паспорт проекта
+# 🧠 ПРАВИЛО РАБОТЫ С ДОКУМЕНТАЦИЕЙ
 
-Краткий архитектурный контекст. Детали — в `doc/agents/*`.
+**Перед любым ответом, который требует деталей (архитектура, поиск, конфиг, адаптеры, тестирование, CI/CD и т.п.) ОБЯЗАТЕЛЬНО прочитай соответствующий файл из `doc/agents/`, используя инструмент `read_file`.**  
+Никогда не полагайся только на краткое описание в этом файле или на код – детали всегда в отдельных документах.  
+
+# AGENTS.md — Технический паспорт проекта
 
 ## 🎯 1. О проекте
 
-B2B SaaS: клиент подключает свою БД → платформа интроспектирует схему → автоматически генерирует REST API + MCP-инструменты → AI-агент отвечает на вопросы над данными.
+B2B self-hosting SaaS: клиент подключает свою БД → платформа интроспектирует схему → автоматически генерирует REST API + MCP-инструменты → AI-агент отвечает на вопросы над данными.
 
 ### 🔄 Data flow: Запрос данных (админка → data-service)
 
 ```
 Admin Dashboard (:8085) → GET /admin/tenants/{id}/data/{entity}
   → data-service (:8084) — chi router → tenantStore.resolveTenant()
-    → generic handler (get_by_id / find / list / custom_query / grep / filter)
+    → generic handler (get_by_id / custom_query / grep / filter)
       → Query Engine (Expression AST → SQL, placeholder адаптация под СУБД)
         → Adapter.Conn.QueryContext → Client DB (SQLite/PG)
 ```
@@ -119,8 +122,6 @@ schema_products   — discovery: мета-информация о сущност
 **Вручную:** custom_queries{}, метод POST/PUT/DELETE, auth{}, mcp_tools[].description/display_name, introspection{}, approved_tools[], readonly_dsn
 
 **Strategy-эндпоинты** (поле `endpoints[].strategy`): `grep`, `filter`, `schema`. MCP-параметры для них генерирует сама стратегия — не нужно вручную описывать `mcp_tools[]`.
-
-Больше нет: `search_*`, `simple_*`, `find_*`, `list_*`, relationship-тулов.
 
 **Схема:** `helperium-go/config/types.go:Config`. Версионируется через `Normalize()` — старые конфиги (v0, v1) апгрейдятся автоматически при загрузке.
 **Детали схемы:** [specs/config.schema.md](specs/config.schema.md)

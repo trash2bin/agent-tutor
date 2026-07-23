@@ -149,7 +149,6 @@ func NewRouterFromConfig(ts *TenantStore, cfg *config.Config, adapter runtime.Ad
 		var h http.HandlerFunc
 
 		// Strategy-based routing (search strategies: grep, filter, schema)
-		// LEGACY: "search" и "simple" стратегии будут удалены в следующем коммите.
 		// Takes precedence over Op-based routing for strategy endpoints.
 		if ep.Strategy != "" {
 			entityConfig, ok := entityMap[ep.Entity]

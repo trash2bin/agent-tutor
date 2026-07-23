@@ -616,9 +616,9 @@ func TestGenerate_DualFKCollision(t *testing.T) {
 	}
 }
 
-// TestGenerate_CustomQueryToolNameCollapse проверяет, что двойные подчёркивания
-// схлопываются в имени MCP-тула для custom queries.
-func TestGenerate_CustomQueryToolNameCollapse(t *testing.T) {
+// TestGenerate_NoCustomQueryMCPTool проверяет, что для стратегий с grep/filter/schema
+// relationship-тулы (_by_*) не генерируются.
+func TestGenerate_NoCustomQueryMCPTool(t *testing.T) {
 	schema := &datasource.Schema{
 		Driver: "sqlite",
 		Tables: []datasource.Table{
@@ -645,19 +645,11 @@ func TestGenerate_CustomQueryToolNameCollapse(t *testing.T) {
 	})
 
 	for _, tool := range cfg.MCPTools {
-		if tool.Endpoint == "/brands/{id}/products" {
-			// Should be products_by_brands, NOT query__brands_id_products
-			if strings.Contains(tool.Name, "__") {
-				t.Errorf("tool name has double underscore: %s", tool.Name)
-			}
-			if !strings.HasPrefix(tool.Name, "products_by_") {
-				t.Errorf("expected tool name to start with 'products_by_', got %s", tool.Name)
-			}
-			t.Logf("custom query tool: %s", tool.Name)
-			return
+		if strings.HasPrefix(tool.Name, "products_by_") || strings.Contains(tool.Name, "_by_") {
+			t.Errorf("relationship tools should not be generated in v4: %s (endpoint: %s)", tool.Name, tool.Endpoint)
 		}
 	}
-	t.Error("expected custom query MCP tool for /brands/{id}/products")
+	t.Logf("✅ No _by_ tools generated (checked %d MCP tools)", len(cfg.MCPTools))
 }
 
 // TestGenerate_WithSkipRules проверяет, что кастомные SkipRules работают вместе с дефолтными.
